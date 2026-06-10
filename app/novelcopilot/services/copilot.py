@@ -1,0 +1,822 @@
+# -*- coding: utf-8 -*-
+"""CopilotService — 유스케이스 오케스트레이션(Facade).
+
+create_project(worldgen) → generate_next_chapter(하네스 + 동적 온톨로지) → directive 주입.
+영속화/세션 재수화/비용 계측을 한데 묶되, 엔진 내부는 모른다(레이어 분리).
+"""
+from __future__ import annotations
+import time
+import uuid
+
+from ..config import Settings
+import re
+
+from ..domain.project import ProjectSeed, ProjectState
+from ..domain.world import EntitySpec, WorldRuleSpec
+from ..domain.types import AuthorDirective, ChapterStatus, WikiPage, RelationEdge, RetrievedItem, RuleSpec, SignalGrade
+from ..domain.bible import StoryBible, BibleEntry, CATEGORY_LABEL, template_for, normalize_category
+from ..llm.base import LLMProvider
+from ..llm.factory import create_provider
+from ..repository.base import ProjectRepository
+from ..worldgen import WorldGenerator, BeatPlanner, ArcPlanner, BibleGenerator, WorldgenChat
+from ..engine.drift import episode_drift_signals
+from ..engine.bible_compiler import bible_digest, entry_to_world_rule, migrate_world_to_bible
+from .session import SessionManager
+
+
+def _usage_delta(before: dict, after: dict) -> dict:
+    return {k: after.get(k, 0) - before.get(k, 0) for k in after}
+
+
+def _accumulate(total: dict, delta: dict) -> dict:
+    out = dict(total)
+    for k, v in delta.items():
+        out[k] = out.get(k, 0) + v
+    return out
+
+
+def _build_story_so_far(chapters, budget: int) -> tuple[str, int]:
+    """누적 줄거리 요약 — FINALIZED 회차만, 최신부터 예산 내로 채운 뒤 시간순 제시. 반환=(text, 드롭된 회차수).
+    요약이 비어도(요약 실패) 본문 앞부분 fallback → FINALIZED 회차가 줄거리에서 통째 누락(영구망각)되지 않게."""
+    lines = [f"{c.chapter}화: {c.summary or c.text[:120]}"
+             for c in chapters if c.status == ChapterStatus.FINALIZED]
+    if not lines:
+        return "", 0
+    out, total = [], 0
+    for line in reversed(lines):
+        if out and total + len(line) + 1 > budget:   # +1 = "\n" 구분자(예산 정확)
+            break
+        out.append(line)
+        total += len(line) + 1
+    return "\n".join(reversed(out)), len(lines) - len(out)
+
+
+def _outstanding_plants(spine) -> list[str]:
+    """완료 에피소드가 심었는데 어디서도 회수(payoff)되지 않은 복선 — 측정→생성 되먹임 고리의 재료.
+    회수 여부는 결정론(라벨 일치). 마감 '강제'가 아니라 비트 설계에 '회수 우선 고려'로 주입(슬로우번은 작가 지시로 우회 가능)."""
+    paid = {p for a in spine.arcs for e in a.episodes for p in e.payoffs}
+    out: list[str] = []
+    for a in sorted(spine.arcs, key=lambda x: x.order):
+        for e in a.episodes:
+            if e.done:
+                out += [p for p in e.plants if p and p not in paid]
+    return out
+
+
+def _arc_anchors(spine, arc, ep) -> list[RetrievedItem]:
+    """엔딩/아크/에피소드 방향을 narrative 앵커로(서사 의도 — ground_truth 아님)."""
+    items: list[RetrievedItem] = []
+    if spine and spine.ending and spine.ending.ending:
+        items.append(RetrievedItem(source="arc_anchor", ref="ending",
+                                   text=f"[작품 엔딩 방향] 질문: {spine.ending.central_question} / 결말: {spine.ending.ending}"))
+    if arc:
+        items.append(RetrievedItem(source="arc_anchor", ref=arc.arc_id,
+                                   text=f"[현재 아크] {arc.title}: 목표 {arc.goal}"))
+    if ep:
+        items.append(RetrievedItem(source="arc_anchor", ref=ep.episode_id,
+                                   text=f"[현재 에피소드] {ep.title}: 절정 '{ep.climax}'로 수렴"))
+    return items
+
+
+def _rollup_episode(provider, episode, chapters) -> str:
+    """완료 에피소드의 회차 요약들을 1~2문장 에피소드 요약으로 압축(계층 story_so_far 재료)."""
+    parts = [f"{c.chapter}화: {c.summary or c.text[:150]}" for c in chapters]
+    try:
+        out = provider.chat(
+            [{"role": "system", "content": "여러 회차를 1~2문장 에피소드 요약으로 압축. 핵심 사건·결과·미결만. 군더더기 금지."},
+             {"role": "user", "content": f"[에피소드]{episode.title}\n" + "\n".join(parts) + "\n에피소드 요약:"}],
+            temperature=0.2, max_tokens=250).strip()
+        return out or (episode.climax or episode.title)
+    except Exception:
+        return episode.climax or episode.title
+
+
+def _build_story_so_far_hier(state, next_ch: int, budget: int) -> tuple[str, int]:
+    """계층 누적 줄거리(spine 모드) — 완료 에피소드는 1줄 롤업으로 압축, 현재 에피소드는 회차 상세.
+    오래된 맥락을 silent drop 하지 않고 '압축'으로 보존 → 회차 무한 증가에도 토큰 선형 억제."""
+    spine = state.world.spine
+    cur_ep = state.narrative_progress.current_episode_id
+    # 완료 에피소드 롤업(1줄·소수) — 전량 보존(엔딩 backward 인과의 시작점이 예산에서 사라지지 않게)
+    rollups = [f"[{arc.title}·{ep.title}] {ep.summary}"
+               for arc in sorted(spine.arcs, key=lambda a: a.order)
+               for ep in arc.episodes if ep.done and ep.summary and ep.episode_id != cur_ep]
+    # 현재(미완) 에피소드 회차 상세 — 예산은 여기에만 적용(최신 우선)
+    cur_chs = sorted([c for c in state.chapters if c.chapter < next_ch
+                      and c.status == ChapterStatus.FINALIZED and c.episode_id == cur_ep],
+                     key=lambda c: c.chapter)
+    cur_lines = [f"{c.chapter}화: {c.summary or c.text[:120]}" for c in cur_chs]
+    if not rollups and not cur_lines:
+        return "", 0
+    used = sum(len(x) + 1 for x in rollups)
+    kept, dropped = [], 0
+    for line in reversed(cur_lines):
+        if kept and used + len(line) + 1 > budget:
+            dropped = len(cur_lines) - len(kept)
+            break
+        kept.append(line)
+        used += len(line) + 1
+    return "\n".join(rollups + list(reversed(kept))), dropped
+
+
+def _slug(name: str, existing: set[str]) -> str:
+    base = re.sub(r"[^a-z0-9]+", "_", (name or "").lower()).strip("_")   # 내부 id(엔티티/설정항목) — ascii
+    if not re.search(r"[a-z0-9]", base):
+        base = "node"
+    sid, i = base, 2
+    while sid in existing:
+        sid, i = f"{base}_{i}", i + 1
+    return sid
+
+
+class CopilotService:
+    def __init__(self, settings: Settings, repo: ProjectRepository):
+        self.settings = settings
+        self.repo = repo
+        self.sessions = SessionManager(settings)
+        self._wg_provider: LLMProvider | None = None
+        self._esc: dict = {}          # (pid,chapter)→연속 ESCALATED 횟수(무한 갇힘 경보용, 휘발)
+
+    @property
+    def wg_provider(self) -> LLMProvider:
+        if self._wg_provider is None:
+            self._wg_provider = create_provider(self.settings)
+        return self._wg_provider
+
+    # ---- 프로젝트 ----
+    def create_project(self, seed: ProjectSeed) -> tuple[ProjectState, dict]:
+        seed.target_chapters = max(1, min(200, int(seed.target_chapters or 12)))   # 방어 클램프(API 외 직접호출 보호)
+        before = self.wg_provider.usage.as_dict()
+        world = WorldGenerator(self.wg_provider).generate(seed)
+        if not seed.title:
+            seed.title = world.title
+        # R4: 엔딩-주도 아크/에피소드 spine 설계(실패 시 None=평면 모드 폴백)
+        try:
+            world.spine = ArcPlanner(self.wg_provider).build_spine(world, seed.target_chapters)
+        except Exception:
+            world.spine = None
+        # R2: 장르 카테고리별 설정집 산문 생성(실패 시 빈 설정집)
+        try:
+            bible = StoryBible(entries=BibleGenerator(self.wg_provider).generate(world, seed))
+        except Exception:
+            bible = StoryBible()
+        pid = uuid.uuid4().hex[:12]
+        state = ProjectState(id=pid, seed=seed, world=world, bible=bible,
+                             created_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        sess = self.sessions.get_or_create(state)
+        sess.snapshot_into(state)            # 시드 위키 등 초기 메모리 영속
+        delta = _usage_delta(before, self.wg_provider.usage.as_dict())
+        state.usage_total = _accumulate(state.usage_total, delta)
+        self.repo.save(state)
+        return state, delta
+
+    def get_project(self, pid: str) -> ProjectState | None:
+        return self.repo.get(pid)
+
+    def list_projects(self) -> list[dict]:
+        return self.repo.list_summaries()
+
+    def delete_project(self, pid: str) -> bool:
+        self.sessions.evict(pid)
+        return self.repo.delete(pid)
+
+    def add_directive(self, pid: str, text: str) -> AuthorDirective | None:
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)
+            if not state:
+                return None
+            d = AuthorDirective(directive_id=f"d{len(state.directives) + 1}", text=text,
+                                from_chapter=state.current_chapter + 1)
+            state.directives.append(d)
+            self.repo.save(state)
+            return d
+
+    # ---- R1: 작가 직접 입력(엔티티/관계) — 개입지점(R5 일부 선반영) ----
+    def add_entity(self, pid: str, name: str, etype: str = "character",
+                   aliases: list[str] | None = None) -> dict | None:
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)            # 권위 재읽기(lost update 방지)
+            if not state:
+                return None
+            from ..engine.ontology import Entity
+            ont = sess.bundle.ontology
+            name = (name or "").strip()
+            if not name:
+                raise ValueError("이름이 비었습니다")
+            amap = ont.alias_map()
+            if name in amap:
+                return {"id": amap[name], "name": name, "created": False}
+            etype = etype or "character"
+            unknown = etype not in ont.entity_types
+            sid = _slug(name, set(ont.entities))
+            clean_aliases = [a for a in (aliases or []) if a]
+            ont.add(Entity(id=sid, name=name, etype=etype, attrs={}, aliases=clean_aliases,
+                           provisional=True))
+            state.runtime_entities.append(EntitySpec(id=sid, name=name, etype=etype,
+                                                      aliases=clean_aliases, attrs={}, provisional=True))
+            sess.snapshot_into(state)
+            self.repo.save(state)
+            return {"id": sid, "name": name, "etype": etype, "created": True, "unknown_type": unknown}
+
+    def add_relation(self, pid: str, src_id: str, dst_id: str, rel_id: str,
+                     eff_from: int = 1, reason: str = "", role: str = "",
+                     state: str = "", pov: str | None = None) -> dict | None:
+        st = self.repo.get(pid)
+        if not st:
+            return None
+        sess = self.sessions.get_or_create(st)
+        with sess.lock:
+            st = self.repo.get(pid)               # 권위 재읽기(lost update 방지)
+            if not st:
+                return None
+            ont = sess.bundle.ontology
+            rel_id = (rel_id or "").strip()
+            if not rel_id:
+                raise ValueError("관계 타입(rel_id)이 비었습니다")
+            if src_id not in ont.entities or dst_id not in ont.entities:
+                raise ValueError("존재하지 않는 엔티티")
+            if src_id == dst_id:
+                raise ValueError("자기참조 관계는 만들 수 없습니다")
+            # 미등록 타입도 동작(자유). 제약(끝점타입·상태어휘)은 '선언된 경우에만' 게이팅(opt-in).
+            rspec = ont.rel_spec(rel_id)
+            s_etype, d_etype = ont.entities[src_id].etype, ont.entities[dst_id].etype
+            if rspec.allowed_src_types and s_etype not in rspec.allowed_src_types:
+                raise ValueError(f"'{rspec.label}' 관계의 출발 타입은 {rspec.allowed_src_types} 여야 합니다(현재 {s_etype})")
+            if rspec.allowed_dst_types and d_etype not in rspec.allowed_dst_types:
+                raise ValueError(f"'{rspec.label}' 관계의 도착 타입은 {rspec.allowed_dst_types} 여야 합니다(현재 {d_etype})")
+            if rspec.states and state and state not in rspec.states:
+                raise ValueError(f"'{rspec.label}' 관계 상태는 {rspec.states} 중 하나여야 합니다(현재 {state})")
+            # cardinality 1:1 강제(opt-in): 배우자/약혼 등 배타 관계 — 두 당사자 중 누구든 다른 활성 1:1 관계가 있으면 거부
+            if rspec.cardinality == "1:1":
+                pair = {src_id, dst_id}
+                act = [e for e in ont.edges if e.rel_id == rel_id and e.eff_to is None
+                       and e.pov is None and e.trust_tier == "ground_truth"]
+                for person in (src_id, dst_id):
+                    if any(person in (e.src_id, e.dst_id) and {e.src_id, e.dst_id} != pair for e in act):
+                        raise ValueError(f"'{rspec.label}'은(는) 1:1 관계입니다 — {ont.name(person)}에게 이미 다른 활성 관계가 "
+                                         f"있습니다(기존 관계를 먼저 종료하세요)")
+            pov = (pov or "").strip() or None
+            if pov is not None and pov not in ont.entities:
+                raise ValueError("관점(pov) 주체가 존재하지 않습니다")
+            src_id, dst_id = ont.order_edge(rel_id, src_id, dst_id)   # 대칭 관계 정렬 → A↔B 중복 방지
+            eff = int(eff_from) if eff_from else 1
+            edge_id = f"{rel_id}:{src_id}->{dst_id}:{eff}" + (f":pov={pov}" if pov else "")
+            if any(e.edge_id == edge_id for e in ont.edges):
+                return {"edge_id": edge_id, "created": False}
+            # 결정론 게이트: 새 '객관' 엣지가 그 시점에 시간선 모순(사망 후 관계 등)을 만들면 reject.
+            # 관점(pov) 엣지는 믿음/인식(거짓 가능)이라 게이트 비대상 → 모순 검사 통과(delta 0).
+            before = len([v for v in ont.ontology_internal_check(eff) if v.kind.startswith("edge_")])
+            edge = RelationEdge(edge_id=edge_id, rel_id=rel_id, src_id=src_id, dst_id=dst_id,
+                                role=role or "", state=state or "", pov=pov,
+                                eff_from=eff, reason=reason or "",
+                                trust_tier="ground_truth", provenance=["author"])
+            ont.add_edge(edge)
+            new_edge_viols = [v for v in ont.ontology_internal_check(eff) if v.kind.startswith("edge_")]
+            if len(new_edge_viols) > before:
+                ont.edges.pop()
+                raise ValueError("이 관계는 시간선 모순을 만듭니다(예: 사망 이후 새 관계). eff_from을 조정하세요.")
+            st.runtime_edges.append(edge)
+            sess.snapshot_into(st)
+            self.repo.save(st)
+            return {"edge_id": edge_id, "created": True, "label": rspec.label}
+
+    def end_relation(self, pid: str, src_id: str, dst_id: str, rel_id: str, eff_to: int) -> dict | None:
+        """관계 종료(eff_to 설정) — 배신/탈퇴/이동 등 '관계 변화' 표현. 작가가 추가한 관계만 대상(시드 제외)."""
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)            # 권위 재읽기(lost update 방지)
+            if not state:
+                return None
+            ont = sess.bundle.ontology
+            eff_to = int(eff_to)
+            src_id, dst_id = ont.order_edge(rel_id, src_id, dst_id)   # 대칭 관계는 정렬 — 비정렬 입력으로도 종료 매칭(저장 정규화와 일치)
+            target = None
+            for e in state.runtime_edges:
+                if (e.src_id == src_id and e.dst_id == dst_id and e.rel_id == rel_id
+                        and e.eff_to is None and e.eff_from < eff_to):
+                    if target is None or e.eff_from > target.eff_from:
+                        target = e
+            if target is None:
+                raise ValueError("종료할 활성 관계가 없습니다(작가가 추가한 관계만, eff_to는 시작 이후여야 함).")
+            target.eff_to = eff_to                       # runtime_edges 와 ont.edges 는 동일 객체(공유 참조)
+            for e in ont.edges:
+                if e.edge_id == target.edge_id:
+                    e.eff_to = eff_to
+            sess.snapshot_into(state)
+            self.repo.save(state)
+            return {"edge_id": target.edge_id, "eff_to": eff_to, "ended": True}
+
+    def get_session(self, pid: str):
+        """SSE 구독용 — 세션을 미리 보장(같은 bus 를 generate 가 재사용)."""
+        state = self.repo.get(pid)
+        if not state:
+            return None, None
+        return self.sessions.get_or_create(state), state
+
+    # ---- 회차 생성(핵심 유스케이스) ----
+    def generate_next_chapter(self, pid: str, directive_text: str | None = None) -> dict:
+        state = self.repo.get(pid)
+        if not state:
+            raise KeyError(pid)
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)        # 권위 재읽기(lock 안에서 — lost update 방지: 동시 bible 편집/promote 가 안 덮임)
+            if not state:
+                raise KeyError(pid)
+            next_ch = state.current_chapter + 1
+            spine = state.world.spine
+            cap = (state.seed.target_chapters or 12) * 2     # 하드캡: 예산 2배 초과 시 강제 완결(런어웨이 차단)
+
+            # R4 완결 종료 — 무한 생성 금지(엔딩 도달 or 하드캡)
+            if spine and (state.narrative_progress.completed or state.current_chapter >= cap):
+                if not state.narrative_progress.completed:
+                    state.narrative_progress.completed = True
+                    self.repo.save(state)
+                return {"completed": True,
+                        "reason": ("hard_cap" if state.current_chapter >= cap else "ending_reached"),
+                        "current_chapter": state.current_chapter,
+                        "total_beats": (len(state.world.beats) or state.seed.target_chapters),
+                        "usage_total": state.usage_total}
+
+            if directive_text and not any(
+                    d.text == directive_text and d.from_chapter == next_ch for d in state.directives):
+                state.directives.append(AuthorDirective(                # #9: 재시도 시 동일 지시 중복 방지
+                    directive_id=f"d{len(state.directives) + 1}", text=directive_text, from_chapter=next_ch))
+
+            active = [d for d in state.directives if d.from_chapter <= next_ch]
+            prior = [c for c in state.chapters if c.chapter < next_ch]
+            summaries = [f"{c.chapter}화 {c.title}: {c.summary or c.text[:120]}" for c in prior[-4:]]
+
+            arc = ep = None
+            is_finale = False
+            anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars)   # R2 설정집 다이제스트(narrative)
+            prog_snap = spine_snap = None
+            if spine and spine.arcs:   # R4 spine 모드: 에피소드(절정 backward) 단위로 beat 파생
+                # B: 커서/spine 변이를 트랜잭션으로 — FINALIZED 아니면 롤백(재시도 결정성·orphan/조기 arc.done 방지)
+                prog_snap = state.narrative_progress.model_copy(deep=True)
+                spine_snap = spine.model_copy(deep=True)
+                planner = ArcPlanner(sess.provider)
+                ep = planner.current_episode(state.world, state.narrative_progress, summaries)
+                if ep is None:                                  # 해소 중 완결 도달
+                    self.repo.save(state)
+                    return {"completed": True, "reason": "ending_reached",
+                            "current_chapter": state.current_chapter,
+                            "total_beats": (len(state.world.beats) or state.seed.target_chapters),
+                            "usage_total": state.usage_total}
+                arc = spine.arc(state.narrative_progress.current_arc_id)
+                is_finale = (state.narrative_progress.chapters_in_episode + 1) >= ep.target_chapters
+                # 떡밥 회수 되먹임 — 비강제 원칙(슬로우번 존중) + 작가 제어(plant_reminder) + 참고 슬롯(작가 지시 위장 금지).
+                plant_notes = ""
+                policy = getattr(state.world, "plant_reminder", "gentle")
+                outstanding = _outstanding_plants(spine)
+                if outstanding and policy != "off":
+                    plant_notes = (f"{outstanding[:self.settings.plant_inject_cap]} — 회수는 절정과 자연스럽게 맞물릴 때만. "
+                                   "억지 회수 금지(슬로우번은 정당한 기법)")
+                    if policy == "active" and is_finale:
+                        plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
+                beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
+                                                summaries, [d.text for d in active], plant_notes=plant_notes)
+                anchors = anchors + _arc_anchors(spine, arc, ep)
+                story_so_far, dropped = _build_story_so_far_hier(state, next_ch, self.settings.story_so_far_chars)
+            else:                      # 평면 모드(하위호환)
+                beat = BeatPlanner(sess.provider).beat_for(
+                    state.world, next_ch, summaries, [d.text for d in active])
+                story_so_far, dropped = _build_story_so_far(prior, self.settings.story_so_far_chars)
+
+            prev = state.chapter(next_ch - 1)
+            prev_text = prev.text if prev else ""
+
+            before = sess.provider.usage.as_dict()
+            sess.bus.reset()
+            if dropped:   # 오래된 맥락이 예산에서 잘림 — 조용한 정지 금지(가시화)
+                sess.bus.emit("assemble_memory", "story_truncated", chapter=next_ch, dropped=dropped)
+            if bible_dropped:   # 설정집 다이제스트 예산 컷 가시화(silent drop 금지)
+                sess.bus.emit("assemble_memory", "bible_truncated", chapter=next_ch, dropped=bible_dropped)
+            if spine and spine.arcs:
+                _out = _outstanding_plants(spine)
+                if len(_out) >= self.settings.plant_backlog_threshold:   # 복선 적체 경보(advisory — 작가 가시화)
+                    sess.bus.emit("narrative", "plant_backlog", chapter=next_ch, outstanding=_out[:8])
+            # 작품 완결 화 감지: 마지막 아크의 마지막 미완 에피소드 finale → 절단신공 대신 '닫는' 회차(여운 마무리)
+            closing = bool(spine and ep and is_finale
+                           and not any((not a.done) and a.arc_id != ep.arc_id for a in spine.arcs)
+                           and not any((not e2.done) and e2.episode_id != ep.episode_id
+                                       for a in spine.arcs for e2 in a.episodes))
+            record = sess.bundle.generator.generate(
+                next_ch, beat.model_dump(), sess.bundle.ontology, sess.bundle.rag,
+                sess.bundle.wiki, directives=active, prev_chapter_text=prev_text,
+                story_so_far=story_so_far, anchors=anchors, closing=closing)
+
+            # 동적 온톨로지 업데이트(엔진 고도화) — FINALIZED 회차에만
+            if record.status == ChapterStatus.FINALIZED:
+                _t0 = sess.provider.usage.chat_tokens
+                proposal = sess.bundle.updater.propose(record.text, sess.bundle.ontology, next_ch)
+                record.usage_by_stage["ontology_propose"] = sess.provider.usage.chat_tokens - _t0
+                changes, new_specs, new_tl, new_edges = sess.bundle.updater.apply(
+                    proposal, sess.bundle.ontology, next_ch)
+                record.ontology_changes = changes
+                state.runtime_entities += new_specs
+                state.runtime_timeline += new_tl
+                state.runtime_edges += new_edges          # 자동추출 관계(narrative_inferred) 영속
+                state.current_chapter = next_ch
+                self._esc.pop((pid, next_ch), None)       # 성공 → 연속 escalation 카운터 리셋
+                # R4: 에피소드 커서 전진 + finale 시 롤업 요약·결정론 드리프트(advisory)
+                if spine and ep:
+                    record.arc_id, record.episode_id = ep.arc_id, ep.episode_id
+                    state.narrative_progress.chapters_in_episode += 1
+                    if is_finale:
+                        ep.done = True
+                        ep_chs = [c for c in state.chapters if c.episode_id == ep.episode_id] + [record]
+                        ep.summary = _rollup_episode(sess.provider, ep, ep_chs)
+                        record.drift_signals = episode_drift_signals(
+                            ep, [c.text for c in ep_chs], sess.bundle.ontology)
+                        for dsig in record.drift_signals:
+                            sess.bus.emit("drift", "signal", chapter=next_ch, detail=dsig)
+            elif spine and spine_snap is not None:
+                # ESCALATED: 커서/spine 변이 롤백(재시도 결정성·orphan 에피소드/조기 arc.done 영속 방지)
+                state.narrative_progress = prog_snap
+                state.world.spine = spine_snap
+                k = (pid, next_ch)                         # #11: 같은 회차 연속 ESCALATED → 갇힘 경보(가시화)
+                self._esc[k] = self._esc.get(k, 0) + 1
+                if self._esc[k] >= 2:
+                    sess.bus.emit("narrative", "episode_stuck", chapter=next_ch,
+                                  attempts=self._esc[k], episode=(ep.episode_id if ep else None))
+
+            # 기존 회차 재생성이면 교체, 아니면 추가
+            state.chapters = [c for c in state.chapters if c.chapter != next_ch] + [record]
+            state.chapters.sort(key=lambda c: c.chapter)
+
+            delta = _usage_delta(before, sess.provider.usage.as_dict())
+            state.usage_total = _accumulate(state.usage_total, delta)
+            sess.snapshot_into(state)
+            self.repo.save(state)
+
+            failures = sess.bus.failures()
+            return {"record": record, "events": list(sess.bus.buffer), "usage_delta": delta,
+                    "usage_total": state.usage_total, "failures": failures, "completed": False,
+                    "current_chapter": state.current_chapter,
+                    "total_beats": (len(state.world.beats) or state.seed.target_chapters)}
+
+    # ---- 인스펙터 ----
+    def ontology_snapshot(self, pid: str) -> dict | None:
+        sess_state = self.get_session(pid)
+        sess, state = sess_state
+        if not sess:
+            return None
+        ont = sess.bundle.ontology
+        chapter = state.current_chapter + 1
+        chars = []
+        for e in ont.entities.values():
+            if e.etype != "character":
+                continue
+            facts = {a: ont.state_as_of(e.id, a, chapter) for a in e.attrs}
+            chars.append({"id": e.id, "name": e.name, "aliases": e.aliases,
+                          "status": ont.state_as_of(e.id, "status", chapter),
+                          "attrs": facts, "provisional": e.provisional})
+        return {"as_of_chapter": chapter, "characters": chars, "rules": ont.rules,
+                "timeline": [{"entity": ont.entities[t[0]].name if t[0] in ont.entities else t[0],
+                              "attr": t[1], "value": t[2], "eff_from": t[3], "reason": t[4],
+                              "trust_tier": (t[5] if len(t) > 5 else "ground_truth")}
+                             for t in ont.timeline],
+                "graph": self._graph_payload(ont, chapter)}
+
+    def _graph_payload(self, ont, chapter: int) -> dict:
+        """R1 시각화 payload — nodes/edges + 타입·관계 카탈로그(스타일 데이터주도). 현재 시점 그래프."""
+        types = ont.entity_types
+        nodes = []
+        for e in ont.entities.values():
+            t = types.get(e.etype)
+            nodes.append({"id": e.id, "name": e.name, "etype": e.etype,
+                          "type_label": t.label if t else e.etype,
+                          "color": t.color if t else "#6aa9ff",
+                          "shape": t.shape if t else "ellipse",
+                          "dead": ont.state_as_of(e.id, "status", chapter) == "dead",
+                          "provisional": e.provisional})
+        edges = []
+        for ed in ont.active_edges_deduped(chapter):   # (src,dst,rel)당 1엣지로 접어 그래프 노이즈 억제
+            spec = ont.rel_catalog.get(ed.rel_id)
+            edges.append({"id": ed.edge_id or f"{ed.rel_id}:{ed.src_id}->{ed.dst_id}",
+                          "src": ed.src_id, "dst": ed.dst_id, "rel_id": ed.rel_id,
+                          "label": spec.label if spec else ed.rel_id,
+                          "color": spec.color if spec else "#888888",
+                          "line_style": spec.line_style if spec else "solid",
+                          "directed": spec.directed if spec else True,
+                          "trust_tier": ed.trust_tier, "eff_from": ed.eff_from})
+        return {"nodes": nodes, "edges": edges,
+                "types": [t.model_dump() for t in types.values()],
+                "relations": [r.model_dump() for r in ont.rel_catalog.values()],
+                "max_chapter": chapter}
+
+    def spine_snapshot(self, pid: str) -> dict | None:
+        """서사 구조(R4) — 엔딩·아크·에피소드·현재 커서. UI '서사 구조' 뷰용."""
+        sess, state = self.get_session(pid)
+        if not sess:
+            return None
+        spine = state.world.spine
+        if not spine:
+            return {"has_spine": False}
+        prog = state.narrative_progress
+        return {
+            "has_spine": True, "completed": prog.completed,
+            "ending": spine.ending.model_dump() if spine.ending else None,
+            "current_arc_id": prog.current_arc_id, "current_episode_id": prog.current_episode_id,
+            "chapters_in_episode": prog.chapters_in_episode,
+            "arcs": [{"arc_id": a.arc_id, "title": a.title, "goal": a.goal, "done": a.done,
+                      "episodes": [{"episode_id": e.episode_id, "title": e.title, "climax": e.climax,
+                                    "target_chapters": e.target_chapters, "done": e.done,
+                                    "required_cast": [sess.bundle.ontology.name(c) for c in e.required_cast],
+                                    "summary": e.summary} for e in a.episodes]}
+                     for a in sorted(spine.arcs, key=lambda x: x.order)],
+        }
+
+    # ---- R2 설정집 ----
+    def _ensure_migrated(self, state) -> bool:
+        """기존 프로젝트 1회 부트스트랩(이미 캐논인 world_rules 를 설정집에 표시). 변경 시 True."""
+        if not state.bible_migrated:
+            if not state.bible.entries and state.world.world_rules:
+                state.bible.entries = migrate_world_to_bible(state.world)
+            state.bible_migrated = True
+            return True
+        return False
+
+    def bible_snapshot(self, pid: str) -> dict | None:
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        if not state.bible_migrated:     # 최초 1회 부트스트랩만 lock 안에서(GET 경로 무락 쓰기 = 동시 promote 와 lost-update 위험 제거)
+            sess = self.sessions.get_or_create(state)
+            with sess.lock:
+                state = self.repo.get(pid)
+                if not state:
+                    return None
+                if self._ensure_migrated(state):
+                    self.repo.save(state)
+        return {"genre": state.world.genre, "template": template_for(state.world.genre),
+                "category_labels": CATEGORY_LABEL,
+                "entries": [{"entry_id": e.entry_id, "category": e.category,
+                             "category_label": CATEGORY_LABEL.get(e.category, e.category),
+                             "title": e.title, "prose": e.prose, "promoted": e.promoted,
+                             "provenance": e.provenance, "status": e.status} for e in state.bible.entries]}
+
+    def add_bible_entry(self, pid: str, category: str, title: str, prose: str = "") -> dict | None:
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        title = (title or "").strip()
+        if not title:
+            raise ValueError("제목이 비었습니다")
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)
+            if not state:
+                return None
+            eid = _slug(title, {e.entry_id for e in state.bible.entries})
+            entry = BibleEntry(entry_id=eid, category=normalize_category(category), title=title, prose=prose,
+                               provenance="author", status="author_approved", promoted=False)
+            state.bible.entries.append(entry)
+            self.repo.save(state)
+            return entry.model_dump()
+
+    def update_bible_entry(self, pid: str, entry_id: str, title=None, prose=None, category=None) -> dict | None:
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)
+            if not state:
+                return None
+            e = state.bible.get(entry_id)
+            if not e:
+                raise ValueError("설정집 항목 없음")
+            if title is not None:
+                e.title = title
+            if prose is not None:
+                e.prose = prose
+            if category:
+                e.category = normalize_category(category)
+            e.status = "author_approved"
+            self.repo.save(state)
+            return e.model_dump()
+
+    def _demote_rule(self, state, sess, rule_id: str, exclude_entry_id: str | None = None) -> bool:
+        """promote 역연산 — world_rules + 라이브 엔진 3미러에서 해당 규칙 제거(orphan 캐논 방지).
+        refcount: 같은 world_rule_id 를 참조하는 '다른' promoted 설정집 항목이 남아 있으면 캐논을 제거하지 않는다
+        (공유룰 재사용 후 한 항목 삭제가 나머지 항목의 캐논을 빼앗던 orphan 결함 교정). 실제 제거 시 True."""
+        still_referenced = any(b.promoted and b.world_rule_id == rule_id and b.entry_id != exclude_entry_id
+                               for b in state.bible.entries)
+        if still_referenced:
+            return False
+        rule = next((r for r in state.world.world_rules if r.rule_id == rule_id), None)
+        state.world.world_rules = [r for r in state.world.world_rules if r.rule_id != rule_id]
+        if rule is not None:
+            sess.bundle.ontology.remove_rule(rule.text)
+        sess.bundle.checker.rule_engine.remove_rule(rule_id)
+        sess.bundle.checker.extractor.remove_world_rule(rule_id)
+        return rule is not None
+
+    def delete_bible_entry(self, pid: str, entry_id: str) -> dict:
+        state = self.repo.get(pid)
+        if not state:
+            return {"deleted": False}
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)
+            if not state:
+                return {"deleted": False}
+            e = state.bible.get(entry_id)
+            demoted = False
+            if e and e.promoted and e.world_rule_id:     # 캐논으로 박힌 항목 → 연결 world_rule 까지(공유 시 refcount)
+                demoted = self._demote_rule(state, sess, e.world_rule_id, exclude_entry_id=entry_id)
+            n0 = len(state.bible.entries)
+            state.bible.entries = [x for x in state.bible.entries if x.entry_id != entry_id]
+            self.repo.save(state)
+            return {"deleted": len(state.bible.entries) < n0, "demoted": demoted}   # 실제 캐논 제거 여부(거짓보고 제거)
+
+    def promote_bible_entry(self, pid: str, entry_id: str) -> dict | None:
+        """'캐논으로 박기' — 설정집 항목 → world_rule 승격(작가 승인 게이트, 비대칭 보존).
+        주의(강제력): 세계규칙 위반은 SignalGrade.SEMANTIC(LLM 판단)이라 '하드 게이트'(자동 재작성/ESCALATED)가
+        아니라 추적·프롬프트 주입(advisory)이다. 하드 캐논(위반 시 재작성/차단)은 관계 엣지·상태 등 det/quasi 신호뿐."""
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)
+            if not state:
+                return None
+            e = state.bible.get(entry_id)
+            if not e:
+                raise ValueError("설정집 항목 없음")
+            if e.promoted:
+                return {"promoted": True, "already": True}
+            # 동일 text 의 기존 world_rule 재사용(orphan 재promote 중복 방지)
+            existing = next((r for r in state.world.world_rules if r.text == (e.prose or e.title).strip()), None)
+            rule = existing or entry_to_world_rule(e, {r.rule_id for r in state.world.world_rules})
+            if existing is None:
+                state.world.world_rules.append(rule)
+            e.promoted, e.promote_target, e.status, e.world_rule_id = True, "world_rule", "author_approved", rule.rule_id
+            # 라이브 엔진 즉시 반영 — build_engine 의 world_rule 처리 미러(멱등 가드)
+            rule_ids = {r.rule_id for r in sess.bundle.checker.rule_engine.rules}
+            if rule.rule_id not in rule_ids:
+                sess.bundle.ontology.add_rule(rule.text)
+                sess.bundle.checker.rule_engine.rules.append(RuleSpec(
+                    rule_id=rule.rule_id, layer="worldrule", predicate_kind="worldrule_flag",
+                    grade=SignalGrade.SEMANTIC, params={"flag": rule.flag, "rule_keywords": rule.keywords}))
+                sess.bundle.checker.extractor.world_rules.append(rule)
+            sess.snapshot_into(state)
+            self.repo.save(state)
+            return {"promoted": True, "rule_id": rule.rule_id, "title": e.title}
+
+    # ---- 문체/생성 정책 편집(③ 작가 입력 전용 — 시스템 스티어링 제어 경로) ----
+    def update_style_policy(self, pid: str, patch: dict) -> dict | None:
+        """ending_hook/plant_reminder/persona/분량/장면수/문체규칙을 작가가 제품에서 직접 제어.
+        적용 후 세션 evict → 다음 요청이 새 정책으로 엔진 재구성(생성 중에는 lock 이 직렬화)."""
+        st = self.repo.get(pid)
+        if not st:
+            return None
+        sess = self.sessions.get_or_create(st)
+        with sess.lock:
+            st = self.repo.get(pid)
+            if not st:
+                return None
+            style = st.world.style
+            if patch.get("ending_hook") is not None:
+                if patch["ending_hook"] not in ("cliffhanger", "soft", "none"):
+                    raise ValueError("ending_hook 은 cliffhanger|soft|none")
+                style.ending_hook = patch["ending_hook"]
+            if patch.get("plant_reminder") is not None:
+                if patch["plant_reminder"] not in ("off", "gentle", "active"):
+                    raise ValueError("plant_reminder 는 off|gentle|active")
+                st.world.plant_reminder = patch["plant_reminder"]
+            if patch.get("system_persona") is not None:
+                style.system_persona = patch["system_persona"]
+            if patch.get("target_chars_per_chapter") is not None:
+                style.target_chars_per_chapter = max(500, min(20000, int(patch["target_chars_per_chapter"])))
+            if patch.get("scenes_per_chapter") is not None:
+                style.scenes_per_chapter = max(1, min(8, int(patch["scenes_per_chapter"])))
+            if patch.get("rules") is not None:
+                style.rules = [r for r in patch["rules"] if r]
+            if patch.get("allow_state_reversal") is not None:
+                st.world.allow_state_reversal = bool(patch["allow_state_reversal"])
+            self.repo.save(st)
+        self.sessions.evict(pid)   # 다음 요청부터 새 정책으로 엔진 재구성
+        return {"updated": True, "style": style.model_dump(),
+                "plant_reminder": st.world.plant_reminder,
+                "allow_state_reversal": st.world.allow_state_reversal}
+
+    # ---- R3 협업형 월드젠 대화 ----
+    def worldgen_chat_log(self, pid: str) -> dict | None:
+        state = self.repo.get(pid)
+        return None if not state else {"chat": state.worldgen_chat}
+
+    def worldgen_turn(self, pid: str, message: str) -> dict | None:
+        """대화 한 턴 — AI 응답 + 신규 엔티티/관계/설정집 제안을 결정론 게이트로 커밋(genesis=캐논). 모순은 blocked."""
+        from ..engine.ontology import Entity
+        message = (message or "").strip()
+        if not message:
+            raise ValueError("메시지가 비었습니다")
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)
+            if not state:
+                return None
+            ont = sess.bundle.ontology
+            res = WorldgenChat(sess.provider).turn(state.world, ont, state.bible, state.worldgen_chat, message)
+            applied, blocked = [], []
+            added_eids: list[str] = []        # 저장 실패 시 캐시 온톨로지 롤백용(유령 노드/엣지 방지)
+            added_edge_ids: list[str] = []
+            amap = ont.alias_map()
+            eff = max(1, state.current_chapter)   # 효력 시점(genesis=1, 진행 중이면 현재 회차부터)
+            # 1) 신규 엔티티 → provisional(AI 제안 = 잠정). 작가가 그래프에서 확정(promote)하면 캐논화. 비대칭 보존.
+            for ne in (res.get("new_entities") or [])[:8]:
+                name = (ne.get("name") or "").strip()
+                if not name:
+                    continue
+                if name in amap:   # 이미 존재 → 정산에 명시(applied/blocked 양쪽에서 증발 방지 — 관측성)
+                    blocked.append({"kind": "entity", "reason": "이미 존재하는 엔티티", "detail": name})
+                    continue
+                etype = (ne.get("etype") or "character").strip() or "character"
+                unknown = etype not in ont.entity_types
+                sid = _slug(name, set(ont.entities))
+                ont.add(Entity(id=sid, name=name, etype=etype, attrs={}, aliases=[], provisional=True))
+                added_eids.append(sid)
+                amap[name] = sid
+                state.runtime_entities.append(EntitySpec(id=sid, name=name, etype=etype, attrs={}, provisional=True))
+                applied.append({"kind": "entity", "name": name, "etype": etype, "unknown_type": unknown})
+            # 2) 관계 → narrative_inferred(AI 제안 = 비binding). 작가가 그래프에서 직접 그으면 ground_truth 승격.
+            def resolve(x):
+                x = (x or "").strip()
+                return x if x in ont.entities else amap.get(x)
+            for nr in (res.get("new_relations") or [])[:8]:
+                rel = (nr.get("rel_id") or "").strip()
+                src, dst = resolve(nr.get("src")), resolve(nr.get("dst"))
+                if not rel:   # 자유 타입 허용 — 카탈로그 FK 검사 폐기(미등록 타입도 동작)
+                    blocked.append({"kind": "relation", "reason": "관계 타입 누락", "detail": str(nr)}); continue
+                if not src or not dst:
+                    blocked.append({"kind": "relation", "reason": "엔티티 미해결(명부에 없음)", "detail": str(nr)}); continue
+                src, dst = ont.order_edge(rel, src, dst)        # 대칭 관계 정렬 → A↔B 중복 방지
+                if src == dst:
+                    blocked.append({"kind": "relation", "reason": "자기참조 관계", "detail": str(nr)}); continue
+                rstate = (nr.get("state") or "").strip()
+                edge_id = f"{rel}:{src}->{dst}:{eff}"
+                if any(e.edge_id == edge_id for e in ont.edges):
+                    blocked.append({"kind": "relation", "reason": "이미 존재하는 관계", "detail": str(nr)})
+                    continue
+                edge = RelationEdge(edge_id=edge_id, rel_id=rel, src_id=src, dst_id=dst, state=rstate, eff_from=eff,
+                                    trust_tier="narrative_inferred", provenance=["ai_worldgen"])
+                ont.add_edge(edge)
+                added_edge_ids.append(edge.edge_id)
+                state.runtime_edges.append(edge)
+                applied.append({"kind": "relation", "label": ont.rel_spec(rel).label,
+                                "src": ont.name(src), "dst": ont.name(dst), "state": rstate})
+            # 3) 설정집 항목(narrative, 작가가 promote 하면 캐논). 동일 제목 중복 방지.
+            existing_titles = {b.title.strip() for b in state.bible.entries if b.status != "deprecated"}
+            for nb in (res.get("new_bible") or [])[:6]:
+                title = (nb.get("title") or "").strip()
+                if not title or title in existing_titles:
+                    continue
+                existing_titles.add(title)
+                eid = _slug(title, {e.entry_id for e in state.bible.entries})
+                state.bible.entries.append(BibleEntry(entry_id=eid, category=normalize_category(nb.get("category")),
+                                                      title=title, prose=(nb.get("prose") or "").strip(),
+                                                      provenance="ai_worldgen", status="ai_unreviewed"))
+                applied.append({"kind": "bible", "title": title})
+            reply = res.get("reply", "")
+            state.worldgen_chat.append({"role": "author", "text": message})
+            state.worldgen_chat.append({"role": "ai", "text": reply})
+            state.worldgen_chat = state.worldgen_chat[-60:]   # 영속 로그 cap(무한 누적 방지)
+            try:
+                sess.snapshot_into(state)
+                self.repo.save(state)
+            except Exception:   # 저장 실패 → 캐시 온톨로지에서 방금 추가분 제거(메모리↔디스크 불일치/유령 방지)
+                for eid in added_eids:
+                    ont.entities.pop(eid, None)
+                if added_edge_ids:
+                    drop = set(added_edge_ids)
+                    ont.edges = [e for e in ont.edges if e.edge_id not in drop]
+                raise
+            return {"reply": reply, "applied": applied, "blocked": blocked,
+                    "questions": res.get("questions", []) or []}
+
+    def wiki_snapshot(self, pid: str) -> dict | None:
+        sess, state = self.get_session(pid)
+        if not sess:
+            return None
+        wm = state.current_chapter
+        pages = [WikiPage.model_validate(p).model_dump() if not isinstance(p, WikiPage) else p.model_dump()
+                 for p in sess.bundle.wiki.export_pages()]
+        lint = [v.model_dump() for v in sess.bundle.wiki.lint(wm)]
+        return {"watermark": wm, "pages": pages, "lint": lint}

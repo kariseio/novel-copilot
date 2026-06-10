@@ -1,0 +1,7 @@
+fastapi>=0.111
+uvicorn[standard]>=0.30
+openai>=1.30
+numpy>=1.26
+rank-bm25>=0.2.2
+pydantic>=2.7
+pydantic-settings>=2.3
