@@ -1,0 +1,354 @@
+{
+    "proposals":  [
+                      {
+                          "lens":  "기억·지식 아키텍처 — LLM Wiki(Karpathy 컴파운딩 위키) 패턴으로 우리의 온톨로지 SSOT(ontology.py) + 청크-RAG(rag.py) + 결정론 검증(checker.py)을 강화. 핵심 통찰: 우리 시스템은 이미 LLM Wiki의 3계층을 부분적으로 갖고 있다 — 스키마 계층=CLAUDE.md류(PRD/도구계약), Wiki 계층의 결정론 절반=온톨로지 SSOT(타입드 엣지·시점 timeline), raw 소스=finalize된 회차 본문. 그러나 (1) Wiki의 \u0027서사/의미\u0027 절반(인물 아크·복선 체인·세력 관계 서술 페이지)이 통째로 비어 있어 매 회차 plan_queries→rag_search로 raw 청크를 재검색·재합성하고 있고(rag.py가 정확히 이것), (2) 청크-RAG는 \u0027교차참조가 이미 있고 모순이 이미 플래깅된\u0027 컴파운딩 아티팩트가 아니라 \u0027매번 새로 찾는\u0027 휘발성 검색이다. LLM Wiki는 이 빈 절반을 \u0027finalize 팬아웃 ③ 계층 요약 컨슈머\u0027(PRD §7.5/§8.7)를 작품 바이블 위키로 승격시켜 메운다. 단 우리의 비대칭 불변식(ontology 박기=결정론 vs rag 찾기=서사)을 절대 위반하지 않도록, 위키는 \u0027rag 찾기\u0027의 trust_tier 상위 레이어로만 들어가고 결정론 코어(checker.py compare/ontology_internal_check)는 LLM 산출물을 1바이트도 받지 않는다(§6.3 신뢰등급 혼합 금지).",
+                          "patterns":  [
+                                           {
+                                               "name":  "작품 바이블 위키 = 계층요약 컨슈머의 LLM-Wiki 승격 (Bible Wiki as Compounding Artifact)",
+                                               "source":  "llm-wiki",
+                                               "what":  "finalize 팬아웃 3중 컨슈머 중 ③ HierarchicalSummary(가역, §7.5/§8.7)를 단순 chapter/arc/work 요약에서 \u0027LLM이 점진 유지하는 상호링크된 markdown 위키\u0027로 승격한다. 회차가 finalize될 때마다 LLM이 그 회차가 건드린 10~15개 위키 페이지(인물/세력/장소/복선/연표)를 원자적으로 갱신하고, 페이지마다 YAML frontmatter에 타입드 wikilink(contradicts/extends/supersedes/payoff_of)를 단다. raw 청크는 그대로 두되(rag.py 불변, LLM 읽기 전용), 매 query마다 raw를 재합성하는 대신 \u0027이미 합성·교차링크된\u0027 위키 페이지를 1차로 읽는다.",
+                                               "whyJustified":  "완결 100~200화·회차당 5천자면 raw 청크가 수천 개로 누적되고, plan_queries→rag_search 재합성을 회차마다 100~200회 반복한다. 이것이 Karpathy가 말한 \u0027인간은 유지부담이 가치보다 빨리 커져 위키를 버리지만 LLM은 지치지 않는다\u0027의 정확한 적용 지점이다 — bookkeeping(매 회차 페이지 갱신)은 지루하지만 우리에겐 이미 finalize 팬아웃이라는 \u0027회차 경계 이벤트\u0027가 있어 갱신 트리거가 공짜다. 인간(작가)은 raw 회차를 큐레이션(승인/거부)하고 위키는 LLM이 소유하는 단일 writer 규율(§10.3 writer_lock의 지식 버전)이 자연스럽게 성립한다. cargo-cult가 아닌 이유: 우리는 위키를 \u0027검색 대체\u0027가 아니라 \u0027서사 의미 모순(§7.4가 결정론으로 못 잡는다고 인정한 톤·동기 일관성)을 컴파운딩으로 누적 플래깅\u0027하는 데 쓴다 — 결정론 SSOT가 이미 잡는 생사·소속·수치는 위키가 손대지 않는다(역할 중복 없음).",
+                                               "mapsTo":  "PRD §7.5 finalize 팬아웃 ③ 컨슈머 / §8.7 HierarchicalSummary(irreversible_facts jsonb) / 데이터모델 §11.2 RagIndexUnit(chunk_type 확장). PoC에선 rag.py 옆에 신설하는 wiki.py(rag.py의 청크 인덱스를 대체하지 않고 상위 레이어로 추가). ontology.py·checker.py는 손대지 않는다(결정론 불변식 보존).",
+                                               "concreteChange":  "(1) HierarchicalSummary를 WikiPage 테이블로 재정의: page_id, page_type(character/faction/place/plot_thread/timeline), markdown_body, frontmatter(jsonb: typed_edges[], lifecycle, provenance), as_of_narrative_order, trust_tier=\u0027wiki_synthesized\u0027, is_active. (2) finalize 팬아웃 ③ 컨슈머가 LLM에게 \u0027이번 회차 본문 + 영향받은 페이지 현재본\u0027을 주고 \u0027관련 페이지만 원자 갱신 + log 1줄 추가\u0027를 시킴(전체 재생성 금지). (3) wikilink는 [[entity_id]] 형태로 ontology.py의 alias_map()/entity id를 재사용해 raw 회차·온톨로지·위키 3계층이 동일 id 공간 공유. (4) assemble_memory(§7.2)의 rag_search 결과 상위에 \u0027관련 위키 페이지\u0027를 trust_tier 가중 상위로 주입 — 단 ontology 박기(상단 고정)와는 스키마상 분리필드 유지(§7.3 혼합 불가).",
+                                               "trendiness":  "2026 \u0027compounding knowledge artifact\u0027 트렌드의 정확한 구현. 청크-RAG 일변도(2023~24 패러다임)에서 \u0027LLM이 소유하는 영속 지식 그래프\u0027로의 전환이며, agentic memory(LLM-curated 계층 메모리)와 정확히 일치. RAG re-retrieval 토큰 비용을 회차당 상수로 누르는 것은 §15 \u0027비용=제약\u0027 지표와 직결.",
+                                               "cargoCultRisk":  "과적용: 모든 finalize마다 위키 전체 재생성(토큰 폭발) 또는 결정론 SSOT가 이미 가진 생사·수치를 위키에도 중복 기록(이중 진실원→split-brain). 가장 간소한 정당한 버전: M3(연속 회차 RAG 루프 30~50화 실증)에서 \u0027인물 페이지\u0027와 \u0027복선 페이지\u0027 단 2종만, frontmatter 없이 markdown + append-only log.md로 시작. typed_edges와 lifecycle은 M5(풀아크)로 미룸. 위키는 절대 결정론 검증 입력이 되지 않는다(checker.py는 위키를 읽지 않음)."
+                                           },
+                                           {
+                                               "name":  "타입드 wikilink + provenance = 복선 터치체인의 컴파운딩 그래프 (Typed Cross-Refs over PlotThread)",
+                                               "source":  "llm-wiki",
+                                               "what":  "LLM Wiki의 \u0027YAML frontmatter 타입드 엣지(contradicts/extends/supersedes)\u0027 + \u0027claim→source file/line provenance\u0027를 우리 PlotThread 터치체인(plant→touch→payoff, §6.3 payoff_check)에 적용. 복선 페이지가 [[plant@12화]] extends [[touch@34화]] payoff_of [[clue_anchor_X]] 형태로 회차가 진행될수록 상호링크가 자라고, 각 링크에 source 회차/문장 앵커(ClueSpanAnchor)를 가역 인용으로 박는다.",
+                                               "whyJustified":  "복선-회수는 웹소설 도메인 1급 요구(§5 일관성 요구)인데 100~200화에 걸친 plant→payoff는 결정론으로 \u0027의미적 회수 여부\u0027를 판정 못 한다(payoff_check는 false payoff 방어=구조 대조까지만, §6.3). 매번 RAG로 \u0027이 복선 관련 회차\u0027를 재검색하면 회차가 늘수록 recall이 떨어진다. 타입드 엣지를 컴파운딩으로 유지하면 \u0027교차참조가 이미 있고 모순이 이미 플래깅됨\u0027 — payoff_check가 위키의 payoff_of 엣지 그래프를 결정론 대조 대상으로 삼아 \u0027미회수 복선(orphan)\u0027을 lint로 잡을 수 있다. provenance(claim→source line)는 §6.6 EscalationBrief \u0027과거 지시 출처 회수\u0027와 §4.5 작가 자기모순 회수에 그대로 재사용 — 감사 가능·가역.",
+                                               "mapsTo":  "PRD §6.3 payoff_check(결정론+RAG) / 데이터모델 §11.2 PlotThread 터치체인·ClueSpanAnchor·ProvenanceEdge(dependency_kind). PoC에선 신설 wiki.py의 plot_thread 페이지 + checker.py에 lint_orphan_threads() 결정론 함수 추가(이건 LLM 없이 위키 frontmatter 엣지만 그래프 순회).",
+                                               "concreteChange":  "(1) WikiPage.frontmatter.typed_edges = [{type:\u0027payoff_of\u0027|\u0027contradicts\u0027|\u0027supersedes\u0027|\u0027extends\u0027, target_page_id, source_narrative_order, source_span_anchor}]. (2) ProvenanceEdge를 위키 엣지의 1급 시민으로: 모든 LLM이 단 엣지는 source 회차·문장 앵커 필수(앵커 없으면 draft 상태로만 둠). (3) checker.py에 ontology_internal_check와 동일 등급(순수 결정론)의 lint_wiki_graph() 추가 — orphan(payoff 없는 plant), dangling link(존재 않는 target), stale(as_of가 last_consistent보다 뒤처진 페이지)을 networkx 그래프 순회로만 검출(§12.1 DeterministicStructureChecker 재사용). (4) payoff_check가 이 lint 결과를 입력으로 받아 false payoff/미회수를 finalize 전 surface.",
+                                               "trendiness":  "LLM Wiki의 \u0027contradicts/supersedes 타입드 엣지\u0027는 event-sourcing/지식그래프의 2026 재유행. provenance-first(모든 claim에 출처 line)는 \u0027citation 강제\u0027 트렌드와 hallucination 구조적 차단(§6.6 raw 증거 상시 접근)의 결합.",
+                                               "cargoCultRisk":  "과적용: 모든 문장에 엣지를 달려다 LLM이 환각 엣지를 양산(특히 contradicts). 가장 간소한 정당한 버전: payoff_of 엣지 1종만 먼저(복선이 우리 도메인 최고가치), contradicts/supersedes는 작가가 redirect할 때만 생성(§4.5 conflict_origin과 묶음). orphan lint는 순수 결정론이라 안전하니 우선 도입하되, \u0027미회수=경고\u0027이지 \u0027미회수=차단\u0027은 절대 아님(작가가 의도적 incidental 표시 가능, §6.3 intentionally_incidental 재사용)."
+                                           },
+                                           {
+                                               "name":  "Ingest→Query→Lint 워크플로 + 멱등 ingest를 finalize 팬아웃 saga에 정렬 (Idempotent Wiki Ingest)",
+                                               "source":  "llm-wiki",
+                                               "what":  "LLM Wiki의 3-페이즈 워크플로(ingest 시 소스 읽고 페이지 갱신+log / query 시 검색·인용 합성 / lint로 모순·stale·orphan 주기 점검)를 우리 finalize 팬아웃 saga(§7.5)와 막경계 정산(§8.6)에 매핑. 위키 ingest를 \u0027멱등\u0027(citation grep 후 기록→중복방지·순서무관 수렴)으로 만들어 Temporal 재시도/크래시 복원(§6.5 처음부터 재실행)과 정합시킨다.",
+                                               "whyJustified":  "우리는 이미 finalize 팬아웃에 \u0027멱등키 + 부분실패 보상 트랜잭션\u0027(§7.5)을 요구한다. LLM Wiki ingest 멱등성은 이 요구의 지식 버전 — Temporal activity가 재실행돼도 위키 페이지가 중복 갱신/오염되지 않으려면 멱등이 필수다(§6.5 도구 멱등+journaling). query 페이즈는 assemble_memory의 rag_search 상위 레이어, lint 페이즈는 막경계 정산(§8.6 provisional 회수)의 결정론 점검에 그대로 들어간다. 회차 경계라는 자연 트리거가 있어 \u0027주기적 lint\u0027를 별도 스케줄 없이 막경계에 붙일 수 있다.",
+                                               "mapsTo":  "PRD §7.5 finalize 팬아웃 saga(멱등키·보상) / §8.6 막경계 정산 / §6.5 LangGraph durable 권위 강등(처음부터 재실행+멱등). PoC에선 rag.py의 index_chapter()와 대칭으로 wiki.py에 ingest_chapter(idempotent) + lint_at_act_boundary().",
+                                               "concreteChange":  "(1) ingest_chapter(narrative_order, text)를 멱등으로: 갱신 전 \u0027source_narrative_order==N인 기존 엣지·log 엔트리\u0027를 grep해 있으면 재기록 스킵(citation grep 멱등, 순서무관 수렴). (2) log.md = append-only, 파싱가능 prefix(`[N화][page_id][edge_type]`) — Temporal 재실행 시 이 log를 진실원으로 dedup. (3) 위키 ingest를 팬아웃 ③ 가역 컨슈머로 분류(§7.5 차등 차단표) → stuck돼도 trust_tier 격리하고 잠정 진행(비가역 온톨로지 ②와 달리 후속 강하게 차단 안 함). (4) lint를 막경계(Act boundary)에서 1회 배치 실행 — provisional 위키 페이지(미검토 회차에서 생성된)를 막경계 정산 통과 전까지 trust_tier=\u0027unreviewed_machine\u0027로 격리(§8.5 자기섭취 차단을 위키에도 적용).",
+                                               "trendiness":  "durable workflow + 멱등 ingest는 2026 \u0027durable agent memory\u0027의 핵심. 회차 경계 이벤트에 lint를 붙이는 것은 harness의 \u0027CI/eval 게이트\u0027 패턴(결정론 linter를 1급 외부검증)을 지식 아티팩트에 적용한 것.",
+                                               "cargoCultRisk":  "과적용: 매 회차 full lint(O(전체 페이지) 비용)를 돌리거나, 멱등을 위해 과도한 버전 테이블을 만듦. 가장 간소한 정당한 버전: lint는 막경계에서만(매 회차 아님), 멱등은 log.md grep 한 줄로 충분(별도 dedup 테이블 불필요). M3에선 ingest+query만, lint는 M5 막경계 정산과 함께."
+                                           },
+                                           {
+                                               "name":  "위키 페이지 lifecycle + 자기섭취 차단의 위키 확장 (Page Lifecycle as Trust Quarantine)",
+                                               "source":  "llm-wiki",
+                                               "what":  "LLM Wiki의 페이지 lifecycle(draft→active→stale→contradicted→archived, 전이 로깅)을 우리 trust_tier 격리(§8.5 unreviewed_machine/provisional)·자기섭취 차단과 결합. 위키 페이지도 미검토 회차에서 갱신되면 \u0027draft/provisional\u0027 lifecycle에 머물고, 막경계 정산 통과 시에만 \u0027active\u0027로 승격돼 후속 회차 plan에 ground truth급 가중으로 주입된다.",
+                                               "whyJustified":  "auto_advance 미검토 회차가 위키를 갱신하면 \u0027미검토 서사가 위키를 통해 후속에 ground truth처럼 박히는\u0027 자기섭취 위험이 청크-RAG보다 더 크다(위키는 합성된 권위처럼 보이므로). §8.5는 청크 trust_weight 하향만 정의했는데, 위키 페이지는 lifecycle 상태로 더 명시적으로 격리할 수 있다. contradicted 상태는 §4.5 작가 자기모순 회수·detect_directive_conflict와 직결 — 작가가 redirect로 과거 설정을 뒤집으면 해당 페이지가 supersedes 엣지와 함께 contradicted→archived로 전이하고 전이가 로깅된다(감사 가능).",
+                                               "mapsTo":  "PRD §8.5 자기섭취 차단·미검토 회차 격리 / §8.6 막경계 정산 / §4.5 directive 회수(conflict_origin) / 데이터모델 §11.2 trust_tier(reviewed/unreviewed_machine/quarantined). PoC에선 wiki.py의 WikiPage.frontmatter.lifecycle + 전이 로그.",
+                                               "concreteChange":  "(1) WikiPage.frontmatter.lifecycle enum = draft|active|stale|contradicted|archived, 모든 전이를 log.md에 (transition, from, to, narrative_order, reason)로 기록. (2) 미검토 회차 ingest는 페이지를 draft에 묶고 trust_tier=\u0027unreviewed_machine\u0027 — assemble_memory 주입 시 draft 페이지는 trust_weight 하향(§8.5)·ontology 박기 절대 침범 금지. (3) 막경계 정산(§8.6)이 draft→active 승격 게이트. (4) detect_directive_conflict(§6.3)가 supersedes를 트리거하면 대상 페이지 active→contradicted, 신규 페이지 생성, 작가 EscalationBrief에 conflict_with_directive_id로 노출(§4.5). (5) stale 검출 = 페이지 as_of \u003c last_consistent 워터마크(§7.5 3종 워터마크 재사용, 순수 결정론).",
+                                               "trendiness":  "page lifecycle은 LLM Wiki의 \u0027staleness/contradiction을 1급 상태로 추적\u0027하는 핵심으로, 2026 knowledge-freshness 트렌드. trust_tier×lifecycle 2차원 격리는 harness의 \u0027criticality 보존 compaction\u0027(중요한 건 살아남고 중간출력은 안 됨)과 동형.",
+                                               "cargoCultRisk":  "과적용: 5단계 lifecycle 상태머신을 M2부터 풀로 구현(상태 폭발). 가장 간소한 정당한 버전: M3에선 draft/active 2상태 + provisional 플래그만(이미 §8.5에 있음). contradicted/archived는 §4.5 redirect 기능이 실제 들어오는 M2 human_review 시점에. stale은 워터마크 비교 한 줄이라 거의 공짜이니 일찍 도입."
+                                           },
+                                           {
+                                               "name":  "index.md 단일 진입점 + 단일 writer 규율 = 위키 거버넌스 (Single-Writer Wiki Governance)",
+                                               "source":  "llm-wiki",
+                                               "what":  "LLM Wiki의 index.md(링크+1줄요약+메타, \u003c100소스면 임베딩 불필요)와 단일 writer 규율(LLM이 페이지 유지, 인간은 소스 큐레이션·질문)을 우리 writer_lock(§10.3)·계층B 오케스트레이터(§6.1) 거버넌스에 정렬. 위키의 \u0027쓰기 권위\u0027를 본문 writer_lock과 동일한 단일 소유 모델로 박아, 작가는 위키를 직접 편집하지 않고 raw 회차(소스) 큐레이션과 redirect 지시로만 위키에 영향을 준다.",
+                                               "whyJustified":  "우리 핵심 불변식은 \u0027단일 writer\u0027(§10.3 본문)·\u0027append-only supersedes 체인\u0027(§3.1 lost update 구조적 불가)이다. 위키도 동일 규율을 따라야 한다 — 작가와 LLM이 같은 위키 페이지를 동시 편집하면 본문에서 막은 split-brain이 지식 계층에서 재발한다. LLM Wiki의 \u0027인간은 소스 큐레이션·질문, LLM은 페이지 유지\u0027는 우리 §2 역할 배치(기계 drive, 인간 decide/assist)와 정확히 동형이다. index.md는 우리 규모(100~200화→페이지 수백 개, 소스 회차 100~200개)에 \u0027임베딩 불필요\u0027(Karpathy: \u003c100소스면)가 거의 들어맞아, 위키 진입을 임베딩 검색이 아니라 index 링크 네비게이션으로 — assemble_memory의 plan_queries(★LLM 핀포인트)가 index를 읽고 관련 페이지를 \u0027심볼 인덱스 네비게이션\u0027(harness)처럼 따라간다.",
+                                               "mapsTo":  "PRD §10.3 writer_lock 단일 소유(orchestration 1곳) / §6.1 계층B 오케스트레이터 / §3.1 append-only 버전 모델 / §6.2 assemble_memory의 plan_queries. PoC에선 wiki.py의 index.md 생성 + rag.py search()의 진입을 위키 index 네비게이션으로 보강(청크 검색은 fallback으로 잔존).",
+                                               "concreteChange":  "(1) index.md = 모든 WikiPage의 (page_id, 1줄 요약, page_type, lifecycle, last_updated_narrative_order) 자동 생성 테이블 — 페이지 갱신 시 함께 단조 갱신. (2) 위키 쓰기 권위 = 계층B 오케스트레이터 단일 소유(본문 writer_lock과 별개 lock이지만 동일 advisory-lock 패턴). 작가는 위키 페이지를 직접 못 씀 — redirect/AuthorDirective로만 간접 영향(§4 지점6). (3) plan_queries(★LLM)가 raw 청크 검색 전에 index.md를 읽고 관련 page_id를 선택→해당 페이지 본문을 컨텍스트 상위에 주입(계층적 컨텍스트 검색=관련 경로만, harness). (4) 회차 수\u003c100 동안 위키 검색은 index 링크 순회로 충분, 임베딩은 raw 청크(rag.py)에만 유지.",
+                                               "trendiness":  "단일 writer + LLM-owned 페이지는 2026 \u0027agent가 소유하는 영속 메모리\u0027 거버넌스 정석. index 네비게이션(임베딩 회피)은 harness의 \u0027심볼 인덱스/계층적 컨텍스트 검색\u0027 트렌드로, 작은 코퍼스에 임베딩을 남발하지 않는 성숙한 선택.",
+                                               "cargoCultRisk":  "과적용: 위키에도 별도 advisory lock 인프라를 풀로 깔거나, index.md를 임베딩 인덱스로 만들어 over-engineering. 가장 간소한 정당한 버전: 위키 쓰기는 finalize 팬아웃 ③ 컨슈머 단일 경로뿐이므로 별도 lock 거의 불필요(팬아웃 자체가 직렬화). index.md는 단순 markdown 테이블 자동생성. M3 규모(30~50화)에선 임베딩 0, 순수 링크 네비게이션."
+                                           }
+                                       ],
+                          "topPick":  "패턴 1 — \u0027작품 바이블 위키 = 계층요약 컨슈머의 LLM-Wiki 승격\u0027. 이유: 우리 시스템은 이미 LLM Wiki 3계층 중 2.5개를 갖고 있다(스키마=PRD/도구계약, 결정론 Wiki 절반=ontology.py 시점 SSOT, raw=finalize 회차). 비어 있는 것은 정확히 \u0027서사/의미 Wiki 절반\u0027이고, §7.4가 \u0027의미 모순은 결정론으로 못 잡는다\u0027고 정직하게 인정한 바로 그 공백이다. 이 공백을 신규 인프라 없이 메울 수 있는 이유는 finalize 팬아웃 ③ 컨슈머(§7.5/§8.7 HierarchicalSummary)라는 \u0027회차 경계 갱신 트리거\u0027와 trust_tier 격리(§8.5)·writer 단일 소유(§10.3)·멱등 saga(§7.5)·워터마크(§7.5)가 이미 전부 존재하기 때문이다 — 위키 패턴은 새 백본이 아니라 기존 ③ 컨슈머의 자연스러운 승격이다. 100~200화·회차당 100~200회 RAG 재합성을 회차당 상수 위키 갱신으로 누르는 것은 §15 \u0027비용=제약\u0027 지표에 직접 기여하고, 청크-RAG가 회차 누적에 따라 recall이 떨어지는 구조적 한계(매번 새로 찾기)를 \u0027이미 합성·교차링크된\u0027 컴파운딩 아티팩트로 교체한다. 결정론 코어(checker.py/ontology.py)를 1바이트도 건드리지 않으면서(§6.3 신뢰등급 혼합 금지 보존) 의미 일관성만 강화하므로 cargo-cult 위험이 가장 낮다. 나머지 4개 패턴(타입드 엣지·멱등 ingest·lifecycle·단일 writer 거버넌스)은 모두 이 핵심 위에 얹히는 속성이다.",
+                          "openQuestions":  [
+                                                "위키 갱신 LLM 산출물의 신뢰등급: 위키 페이지는 LLM이 합성하므로 §6.3에 따라 자동으로 등급2(semantic)다. 그런데 plan_queries가 위키를 \u0027상위 가중\u0027으로 주입하면 ontology 박기(등급1)와의 경계가 UX/프롬프트 상에서 흐려질 위험은? 위키 page_type별로 trust_weight를 차등(인물 사실은 낮게, 톤/분위기는 높게)해야 하는가, 아니면 위키 전체를 단일 등급2로 묶고 ontology와 스키마 분리만으로 충분한가?",
+                                                "위키 갱신 토큰 비용 vs 청크-RAG 재합성 비용의 실제 교차점: 회차당 10~15페이지 원자 갱신이 매 회차 rag_search 재합성보다 정말 싼가? M1 선결 스파이크(§14.1 회차당 LLM 호출·토큰 실측)에 \u0027위키 ingest 토큰\u0027 측정을 추가해야 하는데, 손익분기 회차 수(예: 30화 이전엔 청크-RAG가 더 쌀 수도)를 데이터 보기 전에 어떻게 동결하는가?",
+                                                "미검토 회차(auto_advance)가 위키를 draft로 갱신할 때, 막경계 정산 전까지 후속 회차가 그 draft를 못 읽으면 \u0027미검토 구간 동안 위키가 빈다\u0027. 이 구간 동안 plan_queries는 청크-RAG(unreviewed_machine 격리분)로 fallback해야 하는가? draft 위키와 격리 청크 중 무엇을 주입하는 게 자기섭취 위험이 더 낮은가?",
+                                                "위키 모순 플래깅(contradicts 엣지)의 권위: LLM이 단 contradicts 엣지는 등급2(환각 가능)인데, 이것이 작가에게 surface되면 §6.6 \u0027EscalationBrief 결정론 증거 1차\u0027와 충돌한다(LLM이 만든 모순 플래그는 결정론 증거가 아님). 위키발 모순은 항상 \u0027보조 요약\u0027 레이어로만 노출하고, 결정론 모순(checker.py)과 시각적으로 명확히 분리해야 하는가?",
+                                                "위키 페이지와 EntityStateTimeline의 이중 진실원 위험: 인물 페이지가 \u0027생사·소속\u0027을 markdown으로 서술하면 ontology.py timeline과 충돌 가능. 위키 인물 페이지는 결정론 사실(생사·수치·소속)을 아예 \u0027서술 금지\u0027하고 [[entity_id]] 링크로만 참조(=ontology 박기로 리다이렉트)하도록 강제해야 하는가? 그래야 단일 진실원이 깨지지 않는다.",
+                                                "M1 GO 게이트(§14.0) 세 최소선(정체성·인지부하)에 위키가 미치는 영향: 위키가 모순을 선제 플래깅하면 작가 surface 의사결정 총량(§4.2 interaction friction)이 줄어 인지부하 최소선에 유리하지만, 동시에 \u0027기계가 지식까지 다 정리해줘서 작가가 더 수동화\u0027(§3.4 정체성 최소선 위협)할 위험은? 위키 큐레이션 자체를 작가의 \u0027능동 결정 1개\u0027(§3.4 회차당 최소 1개)로 카운트할 수 있는가?"
+                                            ],
+                          "_key":  "memory",
+                          "_title":  "기억·지식 아키텍처 (LLM Wiki 도입)"
+                      },
+                      {
+                          "lens":  "에이전틱 하네스 · 오케스트레이션 (Harness Engineering 2026) — \"harness over model\" 관점에서 계층A LangGraph 루프 + 계층B 결정론 오케스트레이터를 강화. 평가 기준: PRD가 이미 동결한 불변식(결정론 코어 분리·비대칭 RAG·append-only 버전·Temporal 단일 권위)을 깨지 않으면서, PoC harness.py의 \u0027단일 패스 선형 함수\u0027 현실과 PRD §6/§10/§12의 그래프·핸드오프·복원 야심 사이의 간극을 메우는 패턴만 채택. 우리 규모(완결 100~200화, 회차 단위, 인간 in-the-loop)에 과한 분산 시스템 중장비는 cargo-cult로 기각.",
+                          "patterns":  [
+                                           {
+                                               "name":  "타입드 스키마 핸드오프 (계층A↔계층B↔인간 경계 검증)",
+                                               "source":  "하네스",
+                                               "what":  "에이전트 단계 간/오케스트레이터 간/인간 핸드오프를 자유 텍스트가 아니라 Pydantic v2 타입드 스키마 + 경계 검증으로 강제. 각 노드가 다음 노드에 넘기는 페이로드(plan→assemble→draft→check→reflect→finalize)를 명시적 계약(GraphState)으로 동결하고, 계층 경계를 넘을 때 validate.",
+                                               "whyJustified":  "PoC harness.py의 generate_chapter는 dict·list를 노드 함수 인자로 그냥 흘려보낸다(beat, scenes, retrieved, violations 전부 untyped dict). PRD §6.3은 도구 12종 전부 \u0027Pydantic v2\u0027를 못박았고 §6.3의 핵심 계약 \u0027신뢰등급 혼합 금지(LLM 산출물 1바이트라도 결정론 코어에 섞이면 등급2 강등)\u0027는 타입 시스템 없이는 런타임에 새어나간다. 회차가 100~200번 반복되며 directive·trust_tier·signal_grade가 누적 전파되는 우리 구조에서, 경계 미검증은 §8.5 미검토 회차 RAG 오염(Blocker③)으로 직결된다. 이건 트렌드라서가 아니라 PRD가 이미 요구한 계약을 PoC가 안 지킨 것이라 정당.",
+                                               "mapsTo":  "PoC harness.py 전체(plan_scenes/draft_chapter/rewrite_chapter/generate_chapter 시그니처) + checker.check 반환 dict + PRD §6.3 도구셋 \u0027Pydantic v2\u0027 계약 + §12.4-1~6 계약 동결 산출물 + §6.3 \u0027신뢰등급 혼합 금지\u0027 signal_grade enum.",
+                                               "concreteChange":  "(1) GraphState를 Pydantic 모델로 정의: ChapterPlan(beats, scene_plan:list[ScenePlan]), AssembledContext(ontology_block:OntologyFacts[상단·누락0], rag_block:list[RagChunk][하단·cap], directives:list[Directive]) — ontology와 rag를 \u0027같은 dict의 다른 키\u0027가 아니라 별도 타입 필드로 분리해 혼합을 타입 레벨에서 불가능하게. (2) Violation/Verdict 모델에 signal_grade:Literal[\u0027deterministic\u0027,\u0027quasi-deterministic\u0027,\u0027semantic\u0027] enum 강제(현재 checker.py가 문자열 \u0027grade\u0027를 dict에 넣는 것을 enum으로). (3) 계층 경계(activity→orchestrator, orchestrator→human)에 model_validate 게이트. (4) draft_chapter가 받는 canon_block(현재 str)을 OntologyFacts 타입으로 올려 \u0027절단금지 어서션\u0027(§6.3 누락0)을 검증 가능하게.",
+                                               "trendiness":  "2026 하네스 카탈로그 \u0027타입드 스키마 핸드오프 + 경계검증\u0027, \u0027intent\u003esyntax\u0027, \u0027구조화 출력 보장\u0027의 핵심. \u0027compaction은 criticality 보존\u0027 원리(시스템 규칙은 살고 중간출력은 안 됨)도 타입드 상태에서만 결정론적으로 집행 가능.",
+                                               "cargoCultRisk":  "전 함수를 dataclass 지옥으로 만들면 PoC 민첩성을 죽인다. 가장 간소한 정당한 버전 = \u0027GraphState 하나 + signal_grade enum 하나 + 계층 경계 1곳(finalize→색인)만 validate\u0027. 노드 내부 지역 변수까지 타입화할 필요 없음. ontology/rag 분리 필드와 signal_grade enum 단 2개가 진짜 load-bearing이고 나머지는 점진 도입."
+                                           },
+                                           {
+                                               "name":  "구조화 출력 디코드-타임 보장 (extract_claims/plan_scenes JSON Schema 제약)",
+                                               "source":  "하네스",
+                                               "what":  "LLM이 JSON을 \u0027잘 뱉어주길 기대\u0027하는 대신, 디코드 시점에 JSON Schema/CFG로 출력 형태를 강제(Instructor/outlines류 또는 LiteLLM의 response_format+재시도). 특히 통제 어휘(controlled vocabulary) 추출에서 enum을 디코딩에 박는다.",
+                                               "whyJustified":  "checker.extract_claims는 우리 결정론 검증의 입력을 만드는 가장 임계적인 LLM 호출이다 — eye_color/affiliation을 CATEGORICAL_VOCAB 토큰으로 정규화하는데, 현재는 프롬프트로 \u0027반드시 이 토큰으로\u0027라고 부탁할 뿐 모델이 \u0027진홍색\u0027을 뱉으면 \u0027기타\u0027로도 안 잡히고 조용히 통과한다. plan_scenes는 chat_json 실패 시 except로 폴백하는데(harness.py L20) 이건 \u0027조용한 정지 금지\u0027(§10.9)의 미니 버전 위반 — 파싱 실패가 관측 없이 폴백된다. 우리 결정론 코어의 신뢰도는 추출기 출력이 스키마에 갇혀야 성립. PRD §6.3 \u0027signal_grade enum 고정\u0027, §12.1 \u0027Pydantic v2 + tool-calling\u0027이 이미 이 방향.",
+                                               "mapsTo":  "PoC checker.py extract_claims (CATEGORICAL_VOCAB/NUMERIC_ATTRS 정규화) + harness.py plan_scenes(chat_json + except 폴백) + llm.py chat_json + PRD §6.3 critique/extract_canon 구조화 출력 + §12.1 구조화 출력 행.",
+                                               "concreteChange":  "(1) extract_claims를 Instructor 스타일로: eye_color:Optional[Literal[*CATEGORICAL_VOCAB]], power_tier:Optional[int], appears_as:Literal[...], reawakening:bool 를 Pydantic 모델로 정의하고 response_model로 디코딩 강제(LiteLLM은 json_schema response_format). 모델이 enum 밖 값을 못 내게 해 \u0027진홍색→기타\u0027 누락 누수 차단. (2) plan_scenes의 except 폴백을 \u0027관측되는 degraded 경로\u0027로: 파싱 실패 시 조용히 폴백하지 말고 VerdictRecord/이벤트에 parse_failure를 1건 기록(§10.9 가시성). (3) chat_json에 스키마 위반 시 1회 자동 재프롬프트(decode-time regex/retry) 추가.",
+                                               "trendiness":  "2026 도구설계 \u0027구조화출력 보장(decode-time regex/CFG/JSON Schema; outlines/Instructor)\u0027의 정확한 적용. \u0027에이전트는 자기 작업을 정확히 평가 못 한다→외부 제약 필수\u0027와 직결.",
+                                               "cargoCultRisk":  "draft_scene(산문 생성)에까지 CFG를 거는 건 cargo-cult — 산문은 자유 텍스트가 본질이고 제약하면 문체가 죽는다. 구조화 강제는 \u0027결정론 코어로 들어가는 추출/판정 입력\u0027에만(extract_claims, critique 점수, canon_proposal). 가장 간소한 버전 = extract_claims 하나만 Literal enum response_model로. outlines 같은 무거운 로컬 디코더는 불필요, LiteLLM json_schema로 충분."
+                                           },
+                                           {
+                                               "name":  "Decoupled sub-task 그래프 + 국소 재계획 (장면 미니루프를 진짜 그래프로)",
+                                               "source":  "하네스",
+                                               "what":  "회차를 \u0027하나의 선형 함수\u0027가 아니라 scene_plan 노드들의 decoupled 서브태스크 그래프로 모델링. 한 장면이 위반→재집필로 들어가도 그 장면 노드에서만 국소 재계획(partial_rewrite+seam_reweave)하고 다른 장면은 영향받지 않게(연쇄 실패 방지). reflect를 장면 단위로 격리.",
+                                               "whyJustified":  "PoC harness.generate_chapter는 회차 전체 text를 통으로 draft→통으로 check→통으로 rewrite한다(L75-85 루프가 회차 전체 text 재생성). PRD §6.8은 명백히 장면 단위 미니루프(draft_scene(scene_i)→check→critique→partial_rewrite(scene_i)→seam_reweave(인접 경계))를 요구하고, §6.7은 scene_plan을 \u0027인터럽트/체크포인트 단위\u0027로 못박았다. 통짜 재생성은 (a)통과한 장면을 악화시키고(§6.4 과교정 가드가 막아야 하는 바로 그것), (b)장면 경계 인터럽트(§10.1 \u0027never interrupt a running tool\u0027의 흡수 지점)를 불가능하게 만든다. 100~200화 × 회차당 다수 장면 규모에서 통짜 재생성은 토큰·지연 폭발(§15 비용=제약). 이건 PRD가 이미 설계한 구조를 PoC가 미구현한 것.",
+                                               "mapsTo":  "PoC harness.py generate_chapter의 통짜 draft/rewrite 루프(L71-85) → PRD §6.2 draft_scene 순회 + §6.7 scene_plan 결정론 분할 + §6.8 자가교정 미니루프 + §6.4 best-so-far monotone/seam_reweave/oscillation 가드.",
+                                               "concreteChange":  "(1) generate_chapter를 scene 루프로 재구성: for scene in scene_plan: draft_scene(scene) → check(scene) ∥ prose_lint → if critical: critique→partial_rewrite(scene만)→seam_reweave(scene-1,scene+1 경계 재검증). (2) per-scene 상태에 best_so_far(결정론 위반 카운트 1급 축, §6.4)·round·oscillation_signature(해시 EWMA) 저장 — monotone 가드가 \u0027결정론 위반 카운트\u0027로만 작동하게(§6.4 monotone 1급 축 동결: 의미 점수 아님). (3) 장면 경계마다 체크포인트 emit(다음 패턴의 hibernate-wake·인터럽트 흡수 지점). (4) seam_reweave 후 재검증 의무화(§6.4 seam 책임 공백 방어).",
+                                               "trendiness":  "2026 계획/분해 \u0027decoupled sub-task 그래프(국소 재계획, 연쇄실패 방지)\u0027 + \u0027task-adaptive topology\u0027. \u0027harness over model\u0027(루프 구조가 행동을 좌우)의 교과서적 사례.",
+                                               "cargoCultRisk":  "task-adaptive topology를 \u0027동적 토폴로지 플래너\u0027로 과설계하면 위험 — 우리 scene_plan은 §6.7대로 \u0027결정론 고정 리스트, draft_scene은 순회만, 경계 재정의 금지\u0027다. 즉 토폴로지는 고정 sequential이고 LLM이 그래프를 못 바꾼다. 가장 간소한 버전 = \u0027장면 단위 for 루프 + 장면별 monotone 가드\u0027 (동적 그래프 엔진 불필요). parallel 장면 생성도 우리 연속성 요구상 cargo-cult(장면 N은 N-1에 의존)."
+                                           },
+                                           {
+                                               "name":  "Hibernate-wake 체크포인트 + 의미적 복원 재확인 게이트",
+                                               "source":  "하네스",
+                                               "what":  "다회차 장기 작업을 장면 경계 체크포인트로 hibernate 가능하게 하고, 크래시/STALLED 후 wake 시 \u0027구조는 Temporal이 재현하되 LLM 출력은 temperature\u003e0라 비동일\u0027임을 인정하고 작가에게 \u0027마지막 본 장면 재생성됨\u0027을 명시 고지+재확인하는 게이트.",
+                                               "whyJustified":  "PoC는 복원 개념이 전무(generate_chapter는 in-memory dict, 크래시 시 전부 소실). PRD §10.5는 이미 이 문제를 정확히 진단했다 — \u0027Temporal replay는 구조 재현이지 LLM 동일출력 아님\u0027, \u0027작가 노출 부분=즉시 멱등 체크포인트\u0027. 100~200화를 며칠~몇 주에 걸쳐 쓰는 우리 규모에서 hibernate-wake는 선택이 아니라 필수다. §4.4 L3 STALLED_AWAITING_AUTHOR \u0027동결(frozen, durable 보존)\u0027과 §15 \u0027복원 정합: 구조 손실 0 + 의미적 손실 투명 고지율\u0027이 이미 1급 지표. 의미적 복원 race는 우리 도메인 고유 문제라 범용 durable workflow만으론 안 닫힌다.",
+                                               "mapsTo":  "PoC harness.py(복원 부재) → PRD §10.5 durable 복원 race 의미적 손실 + §4.4 L3 frozen/durable 보존 + §11.2 ReviewSession/AuthorCognitiveState(last_streamed_scene_pos, durable_restore_key) + §4.3 \u0027durable 재개\u0027 개입지점 + §6 Temporal continue-as-new.",
+                                               "concreteChange":  "(1) 장면 경계마다 체크포인트 레코드: {work_run_id, chapter, scene_idx, best_so_far_text, deterministic_violation_count, writer_lock_holder, durable_restore_key}를 멱등키로 영속(PoC는 JSON 파일/SQLite, 프로덕션은 Temporal+PG). (2) \u0027작가가 본 순간=커밋 경계\u0027 표시 플래그(author_observed_at_scene). (3) wake 시퀀스: 마지막 author_observed 장면까지는 보존, 그 이후 in-flight만 재실행 + ReviewSession.system_state_badge=\u0027restored\u0027 + \u0027마지막 본 장면 재생성됨\u0027 고지 이벤트. (4) STALLED 진입 시 frozen 상태로 체크포인트하고 작가 활동 신호 복귀 시에만 wake.",
+                                               "trendiness":  "2026 메모리/상태 \u0027hibernate-wake 체크포인트(다일 작업 재개)\u0027, \u0027git 커밋+테스트 게이트 교차세션 영속\u0027. durable workflow 트렌드를 우리 도메인의 \u0027의미적 비결정성\u0027에 맞게 정직하게 적응시킨 것.",
+                                               "cargoCultRisk":  "Temporal 풀 durable 백본을 PoC 단계부터 세우는 건 과조기 최적화(PRD도 M2에야 2계층 골격). 가장 간소한 정당한 버전 = \u0027장면 경계 JSON 체크포인트 + author_observed 플래그 + wake 시 재확인 고지\u0027 만으로 §15 복원 지표를 PoC에서 검증 가능. 분산 트랜잭션·이벤트 소싱 풀스택은 우리 단일 작가·단일 work 규모에 cargo-cult — PRD §12.3 단일 PG로 충분히 ACID."
+                                           },
+                                           {
+                                               "name":  "외부 검증을 1급으로: unit-test형 결정론 eval 하네스 + 재현성 분산 게이트",
+                                               "source":  "하네스",
+                                               "what":  "\u0027출력 품질\u0027이 아니라 \u0027하네스의 행동\u0027을 측정하는 결정론 eval 하네스. 같은 시드 n회 재실행으로 완주율·partial_rewrite 라운드 분산·output_divergence를 자동 측정하고, monotone 판정 안정성을 회귀 테스트로. linter/구조 테스트를 외부 검증 1급으로 두고 평가 게이트로 배포 차단.",
+                                               "whyJustified":  "2026.3 핵심 연구 \u0027에이전트는 자기 작업을 정확히 평가 못 한다→외부 검증 필수\u0027가 우리 §6.4 monotone 가드의 사활을 가른다. PRD §14.1 M1이 \u0027재현성 분산 측정(n≥10 재실행, ReproducibilityRecord)\u0027을 코딩 전 GO 게이트로 못박았는데, PoC harness.py는 이걸 측정할 하네스가 없다 — generate_chapter를 그냥 한 번 돌릴 뿐. §6.4의 fallback 순서(결정론 강등→temperature 낮춤→로직 재설계)를 \u0027데이터 보기 전 동결\u0027하려면 그 데이터를 만드는 eval 하네스가 선행돼야 한다. 100~200화 누적 전에 회차 1편 루프의 행동 분산을 못 재면 전체 시스템이 노이즈 위에 세워진다.",
+                                               "mapsTo":  "PoC harness.py(eval 하네스 부재) + run_poc.py/smoke.py → PRD §14.1 M1 재현성 분산 측정 + §11.2 ReproducibilityRecord(seed, run_index, completion_outcome, partial_rewrite_round_count, output_divergence) + §6.4 monotone 1급 축 + §15 수렴 안정성 지표 + §14.2 fallback 순서.",
+                                               "concreteChange":  "(1) eval_harness.py: run_n(seed, n) → for run_index in n: generate_chapter(seed 고정) → ReproducibilityRecord 수집(완주 여부, rounds 수, final 결정론 위반 카운트의 run간 분산=output_divergence). (2) 결정론 회귀 테스트: 고정 ontology+beat에 대해 checker.check가 run간 동일 위반 집합을 내는지(추출 LLM은 temp=0이므로 거의 결정론이어야) 검증 — 안정성이 깨지면 §14.2 fallback 1단계 트리거 신호. (3) monotone 불변식 단위 테스트: rewrite 후 결정론 위반 카운트가 절대 증가 안 하는지(best-so-far) assert. (4) 게이트: output_divergence \u003e 동결 임계면 색인/진행 차단.",
+                                               "trendiness":  "2026 검증/CI \u0027unit-test형 eval 하네스(출력 품질 아닌 행동 측정)\u0027, \u0027결정론 linter·구조 테스트를 외부 검증 1급\u0027, \u0027평가 게이트로 배포 차단\u0027. \u0027harness over model\u0027의 검증 짝.",
+                                               "cargoCultRisk":  "LLM-as-judge 기반 산문 품질 eval을 PoC eval 하네스에 욱여넣는 건 cargo-cult이자 자기평가 편향(PRD §3.1 generator≠judge 위배 위험). 가장 간소한 버전 = \u0027결정론 위반 카운트 분산 + 완주율\u0027만 측정(LLM judge 없이). 산문 품질은 §13.4 외부 객관 닻에 위임, eval 하네스는 \u0027행동·수렴\u0027만. n도 처음엔 10이면 충분(§14.4 검정력 한계는 인정하고 정성 신호로 강등)."
+                                           },
+                                           {
+                                               "name":  "관측 훅 파이프라인 + 결정론 감사 기록 (decision-flow 캡처)",
+                                               "source":  "하네스",
+                                               "what":  "루프의 모든 결정 분기(plan_queries 결과, forget_gate 커버리지, reflect 진입/탈출, monotone 판정, surface 발동, 컨슈머 ack)를 훅 파이프라인으로 캡처해 단일 trace_id로 추적. source/failure-mode/consequence 3차원 taxonomy로 근본원인 진단. 조용한 정지를 구조적으로 불가능하게.",
+                                               "whyJustified":  "PRD §10.9 \u0027조용한 정지 금지=hard rule\u0027, §15 \u0027가시성: 비정상 진입 시 알림 100%, 조용한 정지 0건\u0027, §12.1 \u0027OTel+Langfuse(단일 trace_id↔workflow_id)\u0027가 이미 1급 요구다. PoC harness.py는 rounds 리스트에 위반만 append할 뿐(L77) — plan_queries가 뭘 검색했는지, forget_gate가 어떤 fact를 못 덮었는지, 왜 ESCALATED됐는지 decision-flow가 없다. 100~200화에서 회차당 정체·마찰·재현성을 추적하려면(§15 liveness 적정성·인지부하 지표) 훅이 데이터 소스다. plan_scenes의 except 폴백(L20)이 조용히 일어나는 것 자체가 이 패턴 부재의 증거.",
+                                               "mapsTo":  "PoC harness.py rounds 로깅(L77-99) + plan_scenes except(L20) → PRD §10.9 조용한 정지 금지 + §12.1 OTel+Langfuse 단일 trace_id + §15 가시성/liveness 적정성/인지부하 지표 + §11.2 InterventionEvent/VerdictRecord + §6.6 근본원인 후보(EscalationBrief).",
+                                               "concreteChange":  "(1) 경량 이벤트 버스: emit(trace_id, node, event_type, payload) 훅을 각 노드에 1줄씩 삽입(plan_queries→retrieved_ids, forget_gate→uncovered_facts, reflect→round/violation_delta, monotone→accept/reject, finalize→watermark_advance). (2) 실패 taxonomy enum: failure_mode ∈ {parse_failure, retrieval_miss, oscillation, max_round_exceeded, consumer_stuck}로 분류해 EscalationBrief.root_cause_candidates에 결정론적으로 채움(§6.6 \u0027LLM 요약 아닌 결정론 증거 1차 표면\u0027). (3) plan_scenes 폴백을 emit(parse_failure)로 가시화. (4) PoC는 JSONL append-only 로그(파싱 가능 prefix), 프로덕션은 OTel span.",
+                                               "trendiness":  "2026 관측/추적 \u0027훅 파이프라인(decision flow 캡처)\u0027, \u0027결정론 감사기록(서명)\u0027, \u0027근본원인 진단 3차원 taxonomy(source/failure-mode/consequence)\u0027. HITL \u0027구조화 핸드오프\u0027의 데이터 기반.",
+                                               "cargoCultRisk":  "풀 OTel collector+Langfuse 스택을 PoC에 세우는 건 과설계. 가장 간소한 버전 = \u0027emit() 함수 1개 + JSONL append-only 로그 + failure_mode enum\u0027. 모든 변수를 다 trace하면 노이즈 — load-bearing 분기(reflect 진입/monotone 판정/surface 발동/finalize watermark)만. 서명된 감사기록은 우리 단일 작가 규모엔 아직 cargo-cult, M3+로 연기."
+                                           },
+                                           {
+                                               "name":  "LLM Wiki 컴파운딩 지식 아티팩트 = 계층 요약을 wiki 페이지로 (RAG 보완, 대체 아님)",
+                                               "source":  "llm-wiki",
+                                               "what":  "매 회차 raw 회차 본문을 RAG로 재검색하는 것에 더해, LLM이 엔티티/플롯스레드/아크를 wikilink된 markdown wiki 페이지로 점진 컴파일·유지(ingest→query→lint). 교차참조·모순은 미리 플래깅돼 있는 컴파운딩 아티팩트. 단 결정론 ground truth(온톨로지)는 침범하지 않고 \u0027서사 요약 계층\u0027만.",
+                                               "whyJustified":  "우리 §8.7 HierarchicalSummary(chapter/arc/work 요약 + irreversible_facts)가 이미 LLM Wiki의 맹아다 — finalize 팬아웃 컨슈머③이 갱신하는 \u0027가역 계층 요약\u0027. LLM Wiki는 이걸 \u0027교차링크된 영속 아티팩트\u0027로 격상시켜, 회차 N 생성 시 raw RAG 검색(§8.3)에만 의존하지 않고 \u0027이미 합성된 엔티티 페이지·플롯스레드 페이지\u0027를 주입할 수 있게 한다. 우리 규모(\u003c200 소스)는 LLM Wiki가 명시한 \u0027임베딩 불필요(index.md+1줄요약)\u0027의 정확한 적용 구간이다. Karpathy 원리 \u0027인간은 유지부담이 가치보다 빨리 커져 wiki를 버리지만 LLM은 안 지친다\u0027가 100~200화 누적 일관성 유지라는 우리 핵심 명제(§1.1 \u0027긴 호흡을 일관되게\u0027)와 정확히 포개진다. PRD §13.5 미검토 회차 서사/문체 사각지대도 wiki lint(stale/contradiction 주기 점검)로 일부 보완.",
+                                               "mapsTo":  "PoC rag.py(raw 청크만 검색) + harness.py retrieved 주입 → PRD §8.7 HierarchicalSummary(chapter/arc/work + irreversible_facts) + §7.5 팬아웃 컨슈머③ 계층 요약 갱신 + §8.3 검색/주입(하단) + §11.3 PlotThread + §6.6 EscalationBrief 모순 표면. 명시적 비침범 경계: §8.1 온톨로지(결정론 ground truth)는 wiki가 절대 소유하지 않음.",
+                                               "concreteChange":  "(1) wiki 디렉토리: pages/\u003centity\u003e.md, pages/\u003cplotthread\u003e.md + index.md(링크+1줄요약, \u003c200소스라 임베딩 없이 grep). (2) finalize 팬아웃 컨슈머③(현재 \u0027계층 요약 갱신\u0027)을 \u0027wiki ingest\u0027로 확장: 새 finalize 회차를 읽고 관련 10~15 페이지 원자적 갱신 + log.md append(파싱가능 prefix). (3) YAML frontmatter 타입드 엣지(contradicts/extends/supersedes) — 이건 우리 §4.5 AuthorDirective conflict_status·superseded_by와 동형이므로 스키마 재사용. (4) query 시 assemble_memory가 raw RAG 청크(하단)에 더해 wiki 페이지 요약을 주입(여전히 하단·trust_tier, 온톨로지 상단 침범 금지). (5) 주기적 lint: orphan/stale/contradiction 페이지를 작가 surface 후보로(§13.6 정성 신호).",
+                                               "trendiness":  "Karpathy LLM Wiki(2026)의 정확한 도메인 적용 — \u0027raw 재검색 대신 컴파운딩 지식 아티팩트\u0027. durable workflow·event sourcing 트렌드의 \u0027지식 레이어\u0027 버전. 단일 writer 규율(LLM이 페이지 유지·인간은 소스 큐레이션)이 우리 §10.3 단일 writer 계약과 구조 동형이라 트렌드가 우리 불변식과 충돌 없이 포개짐.",
+                                               "cargoCultRisk":  "가장 큰 cargo-cult 위험 지점 — wiki를 ground truth로 착각하면 우리 §3.1 핵심 불변식(\u0027결정론 코어 LLM 완전 배제\u0027, \u0027비대칭 RAG 주입\u0027)을 정면 위반한다. wiki는 LLM 소유 \u0027서사 요약 계층(가역)\u0027일 뿐, 생사·소속·능력수치(§8.1 온톨로지)는 절대 wiki가 못 건드린다 — signal_grade=semantic로 강등, 주입도 하단만. 또 PoC 단계에서 풀 ingest→query→lint 워크플로를 세우는 건 과조기 — 가장 간소한 정당한 버전 = \u0027계층 요약(이미 있는 컨슈머③)에 wikilink+frontmatter edge만 추가\u0027해서 모순 플래깅을 EscalationBrief에 결정론적으로 노출하는 것. 임베딩·전용 인덱서 추가는 \u003c200소스 규모에 불필요(LLM Wiki 자체가 그렇게 명시)."
+                                           }
+                                       ],
+                          "topPick":  "Decoupled sub-task 그래프 + 국소 재계획 (장면 미니루프를 진짜 그래프로) — 패턴 #3. 이유: 이것이 PRD 야심(§6.7/§6.8 장면 단위 미니루프)과 PoC 현실(harness.py의 통짜 회차 draft/rewrite) 사이의 가장 근본적이고 load-bearing한 간극이다. 다른 모든 패턴이 여기에 의존한다 — 장면 경계가 진짜 노드여야 (a)hibernate-wake 체크포인트가 걸 곳이 생기고, (b)인터럽트(§10.1 \u0027never interrupt a running tool\u0027)를 흡수할 경계가 정의되고, (c)best-so-far monotone 가드(§6.4)가 \u0027통과한 장면을 악화시키지 않게\u0027 국소화되고, (d)관측 훅이 장면 단위 decision-flow를 캡처하고, (e)judge 회차당 상수화(§13.3 critical 장면만 critique)가 성립한다. 통짜 재생성은 100~200화 규모에서 토큰·지연 폭발(§15 비용=제약)이자 과교정의 온상이다. cargo-cult가 아닌 결정적 이유: 동적 토폴로지 플래너가 아니라 §6.7이 못박은 \u0027결정론 고정 scene_plan 순회\u0027라서 LLM에 그래프 자유도를 주지 않는다 — \u0027harness over model\u0027 원리(루프 구조가 모델 능력보다 행동을 좌우)의 가장 정당한 적용이며, 우리 불변식(결정론 라우팅)을 1바이트도 침범하지 않는다.",
+                          "openQuestions":  [
+                                                "장면 단위 국소 재계획에서 seam_reweave(§6.4)가 인접 장면을 수정할 때, 그 인접 장면이 이미 author_observed(작가가 본) 상태라면? hibernate-wake 재확인 게이트(§10.5)와 충돌 — 작가가 본 장면을 seam 봉합이 건드리면 \u0027마지막 본 장면 재생성됨\u0027 고지를 매 seam마다 띄울지, 아니면 author_observed 장면은 seam_reweave에서 freeze할지 경계 정의 필요.",
+                                                "LLM Wiki 계층(패턴#7)의 모순 플래깅(contradicts edge)과 우리 결정론 consistency_check(충돌 4종)가 같은 모순을 다르게 판정하면? wiki는 semantic(LLM)이고 consistency_check는 결정론인데, EscalationBrief에 둘 다 올라올 때 작가에게 \u0027결정론 증거가 1차, wiki 요약은 보조\u0027(§6.6)임을 어떻게 시각적으로 강제 분리할지 — signal_grade 라벨만으론 부족할 수 있음.",
+                                                "구조화 출력 디코드-타임 강제(패턴#2)가 extract_claims에서 enum 밖 값을 \u0027못 내게\u0027 막으면, 현재 checker.compare가 \u0027기타(매핑불가 명시언급)→semantic 위반으로 surface\u0027(checker.py L86)하는 안전장치가 무력화될 수 있음 — 모델이 강제로 가장 가까운 enum에 욱여넣으면 \u0027진홍색\u0027이 \u0027붉은색\u0027으로 잘못 정규화돼 진짜 모순을 놓침. enum 강제 vs \u0027기타\u0027 탈출구 보존의 트레이드오프를 M1에서 측정해야.",
+                                                "eval 하네스(패턴#5)의 output_divergence 임계를 \u0027데이터 보기 전 동결\u0027(§14.2)하려면 임계값 자체의 초기 추정 근거가 필요한데, PoC 규모(회차 1편, n=10)에서 나온 분산이 100~200화 누적 분산을 대표하는가? 회차 단위 분산과 work 단위 누적 분산의 관계가 비선형일 수 있음(§14.4 검정력 우려와 연결).",
+                                                "타입드 핸드오프(패턴#1)에서 ontology(상단·누락0)와 rag(하단·cap)를 별도 타입 필드로 분리하면 §6.3 \u0027신뢰등급 혼합 금지\u0027는 컴파일 타임에 보장되지만, AuthorDirective(상단 고정·권위 채널)와 ontology가 충돌할 때(§4.5 자기모순) 둘 다 \u0027상단\u0027인데 우선순위를 타입 시스템이 표현할지, 런타임 detect_directive_conflict에 위임할지 — 핸드오프 계약의 우선순위 차원이 미정의."
+                                            ],
+                          "_key":  "harness",
+                          "_title":  "에이전틱 하네스·오케스트레이션 (Harness Engineering 2026)"
+                      },
+                      {
+                          "lens":  "검증·일관성·이벤트 백본 (structured backbone). 2026 self-eval 한계 연구를 출발점으로 \"외부 검증 우선 + 결정론 1급\"을 축으로, PoC가 이미 암묵적으로 가진 (1) 신뢰등급 분리(deterministic/quasi/semantic), (2) ESCALATED(침묵확정 금지), (3) ontology_internal_check 순수결정론, (4) supersedes 체인/워터마크 3종/finalize 팬아웃을 — 버즈워드가 아니라 \"이미 거기 있는 구조를 정식 패턴으로 승격\"하는 방향으로 강화한다. 우리 규모(완결 100~200화·회차 단위·인간 협업·단일 PostgreSQL·작가 한 명이 writer)는 분산 빅데이터가 아니므로, event sourcing/CQRS/saga/blackboard를 \u0027가장 간소한 단일-DB 정당 버전\u0027으로만 채택한다.",
+                          "patterns":  [
+                                           {
+                                               "name":  "결정론 Lint 컴파일러 — 룰을 데이터로 (Deterministic Linter as 1급 외부검증)",
+                                               "source":  "하네스",
+                                               "what":  "consistency/prose 위반 판정 로직을 코드 if-분기가 아니라 \u0027룰 명세 데이터(rule spec)\u0027로 외부화하고, 그 명세를 평가하는 결정론 엔진을 둔다. 룰은 {scope, predicate, evidence_template, grade, severity, reversibility}의 타입드 레코드. unit-test형 eval 하네스가 \u0027룰 명세 자체\u0027를 골든 케이스 위에서 회귀 검증한다(출력 품질이 아니라 \u0027판정 행동\u0027을 측정).",
+                                               "whyJustified":  "PoC checker.py의 `rule_no_reawaken = \u0027재각성\u0027 in rule_text and (\u0027불가\u0027 in ...)` 키워드 매칭은 결론(run_poc 정당화_안됨)에서 스스로 \u0027규칙 다수화 시 확장 불가, 규칙 컴파일러 필요\u0027라고 자백한다. 100~200화에 걸쳐 세계규칙은 수십 개로 늘어나고(헌터물·회귀물 SSOT 충돌 빈번 장르 선택, §5), 룰마다 if-분기를 추가하면 결정론 코어가 곧 LLM만큼 신뢰불가한 스파게티가 된다. self-eval 한계(2026 연구)가 가리키는 \u0027외부 결정론 검증 1급\u0027은 룰이 코드에 흩어지면 성립 불가 — 룰이 감사가능한 데이터여야 외부검증이 진짜 외부가 된다.",
+                                               "mapsTo":  "checker.py의 compare()/ontology_internal_check() + PRD §6.3 consistency_check·prose_lint·§9.5 DeterministicStructureChecker + §13.2 결정론 게이트. compare()의 1~4번 하드코딩 분기와 rule_no_reawaken을 룰 레지스트리로 대체.",
+                                               "concreteChange":  "1) `RuleSpec` Pydantic 모델 신설: {rule_id, layer(categorical/numeric/timeline/worldrule), predicate_kind(enum), params(jsonb), grade(deterministic|quasi|semantic), reversibility, evidence_template}. 2) checker는 RuleSpec 목록을 순회하는 단일 엔진으로 축소 — CATEGORICAL_VOCAB·NUMERIC_ATTRS·rule_no_reawaken이 전부 RuleSpec row로 이동. 3) run_poc의 C0~C2를 \u0027RuleSpec 골든셋 회귀 하네스\u0027로 승격: 새 룰 추가 시 골든 케이스 통과가 머지 게이트(§14 M1 GO 게이트의 결정론 부분을 CI 1급으로). 4) 온톨로지에 `add_rule(text)` 대신 `add_rule_spec(RuleSpec)` 추가, 자유텍스트 규칙은 worldgen(M4)에서 RuleSpec으로 컴파일(LLM 1회, 사람 승인 후 동결).",
+                                               "trendiness":  "2026 하네스 트렌드의 핵심 명제 \u0027결정론 linter·구조 테스트를 외부검증 1급, eval은 출력품질 아닌 행동 측정\u0027을 정확히 구현. outlines/Instructor류 구조화 출력과 같은 계열(룰을 스키마로 박아 디코딩/판정을 제약).",
+                                               "cargoCultRisk":  "과적용 = 룰 DSL을 튜링완전 표현식 엔진으로 키우는 것(그러면 그 엔진 자체가 검증불가해져 자기모순). 가장 간소한 정당 버전: predicate_kind를 PoC가 이미 가진 4종(categorical_eq, numeric_monotone, timeline_state, worldrule_flag)으로 닫힌 enum으로 고정하고, 그 밖은 semantic 등급으로 강등→judge+escalation. 즉 \u0027컴파일러\u0027가 아니라 \u0027닫힌 룰 테이블 + 디스패처\u0027."
+                                           },
+                                           {
+                                               "name":  "Append-only 검증 이벤트 로그 (Event Sourcing — Verdict/Violation Ledger)",
+                                               "source":  "기타-명시: event sourcing/CQRS (내 렌즈), llm-wiki의 log.md append-only 규율 차용",
+                                               "what":  "회차 생성 루프의 모든 검증 결과(라운드별 violations, status 전이, escalation, 워터마크 전진)를 ad-hoc 반환값이 아니라 append-only 이벤트 스트림으로 기록한다. 현재 상태(VerdictRecord, LivenessState, 워터마크)는 이벤트의 결정론적 fold로 재구성 가능한 projection(CQRS read model)으로 둔다. 이벤트는 불변·서명·파싱가능 prefix.",
+                                               "whyJustified":  "PoC는 이미 `rounds=[{round, n_violations, violations}]`와 `log[]`로 사실상 이벤트 시퀀스를 만들지만 in-memory 휘발이다. PRD가 요구하는 것(§10.5 durable 의미적 복원·재확인 게이트, §15 \u0027STALLED→동결→복귀 구조손실 0\u0027, §11.2 ReproducibilityRecord/InterventionEvent/VerdictRecord, Temporal replay)은 전부 \u0027무슨 일이 있었는지의 불변 기록\u0027을 전제한다. 회차 단위·100~200화·작가가 며칠 자리비움(§4.4 활동신호 부재) 후 복귀해 \u0027왜 멈췄나\u0027를 감사하는 워크플로는 본질적으로 event-sourced 도메인이다. Temporal event history와 자연 정합(중복 백본 아님 — 도메인 이벤트는 Temporal 인프라 이벤트와 다른 층).",
+                                               "mapsTo":  "harness.py generate_chapter의 `rounds`/`rec` 반환 + run_poc의 `R`/`log` 누적 + PRD §11.2 VerdictRecord·InterventionEvent·DefectDebtEntry·LivenessState·§7.5 워터마크 3종·§10.9 상태배지. 휘발 dict를 durable 이벤트 스트림 + projection으로.",
+                                               "concreteChange":  "1) `chapter_event` 테이블(append-only): {event_id, work_id, narrative_order, seq, event_type(enum: drafted/checked/violation_found/rewrite_applied/escalated/finalized/watermark_advanced/liveness_triggered), payload jsonb, signal_grade, created_at, prev_event_hash}. 2) harness가 round마다 dict를 append하는 대신 이벤트 emit; status는 이벤트 fold로 결정(FINALIZED/ESCALATED는 파생 상태). 3) VerdictRecord·LivenessState·워터마크 3종은 이벤트에서 재계산되는 projection 뷰(materialized). 4) §4.4 L1 progress Δ·L2 defect_debt_total은 이벤트 스트림 윈도 집계로 산출(별도 가변 카운터 lost-update 제거). 5) prev_event_hash 체인으로 §6.6 \u0027서명된 감사기록\u0027 달성.",
+                                               "trendiness":  "\u0027결정론 감사기록(서명)\u0027, \u0027git 커밋+테스트 게이트 교차세션 영속\u0027, \u0027hibernate-wake 체크포인트\u0027의 데이터 기반. 2026 durable workflow 트렌드(Temporal)와 event sourcing의 자연 결합.",
+                                               "cargoCultRisk":  "과적용 = 전사 CQRS/이벤트버스/Kafka·별도 이벤트스토어 도입(우리는 단일 PostgreSQL, 작가 1명, §12.3 분산 트랜잭션 회피가 명시 설계). 그건 cargo-cult. 가장 간소한 정당 버전: PostgreSQL 단일 테이블 append + jsonb payload + SQL 뷰 projection. 별도 인프라 0. \u0027이벤트 소싱 프레임워크\u0027가 아니라 \u0027insert-only 감사 테이블 + fold 함수\u0027."
+                                           },
+                                           {
+                                               "name":  "Saga 보상 트랜잭션 — finalize 팬아웃의 retro-repair",
+                                               "source":  "기타-명시: saga (내 렌즈) + 하네스(차등 차단·degraded)",
+                                               "what":  "finalize 후 3중 컨슈머(RAG색인/온톨로지반영/요약갱신)를 분산 saga로 모델링: 각 컨슈머는 멱등 forward step + 명시적 compensation step을 갖고, 부분 실패 시 보상으로 일관성을 retro-repair. state_applied 워터마크는 모든 step ack 후에만 전진(가역 step은 차등 차단).",
+                                               "whyJustified":  "PRD §7.5가 이미 \u0027멱등키 + 부분실패 보상 트랜잭션 + 컨슈머별 stuck 임계 + 차등 차단\u0027을 요구한다 — 이건 정의상 saga다. 단일 ACID 트랜잭션으로 묶을 수 없는 이유가 명확: RAG 색인(가역)과 온톨로지 반영(비가역 ground truth)은 stuck 시 차단 강도가 달라야 하고(가역은 잠정 진행 허용, 비가역은 즉시 차단), 임베딩/색인은 외부 자원·장시간. 100~200화 무인 auto_advance 중 새벽에 가역 컨슈머 하나가 stuck돼 작품 전체가 정지하는 가용성 과희생(§7.5 명시 우려)을 saga 보상으로만 정당하게 막는다.",
+                                               "mapsTo":  "harness.py generate_chapter 말미 `rag.index_chapter(...) if status==\u0027FINALIZED\u0027`(현재 단일 동기 호출) + PRD §7.5 팬아웃 계약·§11.2 Watermark 3종·§10.9 degraded. 단일 인라인 색인을 saga 오케스트레이션으로.",
+                                               "concreteChange":  "1) `FanoutStep` 모델: {consumer(ontology|rag|summary), forward_fn, compensate_fn, idempotency_key, reversibility, stuck_threshold, retry_budget}. 2) finalize 이벤트 → saga 코디네이터가 step 실행, 각 step 결과를 chapter_event에 기록. 3) 비가역(온톨로지) step 실패 = as_of(last_indexed/state_applied) 전진 차단 + 후속 회차 hard block; 가역 step 실패 = trust_tier 격리 + 배지 + retry_budget 소진까지 잠정 진행. 4) compensate: RAG 색인 롤백 = is_active=false superseding(가역), 요약 = 이전 버전 복원. 5) PoC harness에 `finalize_fanout(rec, consumers)` 함수 추가, ESCALATED는 색인 보류(현 동작 유지).",
+                                               "trendiness":  "durable workflow + saga는 2026 에이전트 백본의 표준 신뢰성 패턴. Temporal이 saga 오케스트레이션을 1급 지원(child workflow + compensation)하므로 §6.1 백본과 직결.",
+                                               "cargoCultRisk":  "과적용 = 마이크로서비스 분산 saga(서비스간 메시지·2PC 대체)를 단일 프로세스에 끌어옴. 우리는 단일 DB라 대부분 로컬 트랜잭션으로 충분. 가장 간소한 정당 버전: 진짜 외부·비ACID 자원(임베딩 색인)만 saga step으로 분리하고, 온톨로지 반영은 그냥 로컬 트랜잭션 + 워터마크 전진. 즉 \u0027saga 3개\u0027가 아니라 \u0027가역 외부 step 1개에 대한 보상\u0027만."
+                                           },
+                                           {
+                                               "name":  "외부검증 eval 하네스 게이트 — 행동 측정 배포 차단 (Self-eval 한계 정면 대응)",
+                                               "source":  "하네스",
+                                               "what":  "run_poc.py의 C0~C6 기준을 일회성 PoC 스크립트가 아니라 \u0027상시 eval 하네스\u0027로 승격하고, 신뢰등급별 게이트(결정론/준결정론은 binding, semantic은 non-binding 보고)를 CI/배포 게이트로 둔다. 에이전트의 self-critique(critique judge)는 게이트 권위가 없고, 결정론 외부검증과 판정 안정성(재현성)만 게이트.",
+                                               "whyJustified":  "run_poc.py가 이미 이 패턴의 90%를 구현했다 — \u0027pass\u0027를 결정론/준결정론에만 걸고 의미층을 게이트에서 제외(`gate = [...]; overall_pass = all(...)`), 재현성 n회 측정으로 판정 안정성을 게이트한다. 이건 2026 핵심 연구(\u0027에이전트는 자기작업을 정확히 평가 못 함 → 외부 검증 레이어 필수\u0027)의 교과서적 구현인데, 정식 패턴/지속 인프라로 승격되지 않고 PoC 스크립트에 갇혀 있다. PRD §14 M1 GO 게이트(\u0027결정론 산출물을 실제 스키마/상태머신으로 동결 전 코딩 보류\u0027)는 본질적으로 eval 게이트 요구. 작가 1명 협업·회차 단위라 \u0027출력 품질\u0027은 작가가 보지만, \u0027루프 행동(완주율·monotone 안정성·silent_ship=0)\u0027은 자동 게이트만이 지킬 수 있다.",
+                                               "mapsTo":  "run_poc.py 전체(C0~C6, conclude, gate) + PRD §13(품질전략)·§14.1 M1 재현성 분산 측정·§15 성공지표(루프완주·수렴안정성·결정론잔존·silent_ship). PoC 스크립트를 영속 eval 하네스 + CI 게이트로.",
+                                               "concreteChange":  "1) C0~C6를 `eval/` 패키지로 구조화: 각 criterion = {id, grade_class, binding(bool), golden_cases, pass_predicate}. 2) silent_ship(FINALIZED인데 hard 위반 잔존)=0을 hard CI 게이트로 고정(run_poc C4가 이미 핵심 게이트로 명명). 3) 재현성(C3): semantic/boundary는 \u0027NONbinding 정직보고\u0027, clear/clean만 binding — 이 분리를 영속 정책으로 동결(§14.4 \u0027정량→정성 강등 규칙 데이터 보기 전 동결\u0027과 정합). 4) judge 앙상블(critique)은 게이트 입력 금지, 별도 관측 지표로만. 5) eval 결과를 chapter_event 스트림에 VerdictRecord로 기록(패턴2와 결합).",
+                                               "trendiness":  "\u0027unit-test형 eval 하네스(출력품질 아닌 행동 측정)\u0027, \u0027평가 게이트로 배포차단\u0027, \u0027self-eval 한계 → 외부검증 1급\u0027은 2026 하네스 엔지니어링의 가장 인용되는 명제. PoC가 이미 선취.",
+                                               "cargoCultRisk":  "과적용 = LLM-judge를 게이트로 승격(self-eval 한계를 정면 위반)하거나, semantic recall에 숫자 임계를 박아 \u0027환각 게이트\u0027를 만드는 것. 가장 간소한 정당 버전: binding 게이트는 결정론/준결정론 + silent_ship=0 + clear재현성=100%로만, semantic은 영원히 non-binding 보고. run_poc.py가 이미 한 그 선을 그대로 고정."
+                                           },
+                                           {
+                                               "name":  "Blackboard 일관성 — 비대칭 신뢰등급 공유 캐논 (다중 에이전트/도구 공유 board)",
+                                               "source":  "기타-명시: blackboard (내 렌즈) + 하네스(타입드 핸드오프·신뢰등급 분리)",
+                                               "what":  "온톨로지(상단고정·누락0·ground truth)와 RAG(하단·cap·trust가중·서사)와 AuthorDirective(권위채널)를 하나의 \u0027공유 작업판(blackboard)\u0027으로 보되, 기여자별 신뢰등급(knowledge source의 confidence)을 1급 타입으로 강제해 혼합을 스키마 차원에서 불가능하게 한다. plan_chapter/assemble_memory/draft_scene/critique가 같은 board를 읽되 등급 경계를 침범 못 한다.",
+                                               "whyJustified":  "PRD §7.3 비대칭 RAG 주입(\u0027ontology 박기 vs rag 찾기, 스키마상 분리필드 강제, 혼합불가\u0027)과 §6.3 \u0027signal_grade를 코드 레벨로 강제, LLM 산출물 1바이트라도 결정론 코어에 섞이면 등급2 강등\u0027은 정확히 blackboard의 \u0027typed knowledge source + confidence\u0027 규율이다. PoC ontology.py render_canon_block은 결정론 board(상단)를, rag.py search는 서사 board(하단)를 만들지만, 둘을 합치는 harness draft_chapter에서 단순 문자열 연결(`canon_block + _ctx_block(retrieved)`)이라 등급 경계가 런타임에 강제되지 않는다 — 프롬프트 조립 실수 하나로 RAG 텍스트가 ground truth 슬롯에 새면 §3.1 핵심 불변식이 깨진다. 다중 에이전트(planner/drafter/judge)가 공유 캐논을 읽는 §6 구조라 board의 타입 경계가 일관성 백본.",
+                                               "mapsTo":  "harness.py draft_chapter의 프롬프트 조립(canon_block·retrieved·directives 문자열 병합) + ontology.render_canon_block + rag.search + PRD §7.3 비대칭 주입·§6.3 신뢰등급 혼합금지·§11.2 RagIndexUnit(signal_grade/trust_tier/provisional). 문자열 병합을 타입드 슬롯 조립기로.",
+                                               "concreteChange":  "1) `ContextBoard` 모델: 상호배타 슬롯 {authority_slot(AuthorDirective[]), ground_truth_slot(OntologyFact[], 누락0 어서션), narrative_slot(RagChunk[], cap·trust_weight)}. 각 슬롯은 타입이 다른 별개 필드(문자열 아님). 2) `assemble_context(board)-\u003eprompt`만이 직렬화 권한을 갖고, 슬롯→프롬프트 위치 매핑을 결정론 고정(상단/상단/하단). 3) draft_chapter는 board를 받고 절단/혼합 불가(ground_truth_slot 누락 시 forget_gate가 PRE-GEN 차단, §7.2). 4) RagChunk는 trust_tier=\u0027unreviewed_machine\u0027이면 narrative_slot에서 trust_weight 하향 자동(§8.5 자기섭취 차단). 5) PoC checker.effective_ids/scan_present_ids는 board의 ground_truth_slot 커버리지 검증으로 이동.",
+                                               "trendiness":  "\u0027타입드 스키마 핸드오프 + 제약된 액션 검증\u0027, \u0027intent\u003esyntax(상호작용 topology로 안전 창발)\u0027의 데이터 구현. blackboard는 고전이지만 다중 LLM 에이전트 공유 컨텍스트의 2026 재유행 패턴(공유 작업메모리).",
+                                               "cargoCultRisk":  "과적용 = 범용 blackboard 프레임워크/규칙 기반 control shell 도입(고전 blackboard의 무거운 부분). 우리 board는 슬롯 3개로 닫혀 있어 그럴 필요 없음. 가장 간소한 정당 버전: \u0027Pydantic 모델 3필드 + 단일 직렬화 함수\u0027. board를 동적 게시판이 아니라 \u0027타입 분리가 강제된 불변 컨텍스트 객체\u0027로만."
+                                           }
+                                       ],
+                          "topPick":  "결정론 Lint 컴파일러 — 룰을 데이터로 (패턴1). 이유: (a) PoC가 결론에서 스스로 자백한 가장 구체적·임박한 한계(\u0027규칙 다수화 시 키워드 매칭 확장 불가, 규칙 컴파일러 필요\u0027)를 정조준한다 — cargo-cult가 아니라 명시된 부채 상환. (b) 내 렌즈의 1차 원리인 \u0027외부 결정론 검증 1급\u0027은 룰이 코드 if-분기에 흩어지는 순간 무너진다(검증기 자체가 검증불가). 룰을 감사가능한 데이터로 만들어야 self-eval 한계 연구가 말하는 \u0027진짜 외부\u0027가 성립. (c) 다른 네 패턴의 전제조건: 이벤트 로그(2)는 \u0027violation_found\u0027 이벤트의 grade를 RuleSpec이 정의해야 하고, eval 게이트(4)는 RuleSpec 골든셋 위에서 도는 것이며, blackboard(5)의 ground_truth 경계도 RuleSpec이 layer를 규정한다. (d) 가장 간소한 정당 버전(닫힌 predicate enum 4종 + 디스패처)이 명확해 과적용 위험이 낮고, M1 GO 게이트(§14)의 \u0027결정론 산출물 동결\u0027을 CI 1급으로 직접 구현한다. 단, 이건 신규 기능이 아니라 \u0027구조 리팩터\u0027이므로 사용자 승인 후 진행할 사안임.",
+                          "openQuestions":  [
+                                                "RuleSpec predicate enum을 PoC 4종(categorical_eq/numeric_monotone/timeline_state/worldrule_flag)으로 닫으면, 현대판타지 1개 장르를 넘어 회귀물(timeline_branch_id, §5 P2)로 확장 시 \u0027분기 타임라인 간 모순\u0027 같은 신규 predicate가 enum을 깨뜨린다. enum 확장 정책 vs semantic 강등 경계를 어디서 동결하나?",
+                                                "Append-only chapter_event 로그(패턴2)와 Temporal event history(§6.1 백본)의 책임 경계: 도메인 검증 이벤트를 PostgreSQL 자체 테이블에 둘지, Temporal workflow history에 의존할지. §12.2 \u0027durable 권위 Temporal 단일\u0027과 충돌 없이 도메인 이벤트를 PG에 두는 게 정당한가(인프라 이벤트 vs 도메인 이벤트 2층 분리가 백본 이중화로 미끄러질 위험)?",
+                                                "Saga 보상(패턴3)에서 RAG 색인 롤백을 \u0027is_active=false superseding\u0027으로 가역 처리한다 해도, 그 사이 후속 회차가 잠정 진행하며 stale 청크를 이미 회수해 본문에 박았다면 보상이 \u0027의미적으로\u0027 완전하지 않다. §8.5 trust 격리 + §8.6 막경계 정산이 이 의미적 잔차를 정말 닫는지, 아니면 saga가 닫을 수 없는 영역인지 M3 30~50화 실증에서 측정 필요.",
+                                                "Eval 게이트(패턴4)에서 재현성 binding 임계(clear=100%)는 PoC n=10에서 성립했으나, §14.4가 지적하듯 N=10이 monotone 판정 안정성을 통계적으로 보증하는 검정력이 불확실. \u0027게이트 임계를 데이터 보기 전 동결\u0027 원칙(§14.2)과 \u0027N 검정력 부족\u0027 사이에서, 초기 게이트를 어떤 보수적 값으로 동결할지.",
+                                                "Blackboard board(패턴5)의 ground_truth_slot \u0027누락0 어서션\u0027은 ontology recall\u003c1일 때(§8.8 recall\u003c1 결정론 오염) 무엇을 보장하나 — board는 \u0027온톨로지에 있는 것의 누락0\u0027만 보장할 뿐, 온톨로지에 애초에 없는 사실(본문↔본문 모순, run_poc 자백한 사각지대)은 board 밖이다. 이 사각지대의 소유 주체를 누구로 둘지(검증 백본의 미해결 공백)."
+                                            ],
+                          "_key":  "validation",
+                          "_title":  "검증·일관성·이벤트 백본 (structured backbone)"
+                      }
+                  ],
+    "verdict":  {
+                    "overall":  "12패턴 중 ADOPT 0, ADAPT 6, REJECT 6. 핵심 결함은 근거의 순환성: 거의 모든 패턴이 PRD 섹션(finalize 팬아웃/멱등 saga/trust_tier/writer_lock/durable 복원)을 우리가 이미 요구한다고 인용하나, 실제 PoC harness.py는 인메모리 dict를 흘려보내는 단일 선형 함수이고 그 인프라가 하나도 존재하지 않는다. 미구현 PRD를 근거로 새 위키 인프라를 정당화하는 구조다. LLM-Wiki 5종이 회차 경계 트리거가 공짜라지만 그 트리거인 finalize 팬아웃 3번 컨슈머부터 없다(harness.py 92행은 rag.index_chapter 단일 호출이 전부). 지금 진짜 손댈 것은 둘: checker.py 62행 rule_no_reawaken substring 매칭(PoC가 자백한 부채)을 닫힌 룰 테이블로(validation1), rag.py 32행 index_chapter 중복 색인 버그 멱등화(memory3에 묻힌 진짜 버그). 다음은 run_poc.py가 90% 구현한 eval 게이트 영속화(harness5)와 draft_chapter 문자열 병합을 ontology/rag 타입 분리(harness1=validation5). 나머지는 M3(30~50화 실증) 데이터 후. 5화/인물3/규칙1 규모에 5계층 lifecycle/event sourcing PG/distributed saga/blackboard 프레임워크는 과설계. memory1=harness7, harness5=validation4는 동일 제안 중복으로 다중렌즈 합의 착시.",
+                    "cargoCultFlags":  [
+                                           "LLM-Wiki 5종이 finalize 팬아웃을 공짜 트리거로 전제하나 harness.py 92행은 rag.index_chapter 단일 호출뿐 — 없는 토대 위 부트스트랩",
+                                           "lifecycle 5상태 머신: 5화 규모에 채울 상태 없는 폭발, contradicted 트리거(detect_directive_conflict/redirect)가 PoC에 0",
+                                           "event sourcing chapter_event PG 테이블 + prev_event_hash 서명: PoC는 DB 자체가 없음(인메모리 dict + report.json)",
+                                           "distributed saga: finalize 팬아웃 부재로 보상할 분산 step이 없음 — 모놀리스에 마이크로서비스 어휘 이식",
+                                           "blackboard 프레임워크: 슬롯 3개 Pydantic 객체에 60년대 AI 용어 명명 인플레이션",
+                                           "타입드 contradicts/supersedes 엣지 + networkx orphan lint: PlotThread 노드 0인 5화에서 빈 그래프, 환각 엣지 위험 자인",
+                                           "index.md 임베딩 불필요 네비게이션: 페이지 0개에 Karpathy 휴리스틱 적용 — 측정 불가",
+                                           "memory1=harness7, harness5=validation4 중복 재제출: 다중 렌즈 독립 합의 착시"
+                                       ],
+                    "assessments":  [
+                                        {
+                                            "pattern":  "memory1 작품 바이블 위키 승격 [memory topPick]",
+                                            "verdict":  "REJECT",
+                                            "reason":  "승격 대상 finalize 팬아웃 3번 컨슈머가 harness.py 92행에 없고 rag.index_chapter 단일 호출이 전부. HierarchicalSummary/trust_tier/워터마크 전부 없음=신규 백본. 5화에 비용곡선 미발생, 손익분기 제안도 모른다 자인. recall 하락도 미측정(rag_probe 6청크).",
+                                            "simplestVersion":  "도입 안 함. M3에서 재합성 토큰 계측 후 인물 페이지 1종 plain markdown. 전제 finalize 다중 컨슈머가 M2 실재해야.",
+                                            "severityIfIgnored":  "낮음. 도입 시 split-brain과 토큰 폭발만 들임."
+                                        },
+                                        {
+                                            "pattern":  "memory2 타입드 wikilink 복선 그래프",
+                                            "verdict":  "REJECT",
+                                            "reason":  "PlotThread/payoff_check가 PoC에 0, orphan lint는 빈 그래프 순회. 5화 시드에 복선 체인 미설계. 환각 엣지 위험 자인. 복선은 100~200화 명제이지 5화 검증 대상 아님.",
+                                            "simplestVersion":  "지금 0. M5 PlotThread 실재 후 payoff_of 엣지 1종+결정론 orphan lint. 미회수는 경고이지 차단 아님.",
+                                            "severityIfIgnored":  "낮음(현 단계)."
+                                        },
+                                        {
+                                            "pattern":  "memory3 멱등 ingest saga 정렬",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "위키 일반형은 과조기지만 묻힌 멱등성이 실제 버그를 가리킴. rag.py 32행 index_chapter는 멱등 아님 — 같은 회차 두 번 색인 시 self.chunks.append로 중복. 제안의 이미 멱등키 요구와 코드가 정반대.",
+                                            "simplestVersion":  "rag.py index_chapter 재색인 가드: 같은 chapter면 기존 청크 제거 후 재색인. 3~4줄.",
+                                            "severityIfIgnored":  "중간. M2 재시도/크래시 복원 시 중복 청크가 RAG 검색 오염."
+                                        },
+                                        {
+                                            "pattern":  "memory4 위키 lifecycle 5상태",
+                                            "verdict":  "REJECT",
+                                            "reason":  "5상태 머신을 5화에 도입하면 폭발. 전제 trust_tier/막경계/auto_advance가 PoC에 0, contradicted 트리거 미구현, 채울 상태 없음. 제안도 풀구현은 폭발 자인.",
+                                            "simplestVersion":  "N/A. M3 이후 draft/active 2상태+stale 워터마크 비교 한 줄.",
+                                            "severityIfIgnored":  "낮음. 자기섭취 위험은 auto_advance 있을 때만이고 PoC엔 없음."
+                                        },
+                                        {
+                                            "pattern":  "memory5 index.md 단일 writer 거버넌스",
+                                            "verdict":  "REJECT",
+                                            "reason":  "writer_lock이 PoC에 없음 — 단일 작가/프로세스라 split-brain 발생 불가, 막을 대상 없음. 제안도 팬아웃 단일 경로라 lock 불필요 자인.",
+                                            "simplestVersion":  "N/A. 위키 도입 시 index.md 단순 테이블 자동생성, lock 불필요.",
+                                            "severityIfIgnored":  "무시 가능."
+                                        },
+                                        {
+                                            "pattern":  "harness1 타입드 스키마 햜드오프",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "검증 통과: harness.py가 beat/scenes/violations를 untyped dict로 전달, checker.compare도 grade를 자유 문자열로(73행). 타입 없이 흐르면 신뢰등급 혼합 누수. load-bearing은 signal_grade Literal enum과 ontology/rag 타입 분리(현재 canon_block str+retrieved 병합).",
+                                            "simplestVersion":  "GraphState Pydantic 1개+signal_grade Literal enum 1개+ontology/rag 분리 필드만.",
+                                            "severityIfIgnored":  "중간. 오타 하나로 89행 hard_remaining 필터가 위반 누락해 silent ship — C4 게이트 우회."
+                                        },
+                                        {
+                                            "pattern":  "harness2 구조화 출력 디코드타임",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "부분 정당. plan_scenes(18-21행) except 폴백이 chat_json 실패를 조용히 삼킴. 충돌: extract_claims enum 강제하면 checker.py 86행 기타 escalation 무력화 — 진홍색을 붉은색으로 오정규화돼 진짜 모순 놓침. 기타 탈출구 enum 보존 필수.",
+                                            "simplestVersion":  "extract_claims 이미 json_mode(llm.py 34행). Literal enum로 올리되 기타 포함. plan_scenes except는 parse_failure 1줄 기록.",
+                                            "severityIfIgnored":  "중간. 폴백이 조용하면 분해 실패 원인 추적 불가."
+                                        },
+                                        {
+                                            "pattern":  "harness3 장면 미니루프 국소 재계획 [harness topPick]",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "검증 통과: harness.py 75-85행은 회차 전체를 통짜 draft-check-rewrite. plan_scenes로 scenes 만들지만 draft_chapter는 힌트로만 쓰고 분할 안 함=죽은 구조. 그래프 엔진은 과함(고정 리스트라 동적 플래너 cargo-cult). best_so_far monotone 가드 가치 큼.",
+                                            "simplestVersion":  "엔진 없이 장면 for 루프+장면별 best_so_far monotone 가드. parallel 금지. M2 착수.",
+                                            "severityIfIgnored":  "중간~높음(장기). 100~200화에 통짜 재생성은 토큰/지연 폭발+과교정 온상."
+                                        },
+                                        {
+                                            "pattern":  "harness4 Hibernate-wake 체크포인트",
+                                            "verdict":  "REJECT",
+                                            "reason":  "복원 부재는 사실이나 메우는 게 PoC 목적 아님. PoC는 검증기+RAG+자가교정 동작 증명 단발 스크립트. 장기 재개는 M2 Temporal 책임. JSON 체크포인트 선투자는 검증 목적 없음.",
+                                            "simplestVersion":  "N/A. M2 Temporal 실재 시 author_observed 플래그+wake 재확인 고지.",
+                                            "severityIfIgnored":  "PoC 단계 무시 가능."
+                                        },
+                                        {
+                                            "pattern":  "harness5 외부검증 eval 하네스 게이트",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "가장 정당하나 신규 아니라 영속화. run_poc.py가 90% 구현(C0-C6, 신뢰등급 분리 게이트 80/287행, silent_ship 0 게이트 193행). 한계: C3는 명확 케이스만 1.0, 경계 비게이트(164/170행), n=10 PRD 14.1 경계선. LLM-judge 게이트 미승격선 고정이 핵심.",
+                                            "simplestVersion":  "C0-C6를 eval 패키지+CI 게이트화. binding은 결정론/준결정론+silent_ship 0+clear재현성 100%만. semantic non-binding.",
+                                            "severityIfIgnored":  "중간. 단 run_poc.py가 이미 함."
+                                        },
+                                        {
+                                            "pattern":  "harness6 관측 훅 파이프라인",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "부분 정당. harness.py 78행은 rounds에 위반만 append, decision-flow 없음. plan_scenes 조용한 except(20행)가 부재 증거. 풀 OTel+Langfuse는 과설계. load-bearing은 emit 1개+failure_mode enum+JSONL append만.",
+                                            "simplestVersion":  "emit(node,event_type,payload) 1개+failure_mode enum+JSONL append. plan_scenes 폴백을 emit으로 가시화.",
+                                            "severityIfIgnored":  "중간. 조용한 정지 가능한 한 회차당 마찰 원인 사후추적 불가."
+                                        },
+                                        {
+                                            "pattern":  "harness7 LLM Wiki 아티팩트 (memory1 중복)",
+                                            "verdict":  "REJECT",
+                                            "reason":  "memory1과 사실상 동일 중복(같은 HierarchicalSummary 승격/frontmatter 엣지/비침범). 독립 도출은 정당 착시지 새 근거 아님. 토대 부재. 중복 제출 자체가 cargo-cult 신호.",
+                                            "simplestVersion":  "memory1과 동일. M3 이후 인물 페이지 1종.",
+                                            "severityIfIgnored":  "낮음(패턴 1과 동일)."
+                                        },
+                                        {
+                                            "pattern":  "validation1 결정론 Lint 룰을 데이터로 [validation topPick]",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "유일하게 PoC가 자백한 임박 부채를 정조준. run_poc.py 281행이 규칙 다수화 시 키워드 매칭 확장 불가 명시. checker.py 62행 rule_no_reawaken은 재각성+불가/1회/한번 substring이라 규칙 2개째 깨짐. 컴파일러 명명은 과함, 닫힌 enum 4종+디스패처로 한정이 정답.",
+                                            "simplestVersion":  "닫힌 룰 테이블+디스패처. predicate 4종(categorical_eq/numeric_monotone/timeline_state/worldrule_flag) enum, 그 밖 semantic 강등. 구조 리팩터라 사용자 승인 후.",
+                                            "severityIfIgnored":  "중간~높음. 규칙 수십 개 되면 substring이 if-분기 스파게티되고 결정론 코어 붕괴. M4 worldgen 전 필수."
+                                        },
+                                        {
+                                            "pattern":  "validation2 Append-only 이벤트 로그 Event Sourcing",
+                                            "verdict":  "REJECT",
+                                            "reason":  "PoC에 DB 없음 — 상태는 인메모리 dict+report.json(303행). chapter_event PG/CQRS/서명은 단발 스크립트에 과설계. harness.py 78행 rounds가 이미 이벤트 시퀀스로 충분.",
+                                            "simplestVersion":  "N/A. M2 PG 실재 시 insert-only 감사 테이블+SQL fold 뷰.",
+                                            "severityIfIgnored":  "PoC 단계 무시 가능."
+                                        },
+                                        {
+                                            "pattern":  "validation3 Saga 보상 트랜잭션",
+                                            "verdict":  "REJECT",
+                                            "reason":  "finalize 팬아웃 자체가 없음(harness.py 92행 단일 동기 rag.index_chapter). 보상할 분산 step 부재. 단일 프로세스/DB 없어 compensation 적용 대상 없음.",
+                                            "simplestVersion":  "N/A. M2 다중 컨슈머 분리 시 외부 색인 step에만 멱등키+롤백.",
+                                            "severityIfIgnored":  "PoC 단계 무시 가능."
+                                        },
+                                        {
+                                            "pattern":  "validation4 eval 게이트 (harness5 중복)",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "harness5와 본질 동일 재제출. run_poc.py가 90% 구현해 영속화. 중복이 정당성 만드는 게 아니라 끝워넣기 신호. 패턴 5와 합산 1건.",
+                                            "simplestVersion":  "harness5와 동일. run_poc.py를 CI 게이트로.",
+                                            "severityIfIgnored":  "중간(패턴 5와 동일)."
+                                        },
+                                        {
+                                            "pattern":  "validation5 Blackboard 비대칭 공유 캐논",
+                                            "verdict":  "ADAPT",
+                                            "reason":  "blackboard 명명은 인플레이션이나 지적은 harness1과 같은 실재 결함: draft_chapter(30-41행)가 canon_block str과 retrieved 문자열을 단순 병합 — ontology 상단과 rag 하단 경계가 런타임 강제 안 됨. RAG가 ground truth 슬롯에 새면 비대칭 불변식 깨짐. harness1과 같은 처방.",
+                                            "simplestVersion":  "harness1과 통합. ContextBoard Pydantic 3필드(authority/ground_truth/narrative)+단일 직렬화 함수. 범용 프레임워크 금지.",
+                                            "severityIfIgnored":  "중간. 리팩터 한 번에 등급2가 등급1 슬롯에 새는 회귀. PRD 3.1 비대칭 RAG 위반."
+                                        }
+                                    ]
+                }
+}
