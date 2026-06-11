@@ -72,11 +72,33 @@
              aria-label="세계관 완성도" title="생성 준비도"><div class="brief-meter-fill" id="brief-fill"></div></div>
         <div class="muted small" id="brief-pct">완성도 0%</div>
       </div>
-      <div id="brief-body" class="brief-body">
-        <p class="muted small">대화를 시작하면 여기에 세계가 쌓입니다 — 로그라인·배경·인물·규칙·갈등.</p>
+      <div class="brief-controls">
+        <div class="bc-field">
+          <label class="bf-label" for="ctl-genre">장르</label>
+          <input id="ctl-genre" placeholder="대화로 정하거나 직접 입력" oninput="lockParam('genre', this.value)" />
+          <div class="ctl-chips" id="ctl-genre-chips"></div>
+        </div>
+        <div class="bc-field">
+          <label class="bf-label" for="ctl-tone">분위기</label>
+          <input id="ctl-tone" placeholder="대화로 정하거나 직접 입력" oninput="lockParam('tone', this.value)" />
+          <div class="ctl-chips" id="ctl-tone-chips"></div>
+        </div>
+        <div class="bc-field">
+          <label class="bf-label" for="ctl-target">목표 회차 <span class="muted small" id="ctl-target-note">웹소설 기본 200화 · 조정 가능</span></label>
+          <input id="ctl-target" type="number" min="1" max="1000" value="200" oninput="lockParam('target_chapters', this.value)" />
+          <div class="ctl-chips" id="ctl-target-chips"></div>
+        </div>
       </div>
-      <button class="primary brief-generate" id="brief-gen" onclick="finalizeDraft()" disabled>세계 생성</button>
-      <div class="muted small brief-gen-hint" id="brief-gen-hint">조금 더 대화하면 생성할 수 있어요</div>
+      <div id="brief-body" class="brief-body"></div>
+      <button class="primary brief-generate" id="brief-gen" onclick="finalizeDraft()">세계 생성 →</button>
+      <div class="muted small brief-gen-hint" id="brief-gen-hint">원할 때 언제든 생성할 수 있어요</div>
+      <div id="brief-confirm" class="brief-confirm hidden">
+        <div class="bc-msg" id="bc-msg"></div>
+        <div class="bc-actions">
+          <button onclick="hideConfirm()">더 다듬기</button>
+          <button class="primary" onclick="finalizeGo()">그냥 진행</button>
+        </div>
+      </div>
     </aside>
   </div>
   <div id="cc-overlay" class="cc-overlay hidden">

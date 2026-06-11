@@ -55,6 +55,41 @@ def test_engine_no_llm():
     print("[OK] 결정론 코어/룰 파생 정상 (LLM 0콜)")
 
 
+def test_generate_smoke():
+    """실제 harness.generate() 1회차를 가짜 provider로 끝까지 — NameError 류 회귀를 LLM 0콜로 차단.
+    (단일패스 재설계 때 'scenes' 미정의가 파일럿 3런을 전부 0화로 만든 회귀를 이 테스트가 잡는다.)"""
+    from novelcopilot.domain.world import WorldConfig, AttributeSpec, EntitySpec, Beat
+    from novelcopilot.domain.types import ChapterStatus
+    from novelcopilot.config import get_settings
+    from novelcopilot.engine.factory import build_engine
+    from novelcopilot.llm.base import LLMProvider
+
+    class FakeProvider(LLMProvider):
+        def chat(self, *a, **k):
+            return ("가는 천천히 골목을 걸었다. 빗물이 가로등 아래로 번졌고, 거리는 조용했다.\n\n"
+                    "\"여기야.\" 가가 낮게 말했다. 나는 말없이 고개를 끄덕였다. 멀리서 발소리가 들렸다.")
+        def chat_json(self, *a, **k): return {}   # 구조적 호출(검증/추출/요약/위키)은 빈 결과 — generate 완주만 검증
+        def embed(self, texts): return [[0.1, 0.2, 0.3, 0.4] for _ in texts]
+
+    world = WorldConfig(
+        title="스모크", genre="현대 판타지",
+        attributes=[AttributeSpec(key="status", label="생사", kind="state",
+                                  states=["alive", "dead"], irreversible=["dead"], terminal=["dead"], mutable=True)],
+        entities=[EntitySpec(id="a", name="가", attrs={"status": "alive"}, voice="단답"),
+                  EntitySpec(id="b", name="나", attrs={"status": "alive"})],
+        beats=[Beat(chapter=1, title="시작", summary="가와 나가 만난다", key_events=["만남"], entities=["a", "b"])],
+    )
+    s = get_settings()
+    bundle = build_engine(world, FakeProvider(), s)
+    rec = bundle.generator.generate(
+        1, {"title": "시작", "summary": "가와 나가 만난다", "key_events": ["만남"], "entities": ["a", "b"]},
+        bundle.ontology, bundle.rag, bundle.wiki)
+    assert rec.chapter == 1, rec.chapter
+    assert rec.status in (ChapterStatus.FINALIZED, ChapterStatus.ESCALATED), rec.status
+    assert isinstance(rec.text, str)
+    print(f"[OK] 실제 1회차 생성 스모크 통과 (status={rec.status.value}, {len(rec.text)}자, LLM 0콜)")
+
+
 def test_live():
     from novelcopilot.config import get_settings
     from novelcopilot.repository import FilesystemProjectRepository
@@ -83,6 +118,7 @@ def test_live():
 if __name__ == "__main__":
     test_imports()
     test_engine_no_llm()
+    test_generate_smoke()
     if "--live" in sys.argv:
         test_live()
     print("\n스모크 완료.")

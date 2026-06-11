@@ -153,16 +153,52 @@ function renderStartExamples(){
 }
 function useExample(i){ const ta = document.querySelector("#start-form [name=seed]"); if(ta){ ta.value = START_EXAMPLES[i]; ta.focus(); } }
 
+// 작품 설정 컨트롤(작가 다이얼) — 대화와 별개로 직접 입력. 작가가 만지면 잠금(AI 갱신보다 우선).
+const CTL_PRESETS = {
+  genre: ["현대 판타지","무협","로맨스","로맨스 판타지","SF","미스터리","판타지","게임/헌터"],
+  tone: ["어둡고 긴장감","밝고 유쾌","잔잔한","느와르","서사적","코믹"],
+  target_chapters: [["단편","12"],["중편","30"],["장편","100"],["대장편","200"]],
+};
+function renderControlChips(){
+  $("#ctl-genre-chips").innerHTML = CTL_PRESETS.genre.map(g=>`<span class="ctl-chip" onclick="pickCtl('genre','${g}')">${g}</span>`).join("");
+  $("#ctl-tone-chips").innerHTML = CTL_PRESETS.tone.map(t=>`<span class="ctl-chip" onclick="pickCtl('tone','${t}')">${t}</span>`).join("");
+  $("#ctl-target-chips").innerHTML = CTL_PRESETS.target_chapters.map(([lbl,v])=>`<span class="ctl-chip" onclick="pickCtl('target_chapters','${v}')">${lbl} ~${v}화</span>`).join("");
+}
+function pickCtl(key, val){
+  const el = { genre:"#ctl-genre", tone:"#ctl-tone", target_chapters:"#ctl-target" }[key];
+  if(el) $(el).value = val;
+  lockParam(key, val);
+}
+function lockParam(key, value){     // 작가가 직접 정한 값 → 잠금(서버 turn/finalize 에 params 로 전달)
+  if(!STATE.draft) STATE.draft = { id:null, locks:{} };
+  if(!STATE.draft.locks) STATE.draft.locks = {};
+  const v = (value||"").toString().trim();
+  if(v) STATE.draft.locks[key] = (key==="target_chapters") ? parseInt(v,10)||200 : v;
+  else delete STATE.draft.locks[key];
+  // 칩 on 표시
+  const chips = { genre:"#ctl-genre-chips", tone:"#ctl-tone-chips", target_chapters:"#ctl-target-chips" }[key];
+  if(chips) document.querySelectorAll(`${chips} .ctl-chip`).forEach(c=>c.classList.toggle("on", c.textContent.includes(v) && v));
+}
+function applyBriefToControls(b){     // AI가 제안한 장르·분위기·회차를 컨트롤에 반영(작가가 잠근 건 건드리지 않음)
+  const locks = (STATE.draft && STATE.draft.locks) || {};
+  if(b.genre && !locks.genre) $("#ctl-genre").value = b.genre;
+  if(b.tone && !locks.tone) $("#ctl-tone").value = b.tone;
+  if(b.target_chapters && !locks.target_chapters) $("#ctl-target").value = b.target_chapters;
+}
+
 function startCreate(ev){
   ev.preventDefault();
   const seed = (ev.target.seed.value||"").trim(); if(!seed) return false;
-  STATE.draft = { id:null }; _prevBrief = {};
+  STATE.draft = { id:null, locks:{} }; _prevBrief = {};
   $("#view-home").classList.add("hidden");
   $("#view-create").classList.remove("hidden");
   $("#cc-log").innerHTML = ""; $("#cc-questions").innerHTML = ""; $("#cc-gaps").innerHTML = "";
-  $("#brief-body").innerHTML = ""; updateMeter(0, false);
+  hideConfirm();
+  renderControlChips();
+  $("#ctl-genre").value = ""; $("#ctl-tone").value = ""; $("#ctl-target").value = "200";
+  renderBrief({}); updateMeter(0, false);   // 빈칸 골격을 먼저 보여줌
   ccBubble("ai", "<b>같이 세계를 빚어볼게요.</b><br>주신 한 줄에서 시작해 제가 질문을 던지고, "
-    + "오른쪽 <b>브리프</b>에 차곡차곡 정리할게요. 편하게 답하시거나 아래 <b>추천 질문</b>을 눌러도 됩니다.");
+    + "오른쪽 <b>브리프</b>에 차곡차곡 정리할게요. 장르·분위기·목표 회차는 오른쪽에서 직접 정해도 돼요.");
   ccTurn(seed);
   return false;
 }
@@ -181,12 +217,13 @@ async function ccTurn(message){
   $("#cc-send").disabled = true; $("#cc-msg").disabled = true;
   $("#cc-questions").innerHTML = ""; $("#cc-gaps").innerHTML = "";
   try{
-    const r = await api.post("/api/drafts", { draft_id:STATE.draft.id, message });
+    const r = await api.post("/api/drafts", { draft_id:STATE.draft.id, message, params:STATE.draft.locks });
     STATE.draft.id = r.draft_id;
     thinking.classList.remove("cc-thinking");
     const chips = (r.changes||[]).length
       ? `<div class="wg-applied">${r.changes.map(c=>`<span class="wg-chip">＋ ${esc(c)}</span>`).join("")}</div>` : "";
     thinking.innerHTML = `${esc(r.reply||"")}${chips}`;
+    applyBriefToControls(r.brief || {});
     renderBrief(r.brief); updateMeter(r.completeness, r.ready);
     renderQuestions(r.questions||[]); renderGaps(r.gaps||[]);
     $("#cc-log").scrollTop = $("#cc-log").scrollHeight;
@@ -202,18 +239,16 @@ function renderQuestions(qs){
 function renderGaps(gs){
   $("#cc-gaps").innerHTML = (gs||[]).map(g=>`<div class="cc-gap">${esc(g)}</div>`).join("");
 }
-function updateMeter(pct, ready){
+function updateMeter(pct, ready){     // 미터는 '안내'일 뿐 — 생성 버튼은 항상 활성(부족하면 확인 게이트가 받음)
   pct = Math.max(0, Math.min(100, pct||0));
   const rdy = !!ready && pct >= 35;
   const fill = $("#brief-fill"); fill.style.width = pct + "%"; fill.classList.toggle("is-ready", rdy);
   $("#brief-pct").textContent = `완성도 ${pct}%`;
   const meter = document.querySelector(".brief-meter"); if(meter) meter.setAttribute("aria-valuenow", pct);
   const gen = $("#brief-gen"), hint = $("#brief-gen-hint");
-  gen.disabled = pct < 35;
   gen.classList.toggle("ready", rdy);
-  gen.textContent = gen.disabled ? `세계 생성 (완성도 ${pct}%)` : (rdy ? "이 세계로 시작하기 →" : "세계 생성 →");
-  hint.textContent = gen.disabled ? "핵심 설정 한두 가지만 더 정해지면 시작할 수 있어요"
-    : (rdy ? "충분히 무르익었어요 — 지금 시작해도 좋아요" : "원할 때 언제든 시작할 수 있어요");
+  gen.textContent = rdy ? "이 세계로 시작하기 →" : "세계 생성 →";
+  hint.textContent = rdy ? "충분히 무르익었어요 — 지금 시작해도 좋아요" : "원할 때 언제든 생성할 수 있어요";
 }
 let _prevBrief = {};
 function _bf(label, val){ return `<div class="bf-field"><div class="bf-label">${label}</div><div class="bf-val">${val}</div></div>`; }
@@ -225,36 +260,63 @@ function _mark(b, keys, html){
   const changed = keys.some(k=>JSON.stringify(b[k]) !== JSON.stringify(_prevBrief[k]));
   return changed ? html.replace('class="bf-field"', 'class="bf-field bf-changed"') : html;
 }
+const _EMPTY = '<span class="bf-empty">아직 안 정해졌어요</span>';
+// 빈칸 골격: 핵심 필드를 '항상' 보여줘 무엇을 채우면 되는지 한눈에. 채워지면 값, 비면 안내.
 function renderBrief(b){
-  if(!b){ return; }
+  b = b || {};
   const f = [];
   if(b.title) f.push(_mark(b, ["title"], _bf("제목", esc(b.title))));
-  if(b.logline) f.push(_mark(b, ["logline"], `<div class="bf-field"><div class="bf-label">로그라인</div><div class="bf-logline">${esc(b.logline)}</div></div>`));
-  const gt = [b.genre, b.tone].filter(Boolean).map(esc).join(" · "); if(gt) f.push(_mark(b, ["genre","tone"], _bf("장르 · 분위기", gt)));
-  if(b.premise) f.push(_mark(b, ["premise"], _bf("전제", esc(b.premise))));
-  if(b.setting) f.push(_mark(b, ["setting"], _bf("배경", esc(b.setting))));
-  if((b.characters||[]).length) f.push(_mark(b, ["characters"], `<div class="bf-field"><div class="bf-label">인물</div><div class="bf-chars">`
-    + b.characters.map(c=>`<div class="bf-char"><span class="nm">${esc(c.name||"")}</span>${c.role?`<span class="rl">${esc(c.role)}</span>`:""}${c.want?`<span class="wt">${esc(c.want)}</span>`:""}</div>`).join("")
-    + `</div></div>`));
-  if((b.world_rules||[]).length) f.push(_mark(b, ["world_rules"], _bfList("세계 규칙", b.world_rules)));
-  if((b.conflicts||[]).length) f.push(_mark(b, ["conflicts"], _bfList("핵심 갈등", b.conflicts)));
+  f.push(_mark(b, ["logline"], b.logline
+    ? `<div class="bf-field"><div class="bf-label">로그라인</div><div class="bf-logline">${esc(b.logline)}</div></div>`
+    : _bf("로그라인", _EMPTY)));
+  f.push(_mark(b, ["premise"], _bf("전제", b.premise ? esc(b.premise) : _EMPTY)));
+  f.push(_mark(b, ["setting"], _bf("배경", b.setting ? esc(b.setting) : _EMPTY)));
+  f.push(_mark(b, ["characters"], (b.characters||[]).length
+    ? `<div class="bf-field"><div class="bf-label">인물</div><div class="bf-chars">`
+      + b.characters.map(c=>`<div class="bf-char"><span class="nm">${esc(c.name||"")}</span>${c.role?`<span class="rl">${esc(c.role)}</span>`:""}${c.want?`<span class="wt">${esc(c.want)}</span>`:""}</div>`).join("")
+      + `</div></div>`
+    : _bf("인물", _EMPTY)));
+  f.push(_mark(b, ["world_rules"], (b.world_rules||[]).length ? _bfList("세계 규칙", b.world_rules) : _bf("세계 규칙", _EMPTY)));
+  f.push(_mark(b, ["conflicts"], (b.conflicts||[]).length ? _bfList("핵심 갈등", b.conflicts) : _bf("핵심 갈등", _EMPTY)));
   if((b.themes||[]).length) f.push(_mark(b, ["themes"], `<div class="bf-field"><div class="bf-label">주제</div><div class="bf-tags">`
     + b.themes.map(t=>`<span>${esc(t)}</span>`).join("") + `</div></div>`));
-  $("#brief-body").innerHTML = f.join("") || '<p class="muted small">대화를 시작하면 여기에 세계가 쌓입니다.</p>';
+  $("#brief-body").innerHTML = f.join("");
   _prevBrief = JSON.parse(JSON.stringify(b));
 }
+// 생성 직전 확인 게이트: 핵심(로그라인·인물)이 비면 "정말 진행?" → '그냥 진행'이면 default/AI가 채움.
 function finalizeDraft(){
+  if(!STATE.draft || !STATE.draft.id){ return; }
+  const b = _prevBrief || {};
+  const missing = [];
+  if(!b.logline) missing.push("로그라인");
+  if(!(b.characters||[]).length) missing.push("인물");
+  if(missing.length){
+    $("#bc-msg").innerHTML = `아직 <b>${missing.join("·")}</b>이(가) 비어 있어요. AI가 알아서 채워서 진행할까요?`;
+    $("#brief-confirm").classList.remove("hidden");
+    return;
+  }
+  finalizeGo();
+}
+function hideConfirm(){ const el = $("#brief-confirm"); if(el) el.classList.add("hidden"); }
+function finalizeGo(){
+  hideConfirm();
   if(!STATE.draft || !STATE.draft.id) return;
   const ov = $("#cc-overlay"), msg = $("#cc-overlay-msg");
   ov.classList.remove("hidden"); msg.innerHTML = "세계를 생성하는 중…";
-  const es = new EventSource(`/api/drafts/${STATE.draft.id}/finalize`);
+  const locks = (STATE.draft.locks)||{};
+  const qp = new URLSearchParams();
+  if(locks.target_chapters) qp.set("target_chapters", String(locks.target_chapters));
+  if(locks.genre) qp.set("genre", locks.genre);
+  if(locks.tone) qp.set("tone", locks.tone);
+  const es = new EventSource(`/api/drafts/${STATE.draft.id}/finalize?${qp.toString()}`);
   let done = false;
   es.addEventListener("event", e=>{ msg.innerHTML = wgStage(JSON.parse(e.data)); });
   es.addEventListener("complete", async e=>{ done = true; es.close(); ov.classList.add("hidden");
     const res = JSON.parse(e.data); STATE.draft = null; await openProject(res.id); });
-  es.addEventListener("failed", e=>{ done = true; es.close(); ov.classList.add("hidden");
-    alert("생성하지 못했습니다: " + ((JSON.parse(e.data)||{}).message||"")); });
-  es.onerror = ()=>{ if(!done){ es.close(); ov.classList.add("hidden"); alert("연결이 끊겼습니다. 다시 시도해 주세요."); } };
+  es.addEventListener("failed", e=>{ done = true; es.close();
+    msg.innerHTML = `생성하지 못했습니다: ${esc((JSON.parse(e.data)||{}).message||"")} <button class="primary" onclick="finalizeGo()">다시 시도</button>`; });
+  es.onerror = ()=>{ if(!done){ es.close();
+    msg.innerHTML = `연결이 끊겼습니다. <button class="primary" onclick="finalizeGo()">다시 시도</button> <button onclick="document.querySelector('#cc-overlay').classList.add('hidden')">닫기</button>`; } };
 }
 
 // ---------- 프로젝트 열기 ----------

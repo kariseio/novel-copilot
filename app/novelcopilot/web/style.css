@@ -248,8 +248,27 @@ label input,label textarea{color:var(--ink);font-weight:400}
   border-radius:999px;transition:width .5s cubic-bezier(.2,.8,.2,1),background .3s}
 .brief-meter-fill.is-ready{background:var(--ok)}
 .brief-pct{margin-top:.35em}
-.brief-body{max-height:54vh;overflow:auto;font-size:.88rem}
+/* 작품 설정 컨트롤(작가 다이얼 — 대화와 별개로 직접 입력) */
+.brief-controls{border:1px solid var(--line);border-radius:var(--r-ctrl);padding:.8em .85em;margin-bottom:1em;background:var(--surface-2)}
+.bc-field{margin-bottom:.7em}
+.bc-field:last-child{margin-bottom:0}
+.bc-field input{margin-top:.25em}
+.bc-field input[type=number]{width:7em}
+.ctl-chips{display:flex;flex-wrap:wrap;gap:.3em;margin-top:.4em}
+.ctl-chip{font-size:.74rem;padding:.2em .6em;border-radius:999px;background:var(--surface);
+  border:1px solid var(--line-strong);color:var(--ink-soft);cursor:pointer;transition:.12s}
+.ctl-chip:hover{border-color:var(--accent);color:var(--accent)}
+.ctl-chip.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+.brief-body{max-height:48vh;overflow:auto;font-size:.88rem}
 .brief-body:empty{display:none}
+.bf-empty{color:#b7b1a4;font-style:normal}
+
+/* 생성 확인 게이트(빈 설정으로 생성 직전) */
+.brief-confirm{margin-top:.7em;padding:.8em;border:1px solid var(--warn);background:var(--warn-soft);border-radius:var(--r-ctrl)}
+.bc-msg{font-size:.86rem;color:var(--ink-soft);line-height:1.6;margin-bottom:.7em}
+.bc-actions{display:flex;gap:.5em}
+.bc-actions button{flex:1}
 .bf-field{margin-bottom:.95em;animation:bfin .35s ease;position:relative}
 @keyframes bfin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
 .bf-changed{animation:bfflash 1.6s ease}      /* 방금 갱신된 필드만 잠깐 번짐(첫 턴 제외) */

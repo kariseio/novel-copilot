@@ -27,7 +27,7 @@ class ConceptBrief(BaseModel):
     world_rules: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
     themes: list[str] = Field(default_factory=list)
-    target_chapters: int = 12
+    target_chapters: int = 200                          # 웹소설 기본=장편 연재(상한 아님, 작가가 조정)
 
     def completeness(self) -> int:
         """0~100 — 생성 준비도(채워진 축의 가중 합). 버튼 활성·진척 표시용."""
@@ -47,4 +47,5 @@ class WorldDraft(BaseModel):
     brief: ConceptBrief = Field(default_factory=ConceptBrief)
     chat: list[dict] = Field(default_factory=list)      # [{role:'author'|'ai', text:str}]
     open_questions: list[str] = Field(default_factory=list)
+    locks: dict = Field(default_factory=dict)           # 작가가 컨트롤로 직접 정한 파라미터(장르·분위기·회차) — AI 갱신보다 우선
     created_at: str = ""
