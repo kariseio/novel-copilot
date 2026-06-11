@@ -3,36 +3,40 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>AI 웹소설 코파일럿</title>
+<title>웹소설 코파일럿</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;600;700&display=swap" />
 <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 <header class="topbar">
-  <div class="brand" onclick="goHome()">📕 <b>웹소설 코파일럿</b> <span class="tag">기계가 쓰고, 작가가 조향한다</span></div>
-  <div id="health" class="health"></div>
+  <div class="brand" onclick="goHome()">웹소설 <b>코파일럿</b> <span class="tag">AI가 쓰고, 작가가 이끕니다</span></div>
+  <div id="health" class="health" title="서버 연결 상태"></div>
 </header>
 
 <!-- ===== HOME ===== -->
 <main id="view-home" class="view">
   <section class="panel hero">
-    <h1>시드 한 줄로 세계를 만들고, 회차를 함께 써내려갑니다.</h1>
-    <p class="muted">세계관·설정·룰은 전부 LLM 이 설계(<code>worldgen</code>)하고, 회차는 일관성 엔진이 검증하며 점진 생성합니다.
-       설정이 어긋나면 엔진이 잡아 재집필하거나(자동) 작가에게 escalation 합니다.</p>
+    <h1>한 줄의 아이디어로 세계를 짓고, 회차를 함께 써내려갑니다.</h1>
+    <p class="muted">세계관·인물·설정은 AI가 설계하고, 회차는 일관성 검사를 거쳐 한 화씩 완성됩니다.
+       설정이 어긋나면 자동으로 바로잡거나, 작가의 확인이 필요할 때 알려드립니다.</p>
   </section>
 
   <div class="home-grid">
     <section class="panel">
       <h2>새 작품 시작</h2>
       <form id="seed-form" onsubmit="return createProject(event)">
-        <label>제목 <span class="muted">(선택)</span><input name="title" placeholder="비우면 AI가 작명" /></label>
+        <label>제목 <span class="muted">(선택)</span><input name="title" placeholder="비워두면 AI가 지어드려요" /></label>
         <div class="row">
           <label>장르<input name="genre" value="현대 판타지" /></label>
-          <label>톤<input name="tone" placeholder="비우면 장르에 맞게 AI가 설정" /></label>
+          <label>분위기<input name="tone" placeholder="비우면 장르에 맞게 자동" /></label>
         </div>
-        <label>전제 (한 줄)<input name="premise" placeholder="예: 죽은 자의 기억을 읽는 형사가 자신의 죽음을 목격한다" required /></label>
-        <label>주인공 힌트 <span class="muted">(선택)</span><input name="protagonist_hint" placeholder="예: 냉소적이지만 정의로운 30대 형사" /></label>
-        <label>목표 회차수<input name="target_chapters" type="number" value="12" min="3" max="40" /></label>
-        <button class="primary" type="submit">세계 생성 →</button>
+        <label>한 줄 설정<input name="premise" placeholder="예: 죽은 자의 기억을 읽는 형사가 자신의 죽음을 목격한다" required /></label>
+        <label>주인공 <span class="muted">(선택)</span><input name="protagonist_hint" placeholder="예: 냉소적이지만 정의로운 30대 형사" /></label>
+        <label>목표 회차 수<input name="target_chapters" type="number" value="12" min="3" max="40" /></label>
+        <button class="primary" type="submit">작품 세계 만들기</button>
       </form>
       <div id="create-status" class="status"></div>
     </section>
@@ -62,34 +66,35 @@
     <!-- LEFT: chapters / reader -->
     <section class="panel col-reader">
       <div class="tabs">
-        <button class="tab active" data-tab="reader" onclick="switchTab('reader')">📖 소설</button>
-        <button class="tab" data-tab="bible" onclick="switchTab('bible')">📜 설정집</button>
-        <button class="tab" data-tab="graph" onclick="switchTab('graph')">🕸 관계도</button>
-        <button class="tab" data-tab="arc" onclick="switchTab('arc')">🎬 서사</button>
-        <button class="tab" data-tab="worldgen" onclick="switchTab('worldgen')">🗪 월드빌딩</button>
+        <button class="tab active" data-tab="reader" onclick="switchTab('reader')">회차</button>
+        <button class="tab" data-tab="bible" onclick="switchTab('bible')">설정집</button>
+        <button class="tab" data-tab="graph" onclick="switchTab('graph')">인물 관계</button>
+        <button class="tab" data-tab="arc" onclick="switchTab('arc')">이야기 구조</button>
+        <button class="tab" data-tab="worldgen" onclick="switchTab('worldgen')">세계관 만들기</button>
       </div>
       <div id="tab-reader">
         <div id="chapter-nav" class="chapter-nav"></div>
-        <article id="chapter-body" class="chapter-body muted">왼쪽에서 회차를 선택하거나, 오른쪽에서 다음 회차를 생성하세요.</article>
+        <article id="chapter-body" class="chapter-body muted">왼쪽에서 회차를 고르거나, 가운데에서 다음 회차를 써보세요.</article>
       </div>
       <div id="tab-bible" class="hidden"></div>
       <div id="tab-arc" class="hidden"></div>
       <div id="tab-worldgen" class="hidden">
-        <div class="muted small" style="margin-bottom:.5em">대화로 세계관을 함께 만듭니다. AI 제안은 <b>잠정</b>(그래프 점선·설정집 미승급)으로 추가됩니다 — 그래프에서 관계를 직접 긋거나 설정집에서 ‘캐논으로 박기’ 하면 확정됩니다.</div>
+        <div class="muted small" style="margin-bottom:.7em">대화하며 세계관을 함께 넓혀갑니다. AI가 제안한 인물·설정은 <b>미확정</b> 상태로 더해지며,
+          관계도에서 직접 잇거나 설정집에서 ‘공식 설정으로 확정’하면 작품의 공식 설정이 됩니다.</div>
         <div id="wg-log" class="wg-log"></div>
         <div class="wg-input">
           <textarea id="wg-msg" rows="2" placeholder="예: 주인공의 라이벌을 만들자. 같은 스승 밑에서 배웠지만 길이 갈렸어."></textarea>
-          <button class="primary" id="wg-send" onclick="sendWorldgen()">보내기 ▶</button>
+          <button class="primary" id="wg-send" onclick="sendWorldgen()">보내기</button>
         </div>
       </div>
       <div id="tab-graph" class="hidden">
         <div class="graph-toolbar">
-          <button onclick="promptAddEntity()">＋ 노드</button>
-          <span class="graph-sel" id="graph-sel">노드 2개를 클릭해 선택 →</span>
+          <button onclick="promptAddEntity()">＋ 인물·세력 추가</button>
+          <span class="graph-sel" id="graph-sel">두 인물을 클릭해 관계를 이어보세요</span>
           <select id="rel-select" class="rel-select"></select>
-          <input id="rel-efffrom" type="number" min="1" value="1" title="effective_from(화)" class="rel-eff" />
-          <button class="primary" id="rel-add-btn" onclick="submitRelation()" disabled>관계 맺기</button>
-          <button id="rel-end-btn" onclick="endRelation()" disabled title="선택한 관계(엣지)를 현재 시점부터 종료">관계 종료</button>
+          <input id="rel-efffrom" type="number" min="1" value="1" title="몇 화부터 적용할지" class="rel-eff" />
+          <button class="primary" id="rel-add-btn" onclick="submitRelation()" disabled>관계 잇기</button>
+          <button id="rel-end-btn" onclick="endRelation()" disabled title="선택한 관계를 현재 시점부터 종료">관계 종료</button>
           <button onclick="loadGraph()" title="새로고침">⟳</button>
         </div>
         <div id="cy"></div>
@@ -98,13 +103,13 @@
       </div>
     </section>
 
-    <!-- CENTER: generation + harness -->
+    <!-- CENTER: generation -->
     <section class="panel col-engine">
-      <h3>회차 생성 <span class="muted small">에이전틱 하네스</span></h3>
-      <label class="directive-lbl">작가 지시 <span class="muted">(이번 회차부터 누적 적용 — 빨간 펜)</span>
+      <h3>회차 집필 <span class="muted small">AI 집필 · 일관성 검사</span></h3>
+      <label class="directive-lbl">작가 지시 <span class="muted">(다음 회차부터 반영됩니다)</span>
         <textarea id="directive" rows="2" placeholder="예: 강도현은 이미 죽었다(직접 등장 금지). 주인공의 트라우마를 부각."></textarea>
       </label>
-      <button id="gen-btn" class="primary" onclick="generateNext()">다음 회차 생성 ▶</button>
+      <button id="gen-btn" class="primary" onclick="generateNext()">다음 회차 쓰기</button>
       <div id="harness-log" class="harness-log"></div>
       <div id="gen-result" class="gen-result"></div>
     </section>
@@ -112,8 +117,8 @@
     <!-- RIGHT: inspectors -->
     <section class="panel col-inspect">
       <div class="tabs">
-        <button class="tab active" data-itab="onto" onclick="switchInspect('onto')">🧭 온톨로지 SSOT</button>
-        <button class="tab" data-itab="wiki" onclick="switchInspect('wiki')">🔗 LLM Wiki</button>
+        <button class="tab active" data-itab="onto" onclick="switchInspect('onto')">공식 설정</button>
+        <button class="tab" data-itab="wiki" onclick="switchInspect('wiki')">작품 노트</button>
       </div>
       <div id="inspect-onto" class="inspect-body">…</div>
       <div id="inspect-wiki" class="inspect-body hidden">…</div>
