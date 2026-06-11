@@ -30,7 +30,7 @@ const api = {
 let STATE = { project:null, activeChapter:null, generating:false };
 
 // ---------- 네비게이션 ----------
-function goHome(){ $("#view-viewer").classList.add("hidden"); $("#view-project").classList.add("hidden"); $("#view-home").classList.remove("hidden"); loadProjects(); }
+function goHome(){ $("#view-viewer").classList.add("hidden"); $("#view-create").classList.add("hidden"); $("#view-project").classList.add("hidden"); $("#view-home").classList.remove("hidden"); loadProjects(); }
 function showProject(){ $("#view-home").classList.add("hidden"); $("#view-project").classList.remove("hidden"); }
 function switchTab(t){
   document.querySelectorAll('.col-reader .tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
@@ -140,30 +140,121 @@ function wgStage(ev){
     default: return "작품 세계를 짓는 중…";
   }
 }
-function createProject(ev){
+// ---------- 새 작품: 대화로 세계관 빚기 ----------
+const START_EXAMPLES = [
+  "기억을 사고파는 도시의 기억 거래상",
+  "용을 길들이는 대가로 수명을 바치는 소녀",
+  "회귀한 망나니 황자가 제국을 개혁한다",
+  "죽은 자의 미련을 풀어주는 심부름센터",
+];
+function renderStartExamples(){
+  const el = $("#start-examples"); if(!el) return;
+  el.innerHTML = START_EXAMPLES.map((x,i)=>`<span class="ex" onclick="useExample(${i})">${esc(x)}</span>`).join("");
+}
+function useExample(i){ const ta = document.querySelector("#start-form [name=seed]"); if(ta){ ta.value = START_EXAMPLES[i]; ta.focus(); } }
+
+function startCreate(ev){
   ev.preventDefault();
-  const f = ev.target, st = $("#create-status");
-  const p = new URLSearchParams({ title:f.title.value, genre:f.genre.value, tone:f.tone.value,
-    premise:f.premise.value, protagonist_hint:f.protagonist_hint.value,
-    target_chapters:String(parseInt(f.target_chapters.value||"12",10)) });
-  const btn = f.querySelector("button"); btn.disabled = true;
-  st.innerHTML = '<span class="spin"></span> 시작하는 중…';
-  const es = new EventSource(`/api/projects/create_stream?${p.toString()}`);
-  let done = false;
-  es.addEventListener("event", e=>{ st.innerHTML = `<span class="spin"></span> ${wgStage(JSON.parse(e.data))}`; });
-  es.addEventListener("complete", async e=>{
-    done = true; es.close(); btn.disabled = false;
-    const res = JSON.parse(e.data);
-    st.innerHTML = `‘${esc(res.world.title)}’ 세계가 만들어졌어요.`;
-    await openProject(res.id);
-  });
-  es.addEventListener("failed", e=>{
-    done = true; es.close(); btn.disabled = false;
-    st.innerHTML = `생성하지 못했습니다: ${esc((JSON.parse(e.data)||{}).message||"")}`;
-  });
-  es.onerror = ()=>{ if(!done){ es.close(); btn.disabled = false;
-    st.innerHTML = "연결이 끊겼습니다. 다시 시도해 주세요."; } };
+  const seed = (ev.target.seed.value||"").trim(); if(!seed) return false;
+  STATE.draft = { id:null }; _prevBrief = {};
+  $("#view-home").classList.add("hidden");
+  $("#view-create").classList.remove("hidden");
+  $("#cc-log").innerHTML = ""; $("#cc-questions").innerHTML = ""; $("#cc-gaps").innerHTML = "";
+  $("#brief-body").innerHTML = ""; updateMeter(0, false);
+  ccBubble("ai", "<b>같이 세계를 빚어볼게요.</b><br>주신 한 줄에서 시작해 제가 질문을 던지고, "
+    + "오른쪽 <b>브리프</b>에 차곡차곡 정리할게요. 편하게 답하시거나 아래 <b>추천 질문</b>을 눌러도 됩니다.");
+  ccTurn(seed);
   return false;
+}
+function ccBubble(role, html){
+  const b = document.createElement("div");
+  b.className = `wg-bubble ${role==='author'?'author':'ai'}`;
+  b.innerHTML = html;
+  const log = $("#cc-log"); log.appendChild(b); log.scrollTop = log.scrollHeight;
+  return b;
+}
+function ccSend(){ const ta = $("#cc-msg"); const m = (ta.value||"").trim(); if(!m) return; ta.value = ""; ccTurn(m); }
+function ccAsk(btn){ ccTurn(btn.dataset.q || btn.textContent); }
+async function ccTurn(message){
+  ccBubble("author", esc(message));
+  const thinking = ccBubble("ai", '<span class="spin"></span> 구상 중…'); thinking.classList.add("cc-thinking");
+  $("#cc-send").disabled = true; $("#cc-msg").disabled = true;
+  $("#cc-questions").innerHTML = ""; $("#cc-gaps").innerHTML = "";
+  try{
+    const r = await api.post("/api/drafts", { draft_id:STATE.draft.id, message });
+    STATE.draft.id = r.draft_id;
+    thinking.classList.remove("cc-thinking");
+    const chips = (r.changes||[]).length
+      ? `<div class="wg-applied">${r.changes.map(c=>`<span class="wg-chip">＋ ${esc(c)}</span>`).join("")}</div>` : "";
+    thinking.innerHTML = `${esc(r.reply||"")}${chips}`;
+    renderBrief(r.brief); updateMeter(r.completeness, r.ready);
+    renderQuestions(r.questions||[]); renderGaps(r.gaps||[]);
+    $("#cc-log").scrollTop = $("#cc-log").scrollHeight;
+  }catch(e){ thinking.innerHTML = `응답을 받지 못했어요: ${esc(e.message)}`; }
+  finally{ $("#cc-send").disabled = false; $("#cc-msg").disabled = false; $("#cc-msg").focus(); }
+}
+function renderQuestions(qs){
+  const box = $("#cc-questions");
+  if(!qs || !qs.length){ box.innerHTML = ""; return; }
+  box.innerHTML = '<div class="cc-q-lbl">이어서 정해볼까요 — 눌러서 답하기</div>'
+    + qs.map(q=>`<button class="cc-q" data-q="${esc(q)}" onclick="ccAsk(this)">${esc(q)}</button>`).join("");
+}
+function renderGaps(gs){
+  $("#cc-gaps").innerHTML = (gs||[]).map(g=>`<div class="cc-gap">${esc(g)}</div>`).join("");
+}
+function updateMeter(pct, ready){
+  pct = Math.max(0, Math.min(100, pct||0));
+  const rdy = !!ready && pct >= 35;
+  const fill = $("#brief-fill"); fill.style.width = pct + "%"; fill.classList.toggle("is-ready", rdy);
+  $("#brief-pct").textContent = `완성도 ${pct}%`;
+  const meter = document.querySelector(".brief-meter"); if(meter) meter.setAttribute("aria-valuenow", pct);
+  const gen = $("#brief-gen"), hint = $("#brief-gen-hint");
+  gen.disabled = pct < 35;
+  gen.classList.toggle("ready", rdy);
+  gen.textContent = gen.disabled ? `세계 생성 (완성도 ${pct}%)` : (rdy ? "이 세계로 시작하기 →" : "세계 생성 →");
+  hint.textContent = gen.disabled ? "핵심 설정 한두 가지만 더 정해지면 시작할 수 있어요"
+    : (rdy ? "충분히 무르익었어요 — 지금 시작해도 좋아요" : "원할 때 언제든 시작할 수 있어요");
+}
+let _prevBrief = {};
+function _bf(label, val){ return `<div class="bf-field"><div class="bf-label">${label}</div><div class="bf-val">${val}</div></div>`; }
+function _bfList(label, arr){ return `<div class="bf-field"><div class="bf-label">${label}</div><ul class="bf-list">`
+  + arr.map(x=>`<li>${esc(x)}</li>`).join("") + `</ul></div>`; }
+// 첫 턴(이전 브리프 없음)엔 하이라이트 안 함 — 모든 필드가 깜빡이는 노이즈 방지. 이후엔 바뀐 필드만.
+function _mark(b, keys, html){
+  if(!Object.keys(_prevBrief).length) return html;
+  const changed = keys.some(k=>JSON.stringify(b[k]) !== JSON.stringify(_prevBrief[k]));
+  return changed ? html.replace('class="bf-field"', 'class="bf-field bf-changed"') : html;
+}
+function renderBrief(b){
+  if(!b){ return; }
+  const f = [];
+  if(b.title) f.push(_mark(b, ["title"], _bf("제목", esc(b.title))));
+  if(b.logline) f.push(_mark(b, ["logline"], `<div class="bf-field"><div class="bf-label">로그라인</div><div class="bf-logline">${esc(b.logline)}</div></div>`));
+  const gt = [b.genre, b.tone].filter(Boolean).map(esc).join(" · "); if(gt) f.push(_mark(b, ["genre","tone"], _bf("장르 · 분위기", gt)));
+  if(b.premise) f.push(_mark(b, ["premise"], _bf("전제", esc(b.premise))));
+  if(b.setting) f.push(_mark(b, ["setting"], _bf("배경", esc(b.setting))));
+  if((b.characters||[]).length) f.push(_mark(b, ["characters"], `<div class="bf-field"><div class="bf-label">인물</div><div class="bf-chars">`
+    + b.characters.map(c=>`<div class="bf-char"><span class="nm">${esc(c.name||"")}</span>${c.role?`<span class="rl">${esc(c.role)}</span>`:""}${c.want?`<span class="wt">${esc(c.want)}</span>`:""}</div>`).join("")
+    + `</div></div>`));
+  if((b.world_rules||[]).length) f.push(_mark(b, ["world_rules"], _bfList("세계 규칙", b.world_rules)));
+  if((b.conflicts||[]).length) f.push(_mark(b, ["conflicts"], _bfList("핵심 갈등", b.conflicts)));
+  if((b.themes||[]).length) f.push(_mark(b, ["themes"], `<div class="bf-field"><div class="bf-label">주제</div><div class="bf-tags">`
+    + b.themes.map(t=>`<span>${esc(t)}</span>`).join("") + `</div></div>`));
+  $("#brief-body").innerHTML = f.join("") || '<p class="muted small">대화를 시작하면 여기에 세계가 쌓입니다.</p>';
+  _prevBrief = JSON.parse(JSON.stringify(b));
+}
+function finalizeDraft(){
+  if(!STATE.draft || !STATE.draft.id) return;
+  const ov = $("#cc-overlay"), msg = $("#cc-overlay-msg");
+  ov.classList.remove("hidden"); msg.innerHTML = "세계를 생성하는 중…";
+  const es = new EventSource(`/api/drafts/${STATE.draft.id}/finalize`);
+  let done = false;
+  es.addEventListener("event", e=>{ msg.innerHTML = wgStage(JSON.parse(e.data)); });
+  es.addEventListener("complete", async e=>{ done = true; es.close(); ov.classList.add("hidden");
+    const res = JSON.parse(e.data); STATE.draft = null; await openProject(res.id); });
+  es.addEventListener("failed", e=>{ done = true; es.close(); ov.classList.add("hidden");
+    alert("생성하지 못했습니다: " + ((JSON.parse(e.data)||{}).message||"")); });
+  es.onerror = ()=>{ if(!done){ es.close(); ov.classList.add("hidden"); alert("연결이 끊겼습니다. 다시 시도해 주세요."); } };
 }
 
 // ---------- 프로젝트 열기 ----------
@@ -570,4 +661,4 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,m=>({"&":"&amp;"
 async function health(){ try{ const h=await api.get("/api/health"); const el=$("#health");
   el.textContent="연결됨"; el.title=`${h.provider} · ${h.model}`; }catch(e){ const el=$("#health"); if(el) el.textContent="연결 끊김"; } }
 
-health(); loadProjects();
+health(); loadProjects(); renderStartExamples();

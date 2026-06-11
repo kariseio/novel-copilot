@@ -32,6 +32,65 @@ def create_project(req: CreateProjectRequest, request: Request):
             "created_at": state.created_at}
 
 
+@router.post("/drafts")
+def draft_turn(request: Request, body: dict):
+    """컨셉 대화 한 턴 — 첫 메시지면 새 드래프트 시작. body: {draft_id?, message}."""
+    svc = _svc(request)
+    did = body.get("draft_id") or svc.start_draft().id
+    return svc.draft_turn(did, (body.get("message") or "").strip())
+
+
+@router.get("/drafts/{did}")
+def get_draft(did: str, request: Request):
+    d = _svc(request).get_draft(did)
+    if not d:
+        raise HTTPException(404, "draft not found")
+    return {"draft_id": d.id, "brief": d.brief.model_dump(), "chat": d.chat,
+            "questions": d.open_questions, "completeness": d.brief.completeness()}
+
+
+@router.get("/drafts/{did}/finalize")
+async def finalize_draft(did: str, request: Request):
+    """SSE: 누적 브리프로 세계 생성(세계관→이야기 구조→설정집) 실시간 진행."""
+    from ..engine.observability import EventBus
+    svc = _svc(request)
+    if not svc.get_draft(did):
+        raise HTTPException(404, "draft not found")
+    loop = asyncio.get_event_loop()
+    q: "queue.Queue" = queue.Queue()
+    bus = EventBus()
+    unsub = bus.subscribe(lambda e: q.put(("event", e)))
+
+    def work():
+        try:
+            state, usage = svc.finalize_draft(did, bus=bus)
+            q.put(("complete", {"id": state.id, "world": state.world.model_dump(),
+                                "usage": usage, "created_at": state.created_at}))
+        except Exception as e:  # noqa
+            q.put(("failed", {"message": str(e)}))
+
+    async def stream():
+        fut = loop.run_in_executor(None, work)
+        try:
+            yield _sse("start", {})
+            while True:
+                try:
+                    kind, data = q.get_nowait()
+                except queue.Empty:
+                    if fut.done() and q.empty():
+                        break
+                    await asyncio.sleep(0.12)
+                    continue
+                yield _sse(kind, data)
+                if kind in ("complete", "failed"):
+                    break
+        finally:
+            unsub()
+
+    return StreamingResponse(stream(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @router.get("/projects/create_stream")
 async def create_stream(request: Request, genre: str = "", premise: str = "", title: str = "",
                         tone: str = "", protagonist_hint: str = "", target_chapters: int = 12):

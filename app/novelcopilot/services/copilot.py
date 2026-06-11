@@ -12,13 +12,14 @@ from ..config import Settings
 import re
 
 from ..domain.project import ProjectSeed, ProjectState
+from ..domain.draft import WorldDraft, ConceptBrief
 from ..domain.world import EntitySpec, WorldRuleSpec
 from ..domain.types import AuthorDirective, ChapterStatus, WikiPage, RelationEdge, RetrievedItem, RuleSpec, SignalGrade
 from ..domain.bible import StoryBible, BibleEntry, CATEGORY_LABEL, template_for, normalize_category
 from ..llm.base import LLMProvider
 from ..llm.factory import create_provider
 from ..repository.base import ProjectRepository
-from ..worldgen import WorldGenerator, BeatPlanner, ArcPlanner, BibleGenerator, WorldgenChat
+from ..worldgen import WorldGenerator, BeatPlanner, ArcPlanner, BibleGenerator, WorldgenChat, ConceptChat
 from ..engine.drift import episode_drift_signals
 from ..engine.bible_compiler import bible_digest, entry_to_world_rule, migrate_world_to_bible
 from .session import SessionManager
@@ -135,12 +136,71 @@ class CopilotService:
         self.sessions = SessionManager(settings)
         self._wg_provider: LLMProvider | None = None
         self._esc: dict = {}          # (pid,chapter)→연속 ESCALATED 횟수(무한 갇힘 경보용, 휘발)
+        self._drafts: dict = {}       # 생성 전 컨셉 드래프트(휘발 — finalize 시 ProjectState 로 승격)
 
     @property
     def wg_provider(self) -> LLMProvider:
         if self._wg_provider is None:
             self._wg_provider = create_provider(self.settings)
         return self._wg_provider
+
+    # ---- 컨셉 드래프트(대화로 빚는 세계관) ----
+    def start_draft(self) -> WorldDraft:
+        d = WorldDraft(id=uuid.uuid4().hex[:12], created_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+        self._drafts[d.id] = d
+        return d
+
+    def get_draft(self, did: str) -> "WorldDraft | None":
+        return self._drafts.get(did)
+
+    def draft_turn(self, did: str, message: str) -> dict:
+        """대화 한 턴 — 브리프 갱신 + 변경점·추천 질문·되묻기 반환. (드래프트 없으면 새로 시작)"""
+        d = self._drafts.get(did)
+        if d is None:
+            d = self.start_draft()
+        d.chat.append({"role": "author", "text": message})
+        r = ConceptChat(self.wg_provider).turn(d.brief, d.chat, message)
+        d.brief = ConceptBrief.model_validate(r["brief"])
+        d.open_questions = r.get("questions", [])
+        d.chat.append({"role": "ai", "text": r.get("reply", "")})
+        r["draft_id"] = d.id
+        r["completeness"] = d.brief.completeness()
+        return r
+
+    def _brief_to_seed(self, brief: ConceptBrief) -> ProjectSeed:
+        """누적 브리프 → 풍부한 시드. premise 에 설계서 전체를 구조화해 담아 worldgen 품질을 끌어올린다."""
+        parts: list[str] = []
+        if brief.logline:
+            parts.append(brief.logline)
+        if brief.premise:
+            parts.append(brief.premise)
+        if brief.setting:
+            parts.append(f"[배경] {brief.setting}")
+        if brief.characters:
+            parts.append("[주요 인물] " + " / ".join(
+                f"{c.name}({c.role}): {c.want}".strip(" :()") for c in brief.characters if c.name))
+        if brief.world_rules:
+            parts.append("[세계 규칙] " + " / ".join(brief.world_rules))
+        if brief.conflicts:
+            parts.append("[핵심 갈등] " + " / ".join(brief.conflicts))
+        if brief.themes:
+            parts.append("[주제] " + ", ".join(brief.themes))
+        hint = next((f"{c.name}: {c.want}".strip(" :") for c in brief.characters
+                     if c.role and ("주인공" in c.role or "주연" in c.role)), "")
+        return ProjectSeed(
+            title=brief.title, genre=brief.genre or "현대 판타지", tone=brief.tone,
+            premise="\n".join(parts)[:4000] or brief.logline or brief.title,
+            protagonist_hint=hint or (brief.characters[0].name if brief.characters else ""),
+            target_chapters=brief.target_chapters or 12)
+
+    def finalize_draft(self, did: str, bus=None) -> tuple[ProjectState, dict]:
+        """드래프트 → 세계 생성. 누적 브리프를 시드로 기존 파이프라인 실행 후 드래프트 폐기."""
+        d = self._drafts.get(did)
+        if d is None:
+            raise ValueError("draft not found")
+        state, delta = self.create_project(self._brief_to_seed(d.brief), bus=bus)
+        self._drafts.pop(did, None)
+        return state, delta
 
     # ---- 프로젝트 ----
     def create_project(self, seed: ProjectSeed, bus=None) -> tuple[ProjectState, dict]:

@@ -212,6 +212,87 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .inspect-body::-webkit-scrollbar-thumb,.chapter-body::-webkit-scrollbar-thumb,
 .harness-log::-webkit-scrollbar-thumb,.wg-log::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:6px}
 
+/* ---- 새 작품 시작(홈) ---- */
+.start-panel textarea{min-height:4.5em;font-family:var(--font-serif);font-size:1rem;line-height:1.6}
+.start-examples{display:flex;flex-wrap:wrap;gap:.4em;margin-top:.7em}
+.start-examples .ex{font-size:.78rem;padding:.35em .7em;border-radius:999px;background:var(--surface-2);
+  border:1px solid var(--line);color:var(--ink-soft);cursor:pointer}
+.start-examples .ex:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ---- 세계관 빚기(대화) ---- */
+.create-head{display:flex;justify-content:space-between;align-items:center;gap:1em}
+.create-head h2{font-family:var(--font-serif);font-size:1.4rem;margin-bottom:.15em}
+.create-grid{display:grid;grid-template-columns:1.35fr .9fr;gap:1.1em;align-items:start}
+.col-convo{display:flex;flex-direction:column;min-height:68vh}
+.create-log{flex:1;max-height:none;min-height:46vh}
+.cc-thinking{opacity:.7}
+.cc-gaps{display:flex;flex-direction:column;gap:.4em;margin:.2em 0 .5em}
+.cc-gap{font-size:.82rem;color:var(--ink-soft);background:var(--surface-2);border:1px solid var(--line);
+  border-radius:9px;padding:.45em .7em;display:flex;gap:.45em}
+.cc-gap::before{content:"💡";filter:grayscale(.15)}
+.cc-questions{display:flex;flex-wrap:wrap;gap:.45em;margin-bottom:.7em}
+.cc-q-lbl{flex-basis:100%;font-size:.72rem;font-weight:700;letter-spacing:.04em;
+  color:var(--muted);text-transform:uppercase;margin-bottom:.1em}
+.cc-q{font-size:.82rem;text-align:left;padding:.5em .8em;border-radius:12px;background:var(--accent-soft);
+  border:1px solid transparent;color:var(--accent);font-weight:500;line-height:1.45;cursor:pointer;transition:.15s ease}
+.cc-q:hover{background:#fff;border-color:var(--accent);transform:translateY(-1px);box-shadow:0 1px 3px rgba(28,27,25,.06)}
+.cc-q::before{content:"＋ ";opacity:.7;font-weight:700}
+.cc-input-hint{font-size:.76rem;margin-top:.4em;text-align:right}
+
+/* 브리프 패널 */
+.col-brief{position:sticky;top:5.2em}
+.brief-head{margin-bottom:1em}
+.brief-head h3{font-family:var(--font-serif);font-size:1.1rem;margin-bottom:.5em}
+.brief-meter{height:7px;background:var(--surface-2);border-radius:999px;overflow:hidden;border:1px solid var(--line)}
+.brief-meter-fill{height:100%;width:0;background:var(--accent);
+  border-radius:999px;transition:width .5s cubic-bezier(.2,.8,.2,1),background .3s}
+.brief-meter-fill.is-ready{background:var(--ok)}
+.brief-pct{margin-top:.35em}
+.brief-body{max-height:54vh;overflow:auto;font-size:.88rem}
+.brief-body:empty{display:none}
+.bf-field{margin-bottom:.95em;animation:bfin .35s ease;position:relative}
+@keyframes bfin{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.bf-changed{animation:bfflash 1.6s ease}      /* 방금 갱신된 필드만 잠깐 번짐(첫 턴 제외) */
+@keyframes bfflash{0%{background:var(--accent-soft)}100%{background:transparent}}
+.bf-changed::after{content:"방금 추가";position:absolute;top:0;right:0;font-size:.62rem;color:var(--accent);
+  font-weight:700;letter-spacing:.03em;animation:bffade 2.4s ease forwards}
+@keyframes bffade{0%,55%{opacity:.9}100%{opacity:0}}
+.bf-label{font-size:.72rem;color:var(--ink-soft);text-transform:uppercase;letter-spacing:.05em;
+  font-weight:700;margin-bottom:.25em}
+.bf-val{font-size:.9rem;color:var(--ink);line-height:1.6}
+.bf-logline{font-family:var(--font-serif);font-size:1.05rem;line-height:1.55;color:var(--ink);
+  padding:.5em .7em;background:var(--surface-2);border-radius:9px;border-left:3px solid var(--accent)}
+.bf-chars .bf-char{padding:.4em .6em;border:1px solid var(--line);border-radius:9px;margin-bottom:.4em;background:var(--surface)}
+.bf-char .nm{font-weight:600} .bf-char .rl{font-size:.74rem;color:var(--accent);margin-left:.4em}
+.bf-char .wt{display:block;font-size:.82rem;color:var(--ink-soft);margin-top:.15em}
+.bf-list{list-style:none;padding:0;margin:0}
+.bf-list li{font-size:.85rem;color:var(--ink-soft);padding:.18em 0 .18em 1em;position:relative;line-height:1.5}
+.bf-list li::before{content:"·";position:absolute;left:.2em;color:var(--accent);font-weight:700}
+.bf-tags{display:flex;flex-wrap:wrap;gap:.3em}
+.bf-tags span{font-size:.76rem;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:999px;padding:.12em .55em;color:var(--ink-soft)}
+.brief-generate{width:100%;margin-top:1.2em;padding:.8em;font-size:1rem}
+.brief-generate:disabled{opacity:.45;cursor:not-allowed;box-shadow:none}
+.brief-generate.ready{background:var(--ok);border-color:var(--ok);animation:readypulse 2s ease-in-out 1}
+.brief-generate.ready:hover{background:#2f6647}
+@keyframes readypulse{0%,100%{box-shadow:0 0 0 3px var(--ok-soft)}50%{box-shadow:0 0 0 6px var(--ok-soft)}}
+.brief-gen-hint{text-align:center;margin-top:.45em}
+
+/* 생성 오버레이 */
+.cc-overlay{position:fixed;inset:0;z-index:60;background:rgba(250,248,243,.82);backdrop-filter:blur(3px);
+  display:flex;align-items:center;justify-content:center}
+.cc-overlay-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);
+  box-shadow:var(--shadow);padding:2em 2.4em;text-align:center;max-width:30em;font-size:1rem;color:var(--ink)}
+.cc-overlay-card .spin{width:22px;height:22px;border-width:3px;display:block;margin:0 auto 1em}
+#cc-overlay-msg{font-family:var(--font-serif);line-height:1.6}
+@media(max-width:1000px){
+  .create-grid{display:flex;flex-direction:column}
+  .col-brief{position:static;order:-1}             /* 좁은 화면: '쌓이는 세계'를 대화 위로 */
+  .col-convo{min-height:auto}
+  .create-log{min-height:34vh;max-height:46vh}
+  .brief-generate{position:sticky;bottom:.6em;z-index:5;box-shadow:0 -2px 12px rgba(28,27,25,.08)}
+}
+
 /* ---- 뷰어(몰입형 읽기) — 웹소설 플랫폼처럼 ---- */
 .viewer{position:fixed;inset:0;z-index:50;background:var(--paper);overflow-y:auto;
   display:flex;flex-direction:column;align-items:center}

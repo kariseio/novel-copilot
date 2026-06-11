@@ -25,26 +25,65 @@
   </section>
 
   <div class="home-grid">
-    <section class="panel">
+    <section class="panel start-panel">
       <h2>새 작품 시작</h2>
-      <form id="seed-form" onsubmit="return createProject(event)">
-        <label>제목 <span class="muted">(선택)</span><input name="title" placeholder="비워두면 AI가 지어드려요" /></label>
-        <div class="row">
-          <label>장르<input name="genre" value="현대 판타지" /></label>
-          <label>분위기<input name="tone" placeholder="비우면 장르에 맞게 자동" /></label>
-        </div>
-        <label>한 줄 설정<input name="premise" placeholder="예: 죽은 자의 기억을 읽는 형사가 자신의 죽음을 목격한다" required /></label>
-        <label>주인공 <span class="muted">(선택)</span><input name="protagonist_hint" placeholder="예: 냉소적이지만 정의로운 30대 형사" /></label>
-        <label>목표 회차 수<input name="target_chapters" type="number" value="12" min="3" max="40" /></label>
-        <button class="primary" type="submit">작품 세계 만들기</button>
+      <p class="muted small">한 문장이어도 좋아요. AI와 <b>대화하며</b> 세계관을 함께 키워갑니다 — 준비되면 ‘세계 생성’.</p>
+      <form id="start-form" onsubmit="return startCreate(event)">
+        <label>어떤 이야기를 만들고 싶으세요?
+          <textarea name="seed" rows="3" placeholder="예: 기억을 사고파는 도시에서, 자기 기억이 위조된 걸 깨달은 기억 거래상 이야기" required></textarea></label>
+        <button class="primary" type="submit">AI와 이야기 나누기 →</button>
       </form>
-      <div id="create-status" class="status"></div>
+      <div class="start-examples" id="start-examples"></div>
+      <div id="start-status" class="status"></div>
     </section>
 
     <section class="panel">
       <h2>내 작품</h2>
       <div id="project-list" class="project-list">불러오는 중…</div>
     </section>
+  </div>
+</main>
+
+<!-- ===== CREATE (대화로 세계관 빚기) ===== -->
+<main id="view-create" class="view hidden">
+  <div class="create-head panel">
+    <div>
+      <h2>세계관 빚기</h2>
+      <div class="muted small">답하다 보면 오른쪽 <b>브리프</b>가 채워집니다. 완성도가 차오르면 <b>세계 생성</b>을 눌러 첫 회차로 갑니다.</div>
+    </div>
+    <button onclick="goHome()">← 목록</button>
+  </div>
+  <div class="create-grid">
+    <section class="panel col-convo">
+      <div id="cc-log" class="wg-log create-log"></div>
+      <div id="cc-gaps" class="cc-gaps"></div>
+      <div id="cc-questions" class="cc-questions"></div>
+      <div class="wg-input">
+        <textarea id="cc-msg" rows="2" placeholder="설정을 더하거나, 위 추천 질문에 답해보세요…"
+                  onkeydown="if(event.key==='Enter'&&(event.metaKey||event.ctrlKey)){event.preventDefault();ccSend();}"></textarea>
+        <button class="primary" id="cc-send" onclick="ccSend()">보내기</button>
+      </div>
+      <div class="cc-input-hint muted">Ctrl/⌘ + Enter 로 전송 · 길게 안 써도 돼요, 키워드만 던져도 제가 살을 붙입니다.</div>
+    </section>
+    <aside class="panel col-brief">
+      <div class="brief-head">
+        <h3>세계관 브리프</h3>
+        <div class="brief-meter" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"
+             aria-label="세계관 완성도" title="생성 준비도"><div class="brief-meter-fill" id="brief-fill"></div></div>
+        <div class="muted small" id="brief-pct">완성도 0%</div>
+      </div>
+      <div id="brief-body" class="brief-body">
+        <p class="muted small">대화를 시작하면 여기에 세계가 쌓입니다 — 로그라인·배경·인물·규칙·갈등.</p>
+      </div>
+      <button class="primary brief-generate" id="brief-gen" onclick="finalizeDraft()" disabled>세계 생성</button>
+      <div class="muted small brief-gen-hint" id="brief-gen-hint">조금 더 대화하면 생성할 수 있어요</div>
+    </aside>
+  </div>
+  <div id="cc-overlay" class="cc-overlay hidden">
+    <div class="cc-overlay-card">
+      <div class="spin"></div>
+      <div id="cc-overlay-msg">세계를 생성하는 중…</div>
+    </div>
   </div>
 </main>
 
