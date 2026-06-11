@@ -67,7 +67,10 @@ class EntitySpec(BaseModel):
     aliases: list[str] = Field(default_factory=list)
     attrs: dict[str, object] = Field(default_factory=dict)   # key→value (AttributeSpec.key)
     base_status: str = "alive"
-    voice: str = ""                           # 말투 시그니처(어미·습관구·금지어 — 보이스 분화, draft 주입)
+    voice: str = ""                           # (레거시) 말투 지정 — 신규 작품은 비움: 말투는 설정+실측 대사 인용에서 창발
+    profile: str = ""                         # 인물 설계서(배경·성격·욕망·관계 — 캐스트 플랜 레이어 산출물)
+    debut_episode: str = ""                   # 등장 계획(에피소드 id — 아크 설계가 결정, 비트가 데뷔를 집행)
+    introduced: bool = False                  # 본문 첫 등장 완료 여부(FINALIZED 시 코드가 마킹 — 데뷔 앵커 의무의 근거)
     provisional: bool = False                 # 동적 업데이트로 자동 커밋된 신규 인물 표식
 
 

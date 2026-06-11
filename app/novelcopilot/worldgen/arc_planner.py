@@ -8,7 +8,9 @@
 from __future__ import annotations
 import json
 
-from ..domain.world import WorldConfig, Beat
+import re as _re
+
+from ..domain.world import WorldConfig, Beat, EntitySpec
 from ..domain.narrative import NarrativeSpine, Arc, Episode, EndingSpec, NarrativeProgress
 from ..llm.base import LLMProvider
 
@@ -30,10 +32,14 @@ class ArcPlanner:
                f"아크 {n_arcs}개(각 goal/central_conflict/turning_point). **첫 아크만** 에피소드 3~4개로 분해하고 "
                f"나머지 아크는 episodes 를 빈 배열로 둬라(진행하며 생성). 각 에피소드: title/premise/climax/"
                f"required_events(통제 태그)/required_cast(인물 id)/plants/payoffs/target_chapters(3~8).\n"
+               "첫 아크의 new_cast: 이 아크에 필요한 조연·적대·조력 인물 0~4명을 '등장 전에 설계'하라 — "
+               "name/profile(배경·성격·욕망·기존 인물과의 관계 — 말투 지정 금지)/debut_episode(데뷔 에피소드 순번 1..n). "
+               "이야기가 요구하는 인물만(억지 채우기 금지).\n"
                '{"ending":{"central_question":"","ending":"","thematic_payoff":""},'
                '"arcs":[{"title":"","goal":"","central_conflict":"","turning_point":"",'
                '"episodes":[{"title":"","premise":"","climax":"","required_events":[],"required_cast":[],'
-               '"plants":[],"payoffs":[],"target_chapters":4}]}]}')
+               '"plants":[],"payoffs":[],"target_chapters":4}],'
+               '"new_cast":[{"name":"","profile":"","debut_episode":1}]}]}')
         try:
             raw = self.provider.chat_json([{"role": "system", "content": sys},
                                            {"role": "user", "content": usr}],
@@ -46,8 +52,54 @@ class ArcPlanner:
                       central_conflict=a.get("central_conflict", ""), turning_point=a.get("turning_point", ""))
             for ei, e in enumerate(a.get("episodes", []) or [], start=1):
                 arc.episodes.append(self._mk_episode(arc.arc_id, ei, e, {c["id"] for c in chars}))
+            self._register_cast(world, arc, a.get("new_cast") or [])   # 캐스트 플랜 레이어: 등장 전 설계 완비
             spine.arcs.append(arc)
+        self._rebalance(spine, target_chapters)   # 예산 정합: 프롬프트 1줄 지시가 아니라 산술(결정론)
         return spine
+
+    @staticmethod
+    def _rebalance(spine: NarrativeSpine, target: int) -> None:
+        """분해된 에피소드 예산 합을 '아크 몫'(목표/아크수)에 산술 정합 — 회차수 권위 3개의 무조정 공존 해소.
+        몫보다 에피소드가 많아 최소치(2화)로도 초과하면 에피소드 수 자체를 줄인다(정합 불가능 상태 제거)."""
+        if not target or not spine.arcs:
+            return
+        share = max(2, round(target / max(1, len(spine.arcs))))
+        for arc in spine.arcs:
+            if not arc.episodes:
+                continue
+            while len(arc.episodes) > 1 and len(arc.episodes) * 2 > share:   # 최소 2화×개수 > 몫 → 병합(축소)
+                arc.episodes.pop()
+            total = sum(e.target_chapters for e in arc.episodes)
+            if total <= 0:
+                continue
+            for e in arc.episodes:
+                e.target_chapters = max(2, min(10, round(e.target_chapters * share / total)))
+            diff = share - sum(e.target_chapters for e in arc.episodes)
+            e_last = arc.episodes[-1]
+            e_last.target_chapters = max(2, min(12, e_last.target_chapters + diff))
+
+    @staticmethod
+    def _register_cast(world: WorldConfig, arc, cast: list) -> None:
+        """아크 설계가 낳은 신규 인물을 '등장 전에' 등록(잠정) — 즉흥 발명 금지의 집행 지점.
+        말투는 받지 않는다(설정에서 창발). 데뷔는 에피소드 id 로 박아 비트가 집행."""
+        existing = {e.id for e in world.entities} | {e.name for e in world.entities}
+        for c in cast[:5]:
+            name = (c.get("name") or "").strip()
+            if not name or name in existing:
+                continue
+            base = _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or f"cast_{len(world.entities)}"
+            sid, i = base, 2
+            while sid in {e.id for e in world.entities}:
+                sid, i = f"{base}_{i}", i + 1
+            try:
+                ep_no = max(1, min(len(arc.episodes) or 1, int(c.get("debut_episode") or 1)))
+            except (ValueError, TypeError):
+                ep_no = 1
+            world.entities.append(EntitySpec(
+                id=sid, name=name, etype="character", attrs={},
+                profile=(c.get("profile") or "").strip(),
+                debut_episode=f"{arc.arc_id}_ep{ep_no}", provisional=True))
+            existing |= {sid, name}
 
     def _mk_episode(self, arc_id, order, e, valid_ids) -> Episode:
         cast = [c for c in (e.get("required_cast") or []) if c in valid_ids]
@@ -62,14 +114,21 @@ class ArcPlanner:
                        target_chapters=max(3, min(10, tgt)))
 
     # ---- 2) lazy 에피소드 생성(아크에 에피소드가 없을 때) ----
-    def _gen_episodes(self, world: WorldConfig, arc: Arc, recent: list[str]) -> None:
+    def _gen_episodes(self, world: WorldConfig, arc: Arc, recent: list[str],
+                      remaining: int | None = None) -> None:
         chars = [{"id": e.id, "name": e.name} for e in world.entities if e.etype == "character"]
         ending = world.spine.ending.ending if world.spine and world.spine.ending else ""
-        sys = ("아크를 에피소드(3~4개)로 분해하라. 각 에피소드는 절정(climax)을 먼저 정하고 수렴하게. 엔딩을 향해 전진. JSON만.")
-        usr = (f"[엔딩]{ending}\n[아크]{arc.title} / 목표:{arc.goal} / 갈등:{arc.central_conflict} / 전환:{arc.turning_point}\n"
-               f"[인물]{json.dumps(chars, ensure_ascii=False)}\n[최근 줄거리]\n" + "\n".join(recent[-3:]) +
+        sys = ("아크를 에피소드(3~4개)로 분해하라. 각 에피소드는 절정(climax)을 먼저 정하고 수렴하게. 엔딩을 향해 전진. "
+               "이 아크에 필요한 신규 인물(조연·적대) 0~4명은 new_cast 로 '등장 전에 설계'하라 — "
+               "지금까지의 이야기 상태에서 태어나야 한다. profile=배경·성격·욕망·기존 인물과의 관계(말투 지정 금지). JSON만.")
+        budget_line = f"[남은 회차 예산]{remaining}화 — 에피소드 target_chapters 합이 이 예산에 맞게.\n" if remaining else ""
+        usr = (budget_line +
+               f"[엔딩]{ending}\n[아크]{arc.title} / 목표:{arc.goal} / 갈등:{arc.central_conflict} / 전환:{arc.turning_point}\n"
+               f"[인물]{json.dumps(chars, ensure_ascii=False)}\n[최근 줄거리]\n" + "\n".join(recent) +
                '\n{"episodes":[{"title":"","premise":"","climax":"","required_events":[],"required_cast":[],'
-               '"plants":[],"payoffs":[],"target_chapters":4}]}')
+               '"plants":[],"payoffs":[],"target_chapters":4}],'
+               '"new_cast":[{"name":"","profile":"","debut_episode":1}]}')
+        raw = {}
         try:
             raw = self.provider.chat_json([{"role": "system", "content": sys},
                                            {"role": "user", "content": usr}], temperature=0.5)
@@ -79,13 +138,20 @@ class ArcPlanner:
         valid = {c["id"] for c in chars}
         for ei, e in enumerate(eps, start=1):
             arc.episodes.append(self._mk_episode(arc.arc_id, len(arc.episodes) + 1, e, valid))
+        self._register_cast(world, arc, (raw.get("new_cast") or []) if eps else [])
+        if remaining and arc.episodes:   # 코드 정합(지시는 보조): 잔여 예산으로 산술 클램프
+            total = sum(e.target_chapters for e in arc.episodes)
+            if total > 0 and total != remaining:
+                for e in arc.episodes:
+                    e.target_chapters = max(2, min(10, round(e.target_chapters * remaining / total)))
         if not arc.episodes:   # LLM 실패 시 최소 1개 보장(정지 방지)
             arc.episodes.append(Episode(episode_id=f"{arc.arc_id}_ep1", arc_id=arc.arc_id, order=1,
                                         title=arc.title or "전개", premise="", climax=arc.goal or "전개",
                                         target_chapters=4))
 
     # ---- 3) 현재 에피소드(커서) — 없으면 전진/연장 ----
-    def current_episode(self, world: WorldConfig, progress: NarrativeProgress, recent: list[str]) -> Episode | None:
+    def current_episode(self, world: WorldConfig, progress: NarrativeProgress, recent: list[str],
+                        remaining: int | None = None) -> Episode | None:
         spine = world.spine
         if not spine or not spine.arcs or progress.completed:
             return None
@@ -106,7 +172,7 @@ class ArcPlanner:
             progress.completed = True
             return None
         if not nxt.episodes:
-            self._gen_episodes(world, nxt, recent)                 # 다음 아크 에피소드 lazy 생성
+            self._gen_episodes(world, nxt, recent, remaining=remaining)   # 다음 아크: 잔여 예산 내에서 분해
         ep = next((e for e in nxt.episodes if not e.done), None)
         if ep is None:                                             # gen 실패로도 못 채우면 완결 처리(정지 방지)
             progress.completed = True
@@ -123,13 +189,13 @@ class ArcPlanner:
         hook = ("이번 회차가 에피소드 절정(finale): 아래 climax 를 이번 회차에서 터뜨려라(끝맺음 방식은 작품 문체 정책을 따름)."
                 if is_finale else "에피소드 절정으로 한 걸음 전진. 아직 절정을 다 터뜨리지 말 것.")
         sys = ("에피소드 안에서 다음 회차 1개의 beat 를 설계하라. 절정으로 수렴하되 기존 설정과 모순 금지. " + hook +
-               " 직전 회차와 같은 장소·같은 대치 상황·같은 비트의 반복 금지 — 공간 또는 상황을 반드시 한 단계 전진시켜라. "
-               "세계 고유 설정(경제·무기·기술 체계)을 사건의 구체 디테일로 쓰라. JSON만.")
+               " 직전 화 말미의 미결 위기·중단된 상황을 이번 화 도입에서 '즉시 이어받아' 회수하라 — 리셋·동일 클라이맥스 재연·비트 반복 금지, 공간 또는 상황을 반드시 한 단계 전진. "
+               "세계 고유 설정(경제·무기·기술 체계)을 사건의 구체 디테일로 쓰라. title 은 회차 제목만(시리즈명·화수 붙이지 마라). JSON만.")
         # plant_notes 는 시스템 '참고' 정보 — 작가 지시(authority)와 분리된 슬롯(시스템 개입의 지시 위장 금지, 모드 계약 §1)
         notes_block = f"\n[미회수 복선 — 참고용]{plant_notes}" if plant_notes else ""
         usr = (f"[아크 목표]{arc.goal}\n[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
                f"[필수 사건]{episode.required_events}\n[등장해야 할 인물 id]{episode.required_cast}\n"
-               f"[인물 id]{char_ids}\n[최근 줄거리]\n" + "\n".join(recent[-3:]) +
+               f"[인물 id]{char_ids}\n[최근 줄거리]\n" + "\n".join(recent) +
                f"\n[작가 지시]{json.dumps(directives, ensure_ascii=False)}{notes_block}\n[회차]{chapter} (에피소드 내 finale={is_finale})\n"
                '{"title":"","summary":"","key_events":["",""],"entities":["인물 id"]}')
         try:

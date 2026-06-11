@@ -31,7 +31,7 @@ _SCHEMA_HINT = """{
   "entities": [
     {"id":"hero","name":"주인공이름","etype":"character","aliases":["약칭"],
      "attrs":{"affiliation":"A"},"base_status":"alive",
-     "voice":"말투 시그니처(어미·습관구·금지어 — 인물끼리 뚜렷이 구분되게. 예: 반말 단답, '~지' 어미, 존댓말 금지)"}
+     "profile":"인물 설계서: 배경·성격·욕망(원하는 것/두려운 것)·다른 핵심 인물과의 관계. 말투 지정 금지 — 말투는 이 설정에서 창발한다"}
   ],
   "relations": [],                      // 선택: 작품별 관계 타입(RelationSpec). rel_id 자유
   "seed_edges": [],                     // 선택: 시작 시점 관계 엣지
@@ -65,8 +65,9 @@ class WorldGenerator:
             "   - state(생애주기): 사망·각성·정체발각·결혼 등 상태 전이. states + irreversible(되돌릴 수 없는 값) "
             "+ terminal(등장불가='서사에서 제거됨' — 사망·소멸뿐. 'none' 같은 평범한 초기/기본값을 절대 넣지 마라) 지정.\n"
             "   ※ 장르에 맞춰: 로맨스=관계/비밀/정체, 무협=경지(비단조 가능)/진영, 미스터리=단서/지식, 현판=각성/등급 등.\n"
-            "2) entities: 주연 3~4명(character). attrs 는 위 attribute key 로. id 는 영문. "
-            "각 인물에 voice(말투 시그니처 — 어미·습관구·말버릇)를 서로 뚜렷이 구분되게 부여(보이스 분화).\n"
+            "2) entities: '주인공과 핵심 관계 인물 2~3명만'(character). attrs 는 위 attribute key 로. id 는 영문. "
+            "조연·적대·조력 캐스트는 여기서 만들지 마라 — 아크 설계 단계에서 그 시점의 이야기 상태로부터 태어난다. "
+            "말투(voice) 지정 금지 — 말투는 인물 설정에서 창발한다. 대신 각 인물의 profile(배경·성격·욕망·관계)을 충실히.\n"
             "3) world_rules(선택): 이 세계 핵심 규칙(있으면 flag 영문, keywords 한국어).\n"
             "4) timeline(선택): 예정된 상태 전이가 있으면 eff_from 으로(없으면 빈 배열).\n"
             "5) relations/seed_edges(선택): 시작 관계·작품별 관계 타입(rel_id 자유 라벨).\n"
