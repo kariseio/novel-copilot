@@ -35,13 +35,18 @@ class Wiki:
         if not chars:
             self.log.append(f"[{chapter}][-][noop]")
             return 0
-        current = {e.id: (self.pages[e.id].body if e.id in self.pages else "") for e in chars}
+        # 페이지 본문 비대 통제: 입력은 최근 1,200자만 노출 + 출력 800자 유지 지시(무한 누적 → JSON 절단 방지)
+        current = {e.id: (self.pages[e.id].body[-1600:] if e.id in self.pages else "") for e in chars}
         roster = [{"id": e.id, "name": e.name} for e in chars]
         msg = [
             {"role": "system", "content":
-             "너는 작품 바이블 위키 관리자다. 각 인물의 기존 페이지에 '이번 회차에서 새로 드러난 서사 사실'만 "
-             "1~3문장 누적 추가한다(전체 재작성 금지, 기존 내용 보존). 설정 수치(눈색·등급 등)는 적지 마라(온톨로지 소유). "
-             "성격·동기·관계·서사 사건만. JSON: {\"pages\":[{\"id\":..,\"body\":\"갱신된 전체 본문\"}]}"},
+             "너는 작품 바이블의 인물카드 관리자다. 각 인물 카드를 이번 회차를 반영해 갱신하라. "
+             "카드는 반드시 이 구조(줄 단위, 인물당 1,000자 이내 — 넘으면 오래된 디테일 압축):\n"
+             "상태: <현재 처지·위치·몸 상태 한 줄>\n감정: <현재 감정과 그 원인>\n목표: <지금 원하는 것/두려운 것>\n"
+             "관계: <주요 인물별 현재 긴장·온도 — 예: A에게 경계가 누그러짐>\n"
+             "말투: <종결어미·습관·상황별 변화>\n대사: <이 인물다운 실제 대사 인용 2~3개(본문에서)>\n"
+             "비밀: <아는 것/모르는 것 비대칭>\n"
+             "설정 수치(눈색·등급 등)는 적지 마라(온톨로지 소유). JSON: {\"pages\":[{\"id\":..,\"body\":\"갱신된 카드 전문\"}]}"},
             {"role": "user", "content":
              f"[인물]\n{json.dumps(roster, ensure_ascii=False)}\n[기존 페이지]\n{json.dumps(current, ensure_ascii=False)}\n"
              f"[{chapter}화 본문]\n{text}"},

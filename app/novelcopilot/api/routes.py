@@ -173,6 +173,19 @@ def worldgen_turn(pid: str, req: WorldgenTurnRequest, request: Request):
     return res
 
 
+@router.post("/projects/{pid}/state")
+def set_state(pid: str, body: dict, request: Request):
+    """작가 상태 정정(③) — 낡은/틀린 캐논 속성을 직접 박는다. {entity_id, attr, value, eff_from}"""
+    try:
+        res = _svc(request).set_entity_state(pid, body.get("entity_id", ""), body.get("attr", ""),
+                                             body.get("value"), int(body.get("eff_from", 1)))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, str(e))
+    if res is None:
+        raise HTTPException(404, "project not found")
+    return res
+
+
 @router.put("/projects/{pid}/style")
 def update_style(pid: str, req: StylePolicyRequest, request: Request):
     """문체/생성 정책(절단 훅·복선 리마인더·persona·분량 등) 작가 제어 — ③ 입력 전용."""

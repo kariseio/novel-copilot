@@ -7,7 +7,7 @@ worldgen 이 시드로부터 이 객체를 생성한다.
 """
 from __future__ import annotations
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from .relations import RelationSpec
 from .types import RelationEdge
@@ -74,9 +74,15 @@ class EntitySpec(BaseModel):
 class WorldRuleSpec(BaseModel):
     rule_id: str
     text: str                                 # 세계 규칙 산문(프롬프트 노출)
-    flag: str                                 # 추출기가 내보내는 불리언 플래그명(예: reawakening)
+    flag: str = ""                            # 추출기 불리언 플래그명 — 누락 시 rule_id 로 자동 유도(LLM 산출 견고성)
     keywords: list[str] = Field(default_factory=list)   # 규칙 활성 판정 + 추출 가이드
     extract_hint: str = ""
+
+    @model_validator(mode="after")
+    def _default_flag(self):
+        if not self.flag:
+            self.flag = self.rule_id
+        return self
 
 
 class TimelineEntry(BaseModel):
@@ -122,12 +128,17 @@ class StyleSpec(BaseModel):
 
 
 DEFAULT_STYLE_RULES = [
-    "분량: 이 장면을 1,500자 이상 충분히 길게 써라(회차 총 5,000자 목표).",
-    "웹소설식 줄바꿈: 문장이 끝날 때마다 줄을 바꾼다. 2~3문장마다 빈 줄 하나로 문단을 잘게 나눈다. 빽빽한 문단 금지.",
-    "대사·지문 리듬: 대사를 충분히 활용해 장면에 속도를 주되, 비율을 기계적으로 맞추지 말고 장면 목적에 맞춘다(한 줄에 대사 하나).",
+    "분량: 이 장면을 약 1,800자 내외로 쓰고 반드시 '문장을 자연스럽게 맺으며' 완결하라 — 끊긴 문장으로 끝내기 금지(회차 총 5,000~5,500자).",
+    "조판: 대사는 한 줄에 하나. 지문은 2~4문장을 한 문단으로 묶는다. 문장을 한두 어절씩 토막내는 행갈이 금지(시처럼 끊지 마라).",
+    "대사·지문 리듬: 대사를 충분히 활용해 장면에 속도를 주되, 비율을 기계적으로 맞추지 말고 장면 목적에 맞춘다.",
     "단문·속도감: 짧고 명료한 문장 위주(단문 중심, 가끔 중문). 만연체·장황한 시공간 묘사 금지.",
-    "금지: 접속사 남발, 불필요한 주어 반복, 번역체, 멋부린 어려운 단어.",
+    "수치·연속성: 자원(배터리·산소·식량)·시간·거리 수치는 회차 안에서 정합되게 — 보급 없이 늘거나 사건 없이 급감 금지. 같은 정보를 되묻는 반복 대사 금지.",
+    "금지: 접속사 남발, 불필요한 주어 반복, 번역체, 멋부린 어려운 단어, 같은 어미 말버릇의 과도한 반복.",
     "인물 속마음(내면)을 짧게 섞어 몰입감을 준다.",
+    "시점·시제 일관: 작품 전체 동일 시점(기본 3인칭)·과거형 서술 고정 — 인칭 전환·현재형 누출 금지.",
+    "말버릇 제한: 인물 시그니처(욕설·감탄사·어미 틱)는 회차당 3회 이내 — 도배는 캐릭터를 자기 패러디로 만든다.",
+    "호칭: 설정 명부의 표기(괄호 라벨 포함)를 그대로 노출하지 말고 자연스러운 작중 호칭으로.",
+    "도입 금지 패턴: 회차를 자원·수치 낭독(배터리 %·식량 개수 나열)으로 시작하지 마라 — 상태는 장면 사건에 녹여라.",
 ]
 
 

@@ -38,7 +38,7 @@ def _accumulate(total: dict, delta: dict) -> dict:
 def _build_story_so_far(chapters, budget: int) -> tuple[str, int]:
     """누적 줄거리 요약 — FINALIZED 회차만, 최신부터 예산 내로 채운 뒤 시간순 제시. 반환=(text, 드롭된 회차수).
     요약이 비어도(요약 실패) 본문 앞부분 fallback → FINALIZED 회차가 줄거리에서 통째 누락(영구망각)되지 않게."""
-    lines = [f"{c.chapter}화: {c.summary or c.text[:120]}"
+    lines = [f"{c.chapter}화: {getattr(c, 'detail_synopsis', '') or c.summary or c.text[:120]}"
              for c in chapters if c.status == ChapterStatus.FINALIZED]
     if not lines:
         return "", 0
@@ -104,7 +104,7 @@ def _build_story_so_far_hier(state, next_ch: int, budget: int) -> tuple[str, int
     cur_chs = sorted([c for c in state.chapters if c.chapter < next_ch
                       and c.status == ChapterStatus.FINALIZED and c.episode_id == cur_ep],
                      key=lambda c: c.chapter)
-    cur_lines = [f"{c.chapter}화: {c.summary or c.text[:120]}" for c in cur_chs]
+    cur_lines = [f"{c.chapter}화: {getattr(c, 'detail_synopsis', '') or c.summary or c.text[:120]}" for c in cur_chs]
     if not rollups and not cur_lines:
         return "", 0
     used = sum(len(x) + 1 for x in rollups)
@@ -359,7 +359,7 @@ class CopilotService:
 
             arc = ep = None
             is_finale = False
-            anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars)   # R2 설정집 다이제스트(narrative)
+            anchors, bible_dropped = [], 0   # 설정집 다이제스트는 beat 확정 후 '관련 카드 선별'로(아래)
             prog_snap = spine_snap = None
             if spine and spine.arcs:   # R4 spine 모드: 에피소드(절정 backward) 단위로 beat 파생
                 # B: 커서/spine 변이를 트랜잭션으로 — FINALIZED 아니면 롤백(재시도 결정성·orphan/조기 arc.done 방지)
@@ -386,11 +386,15 @@ class CopilotService:
                         plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
                 beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
                                                 summaries, [d.text for d in active], plant_notes=plant_notes)
+                hint = f"{beat.title} {beat.summary} {' '.join(beat.key_events)} {ep.climax}"
+                anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars, hint)
                 anchors = anchors + _arc_anchors(spine, arc, ep)
                 story_so_far, dropped = _build_story_so_far_hier(state, next_ch, self.settings.story_so_far_chars)
             else:                      # 평면 모드(하위호환)
                 beat = BeatPlanner(sess.provider).beat_for(
                     state.world, next_ch, summaries, [d.text for d in active])
+                anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars,
+                                                      f"{beat.title} {beat.summary}")
                 story_so_far, dropped = _build_story_so_far(prior, self.settings.story_so_far_chars)
 
             prev = state.chapter(next_ch - 1)
@@ -406,15 +410,24 @@ class CopilotService:
                 _out = _outstanding_plants(spine)
                 if len(_out) >= self.settings.plant_backlog_threshold:   # 복선 적체 경보(advisory — 작가 가시화)
                     sess.bus.emit("narrative", "plant_backlog", chapter=next_ch, outstanding=_out[:8])
-            # 작품 완결 화 감지: 마지막 아크의 마지막 미완 에피소드 finale → 절단신공 대신 '닫는' 회차(여운 마무리)
-            closing = bool(spine and ep and is_finale
+            # 작품 완결 화 감지: ①스파인 소진(마지막 아크의 마지막 에피소드 finale) 또는 ②목표 회차 도달
+            # — 어느 쪽이든 마지막으로 나가는 화는 절단신공 대신 '닫는' 회차(미결 선택은 결행, 새 떡밥 금지)
+            target = state.seed.target_chapters or 12
+            closing = bool(next_ch >= target or (spine and ep and is_finale
                            and not any((not a.done) and a.arc_id != ep.arc_id for a in spine.arcs)
                            and not any((not e2.done) and e2.episode_id != ep.episode_id
-                                       for a in spine.arcs for e2 in a.episodes))
+                                       for a in spine.arcs for e2 in a.episodes)))
+            recent_tails = [c.text[-160:] for c in prior[-3:] if c.text]   # 훅 유형 로테이션 재료
+            # 전권 틱 원장(작품-전역 품질 상태): 지난 회차 전체에서 과용된 습관구 → 이번 화 절제 목록(예방측)
+            from ..engine.quality_gates import word_tics as _wt
+            roster_names = {e.name for e in sess.bundle.ontology.entities.values()}
+            corpus = " ".join(c.text for c in prior[-8:] if c.text)
+            restraint = [p for p, n in _wt(corpus, roster_names, cap=12)][:8]
             record = sess.bundle.generator.generate(
                 next_ch, beat.model_dump(), sess.bundle.ontology, sess.bundle.rag,
                 sess.bundle.wiki, directives=active, prev_chapter_text=prev_text,
-                story_so_far=story_so_far, anchors=anchors, closing=closing)
+                story_so_far=story_so_far, anchors=anchors, closing=closing,
+                recent_tails=recent_tails, restraint=restraint)
 
             # 동적 온톨로지 업데이트(엔진 고도화) — FINALIZED 회차에만
             if record.status == ChapterStatus.FINALIZED:
@@ -427,6 +440,18 @@ class CopilotService:
                 state.runtime_entities += new_specs
                 state.runtime_timeline += new_tl
                 state.runtime_edges += new_edges          # 자동추출 관계(narrative_inferred) 영속
+                # 설정집 연재 증분: 회차에서 드러난 세계 설정 → 미승인 초안으로만 append(작가 promote 게이트 보존)
+                existing_titles = {b.title.strip() for b in state.bible.entries}
+                for ns in (proposal.get("new_settings") or [])[:2]:
+                    t = (ns.get("title") or "").strip()
+                    if t and t not in existing_titles:
+                        existing_titles.add(t)
+                        state.bible.entries.append(BibleEntry(
+                            entry_id=_slug(t, {e.entry_id for e in state.bible.entries}),
+                            category=normalize_category(ns.get("category")), title=t,
+                            prose=(ns.get("prose") or "").strip(),
+                            keywords=[k for k in (ns.get("keywords") or []) if k][:5],
+                            provenance="ai_worldgen", status="ai_unreviewed"))
                 state.current_chapter = next_ch
                 self._esc.pop((pid, next_ch), None)       # 성공 → 연속 escalation 카운터 리셋
                 # R4: 에피소드 커서 전진 + finale 시 롤업 요약·결정론 드리프트(advisory)
@@ -565,6 +590,7 @@ class CopilotService:
                 "entries": [{"entry_id": e.entry_id, "category": e.category,
                              "category_label": CATEGORY_LABEL.get(e.category, e.category),
                              "title": e.title, "prose": e.prose, "promoted": e.promoted,
+                             "keywords": list(getattr(e, "keywords", []) or []),
                              "provenance": e.provenance, "status": e.status} for e in state.bible.entries]}
 
     def add_bible_entry(self, pid: str, category: str, title: str, prose: str = "") -> dict | None:
@@ -676,6 +702,42 @@ class CopilotService:
             sess.snapshot_into(state)
             self.repo.save(state)
             return {"promoted": True, "rule_id": rule.rule_id, "title": e.title}
+
+    # ---- 작가 상태 정정(③ 입력 전용) — 낡은/틀린 캐논 속성을 작가가 직접 박는 레버 ----
+    def set_entity_state(self, pid: str, entity_id: str, attr: str, value, eff_from: int = 1,
+                         reason: str = "작가 정정") -> dict | None:
+        st = self.repo.get(pid)
+        if not st:
+            return None
+        sess = self.sessions.get_or_create(st)
+        with sess.lock:
+            st = self.repo.get(pid)
+            if not st:
+                return None
+            ont = sess.bundle.ontology
+            if entity_id not in ont.entities:
+                raise ValueError("존재하지 않는 엔티티")
+            spec = sess.bundle.vocab.attr(attr)
+            sval = str(value).strip()
+            if spec and spec.kind == "categorical" and spec.vocab and sval not in spec.vocab:
+                raise ValueError(f"'{attr}' 값은 {spec.vocab} 중 하나여야 합니다")
+            if spec and spec.kind in ("state", "status") and spec.states and sval not in spec.states:
+                raise ValueError(f"'{attr}' 상태는 {spec.states} 중 하나여야 합니다")
+            eff = max(1, int(eff_from))
+            cur = ont.binding_state_as_of(entity_id, attr, eff)
+            irr = sess.bundle.vocab.irreversible_states(attr)
+            if (cur is not None and str(cur) in irr and sval != str(cur)
+                    and not getattr(st.world, "allow_state_reversal", False)):
+                raise ValueError(f"'{cur}'은(는) 비가역 상태입니다(allow_state_reversal 세계에서만 정정 가능)")
+            ont.entities[entity_id].attrs.setdefault(attr, None)   # 주입집합=게이트집합
+            ont.set_state(entity_id, attr, sval, eff, reason=reason, trust_tier="ground_truth")
+            from ..domain.world import TimelineEntry
+            st.runtime_timeline.append(TimelineEntry(entity_id=entity_id, attr=attr, value=sval,
+                                                     eff_from=eff, reason=reason, trust_tier="ground_truth"))
+            sess.snapshot_into(st)
+            self.repo.save(st)
+            return {"updated": True, "entity": ont.name(entity_id), "attr": attr,
+                    "value": sval, "eff_from": eff}
 
     # ---- 문체/생성 정책 편집(③ 작가 입력 전용 — 시스템 스티어링 제어 경로) ----
     def update_style_policy(self, pid: str, patch: dict) -> dict | None:
