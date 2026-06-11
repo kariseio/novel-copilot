@@ -30,16 +30,19 @@ class PromptAssembler:
                       if prev_ch else "")
         within = (f"[이번 회차 직전 장면들(바로 이어서)]\n{prev_scenes[-2500:]}\n\n"
                   if prev_scenes else "")
-        voice_block = (f"[인물 보이스 — 각 인물의 대사는 이 말투 시그니처를 일관되게(서로 구분되게)]\n"
-                       f"{board.voice_cards}\n\n" if board.voice_cards else "")
+        voice_block = (f"[인물 보이스 — 서로 구분되는 말투. 단 시그니처(어미·감탄사)는 대사 서너 개 중 한 번 정도만, "
+                       f"모든 대사에 도배 금지(자기 패러디화 방지)]\n{board.voice_cards}\n\n" if board.voice_cards else "")
         return (
             f"[확정 설정 — 절대 위반 금지(눈색·소속·생사·등급·관계·세계규칙)]\n{gt}\n\n"
             f"[작가 지시 — 우선]\n{auth}\n\n"
             f"{voice_block}"
             f"{sofar_block}"
             f"{flow_block}"
-            f"[이번 장면 목표]\n{scene.goal}\n핵심사건: {', '.join(scene.key_events)}\n\n"
+            f"[이번 장면 목표]\n{scene.goal}\n핵심사건: {', '.join(scene.key_events)}\n"
+            "(아래 참조 맥락의 세계 고유 설정 — 경제·무기·기술 — 을 장면의 구체 디테일(거래·전술·사물)로 최소 1회 구현하라. "
+            "직전 장면과 같은 정보를 되묻는 대화 반복 금지.)\n\n"
             f"{within}"
             f"[참조 맥락 — 서사 배경(낮은 신뢰, 설정은 위 '확정 설정'이 우선)]\n{narr}\n\n"
-            "[연속성 지시] 새 회차를 처음부터 다시 소개하지 말 것. 직전 상황에서 자연스럽게 이어서 전개하라."
+            "[연속성 지시] 새 회차를 처음부터 다시 소개하지 말 것. 직전 상황에서 자연스럽게 이어서 전개하라. "
+            "직전 장면의 내용을 재서술·되감기·재시작하지 마라 — 시간은 앞으로만 흐른다."
         )

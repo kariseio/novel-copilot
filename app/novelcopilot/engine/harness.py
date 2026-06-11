@@ -9,6 +9,43 @@ build ContextBoard(타입 분리 슬롯 + 직전 회차 원문) → plan_scenes
 """
 from __future__ import annotations
 import json
+import re
+
+_META_LINE = re.compile(r"^\s*[\[【(#\-=*]{0,3}\s*(END|끝|다음\s*(화|회차|:)|계속|장면\s*(종료|전환)|scene|chapter|메모|note|todo|작가\s*주)"
+                        r".{0,80}$", re.IGNORECASE)
+_BRACKET_ONLY = re.compile(r"^\s*[\[【].{0,100}[\]】]\s*$")
+
+
+def sanitize_meta(text: str) -> str:
+    """생성물에서 메타텍스트([END…], 장면 표지, 작가 메모류) 라인 제거 — FINALIZED 본문 누출 차단(결정론)."""
+    out = []
+    for ln in text.splitlines():
+        s = ln.strip()
+        if s and (_META_LINE.match(s) or (_BRACKET_ONLY.match(s)
+                  and re.search(r"END|다음|계속|종료|전환|장면|회차|scene|chapter", s, re.IGNORECASE))):
+            continue
+        if s.startswith(("- \"", "- “", "* \"", "* “")):   # 마크다운 불릿이 대사에 누출된 조판 제거
+            ln = ln.replace("- ", "", 1).replace("* ", "", 1)
+        out.append(ln)
+    return "\n".join(out).strip()
+
+
+def fragmentation_score(text: str) -> float:
+    """비대사 줄의 평균 길이(자) — 토막 행갈이 붕괴 탐지용(결정론). 낮을수록 파편화."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    prose = [ln for ln in lines if not ln.startswith(('"', '“', '—', "'"))]
+    if len(prose) < 8:
+        return 99.0
+    return sum(len(ln) for ln in prose) / len(prose)
+
+
+def short_line_ratio(text: str) -> float:
+    """비대사 줄 중 15자 미만 비율 — 평균은 정상인데 토막이 17~25% 섞이는 패턴 탐지(편집자 실측 보완)."""
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    prose = [ln for ln in lines if not ln.startswith(('"', '“', '—', "'"))]
+    if len(prose) < 8:
+        return 0.0
+    return sum(1 for ln in prose if len(ln) < 15) / len(prose)
 
 from ..config import Settings
 from ..domain.types import (ContextBoard, SceneSpec, ChapterRecord, ChapterStatus,
@@ -58,13 +95,18 @@ class ChapterGenerator:
                  "이 회차의 감정·상황을 자연스러운 여운으로 마무리하라."),
         "none": "",
     }
-    _CLOSING = ("\n\n[이 장면은 '작품 전체의 마지막' 회차다] 절단신공 금지 — 중심 갈등과 감정선을 매듭짓고 "
-                "여운 있게 작품을 닫아라.")
+    _CLOSING = ("\n\n[이 장면은 '작품 전체의 마지막' 회차다] 절단신공 금지 — 중심 갈등과 감정선을 매듭지어라. "
+                "본문에서 제시된 미결 선택은 반드시 결행하고, 새로운 미스터리·신호·떡밥·세력 도입 금지. 여운 있게 작품을 닫아라.")
 
-    def _draft(self, board, scene, prev_scenes, last=False, closing=False) -> str:
+    def _draft(self, board, scene, prev_scenes, last=False, closing=False, recent_tails=None) -> str:
         hook = ""
         if last:
             hook = self._CLOSING if closing else self._HOOKS.get(self.style.ending_hook, self._HOOKS["cliffhanger"])
+            if hook and not closing and recent_tails:
+                tails = "\n".join(f"- …{t[-70:]}" for t in recent_tails[-3:] if t)
+                hook += ("\n(최근 회차들의 끝:\n" + tails +
+                         "\n— 위와 같은 유형의 훅('접근하는 신호/누군가 부르는 소리/다가오는 무언가' 류 포함) 반복 절대 금지. "
+                         "위기·반전·폭로·결단·관계 균열 중 최근에 안 쓴 다른 축으로 끊어라.)")
         return self.provider.chat(
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
              {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook
@@ -81,28 +123,115 @@ class ChapterGenerator:
              {"role": "user", "content": f"[확정 설정]\n{gt}\n[설정 위반]\n{vlist}\n[원본 본문]\n{scene_text}"}],
             temperature=0.4, max_tokens=self.settings.gen_max_tokens)
 
-    # ---- 회차 생성 ----
-    def _summarize(self, chapter_text: str, prior_summary: str = "") -> str:
-        """회차 줄거리 요약(누적 story_so_far 재료). 핵심 사건·결정/변화·미결 긴장만."""
+    def _reformat(self, text: str) -> str:
+        """토막 행갈이 붕괴 복구 — 내용 불변, 조판만 정상 산문으로(문체 드리프트 루프 차단).
+        출력이 원문의 60% 미만이면 절단/메타응답으로 보고 원문 유지(본문 파괴 가드)."""
+        out = self.provider.chat(
+            [{"role": "system", "content":
+              "조판 교정자. 내용·문장·대사를 단 한 글자도 바꾸지 말고, 과도하게 토막난 행갈이만 정상 산문으로 재조판하라. "
+              "대사는 한 줄에 하나 유지, 지문은 2~4문장 문단으로 묶어라. 본문만 출력."},
+             {"role": "user", "content": text}],
+            temperature=0.0, max_tokens=self.settings.gen_max_tokens * 2)
+        return out if len(out or "") >= len(text) * 0.6 else text
+
+    def _continuity_polish(self, chapter_text: str, names: list[str] | None = None) -> str:
+        """회차 내부 연속성 교정 — 패치 방식: LLM 은 '수정 쌍'만 내고 코드가 정확일치 치환만 적용.
+        (전량 재작성 방식은 메타응답이 본문을 덮어쓰거나 max_tokens 절단으로 본문을 파괴했음 — 시뮬 실측 결함.
+        패치 방식은 본문이 원형 그대로라 증발·절단·분량손실이 구조적으로 불가능.)"""
         try:
-            out = self.provider.chat(
+            roster = f"[공식 인명: {', '.join(names or [])}]\n" if names else ""
+            res = self.provider.chat_json(
                 [{"role": "system", "content":
-                  "웹소설 회차를 3~5문장으로 요약하라. 핵심 사건·인물의 결정/변화·새로 생긴 상황·아직 풀리지 않은 긴장(미결)만 담아라. "
-                  "감상·군더더기·문체 묘사 금지. 다음 회차 집필자가 '지금까지 줄거리'로 읽을 사실 위주."},
+                  "출고 검수자. 이 회차에서 다음 결함만 찾아라: ①수치(배터리·산소·식량·GPU·시간)·소지품·위치의 회차 내 모순 "
+                  "②공식 인명의 오염(한 글자 다른 오타) ③문두/문중 절단된 깨진 문장 ④화자의 자기 언급 메타문장(예: '이 장의 끝에') "
+                  "⑤같은 부사구·관용구('짧게 말했다','그 순간' 등)의 과도 반복(가장 잦은 것 일부를 동의 표현으로) ⑥현재형 시제 누출(과거형으로). "
+                  "수정은 본문 구절의 정확한 치환 쌍으로만(find=본문에 실제 있는 구절 그대로). "
+                  '없으면 빈 배열. JSON: {"fixes":[{"find":"","replace":""}]}'},
+                 {"role": "user", "content": roster + chapter_text}],
+                temperature=0.0, max_tokens=1600)
+            n = 0
+            for fx in (res.get("fixes") or [])[:20]:
+                f, r = (fx.get("find") or ""), (fx.get("replace") or "")
+                if len(f) >= 6 and f in chapter_text and r and r != f:
+                    chapter_text = chapter_text.replace(f, r, 1)
+                    n += 1
+            if n:
+                self.bus.emit("finalize", "continuity_fixes", count=n)
+        except Exception:
+            pass
+        return chapter_text
+
+    # ---- 회차 생성 ----
+    def _summarize(self, chapter_text: str, prior_summary: str = "") -> tuple[str, str]:
+        """2계층 요약(컨텍스트 기아 해소 ①): (한 줄, 상세 시놉시스 ~1500자).
+        기존 348자 단일 요약은 보존율 5.4% — 상세 레이어가 사건 인과·감정 변화·물리 디테일·미결을 보존(~25%)."""
+        try:
+            r = self.provider.chat_json(
+                [{"role": "system", "content":
+                  "웹소설 회차 기록자. 두 가지를 만들라:\n"
+                  "1) oneliner: 한 문장 요약(나중 회차에서 원거리 기억용).\n"
+                  "2) synopsis: 상세 시놉시스 1,200~1,600자 — 사건의 인과 순서, 인물별 결정/감정 변화, "
+                  "물리 디테일(자원·소지품·위치·시각), 대화의 핵심 내용, 미결 긴장/복선. "
+                  "다음 회차 집필자가 본문 없이도 이어 쓸 수 있을 밀도로. 감상·문체 묘사 금지.\n"
+                  'JSON: {"oneliner":"","synopsis":""}'},
                  {"role": "user", "content":
-                  (f"[직전까지 줄거리]\n{prior_summary[-1500:]}\n\n" if prior_summary else "")
-                  + f"[이번 회차 본문]\n{chapter_text}\n\n이번 회차 요약:"}],
-                temperature=0.2, max_tokens=400).strip()
-            if out:
-                return out
+                  (f"[직전까지 줄거리]\n{prior_summary[-1200:]}\n\n" if prior_summary else "")
+                  + f"[이번 회차 본문]\n{chapter_text}"}],
+                temperature=0.2, max_tokens=2200)
+            one = (r.get("oneliner") or "").strip()
+            syn = (r.get("synopsis") or "").strip()
+            if one or syn:
+                return (one or syn[:160]), (syn or chapter_text[:400])
             self.bus.emit("summarize", "empty_response")
         except Exception:
             self.bus.emit("summarize", "parse_failure")
-        return chapter_text[:200]   # 빈/실패 시 본문 앞부분 fallback(요약 누락→story_so_far 구멍·영구망각 방지)
+        return chapter_text[:200], chapter_text[:400]   # 실패 폴백(요약 구멍·영구망각 방지)
+
+    def _fix_tics(self, chapter_text: str, offenders: list[tuple[str, int]]) -> str:
+        """틱 과용 국소 교정 — 위반 구절을 '명시'하고 패치(고유 구절 치환)로만 다양화. 전량 재생성 금지."""
+        try:
+            lst = ", ".join(f"'{p}'({n}회)" for p, n in offenders)
+            res = self.provider.chat_json(
+                [{"role": "system", "content":
+                  "문장 다양화 검수자. 다음 습관구가 과용됐다: " + lst + ". "
+                  "각 습관구의 출현 대부분을 문맥에 맞는 다양한 표현으로 바꿔라(전부 같은 단어로 바꾸지 말 것). "
+                  "수정은 치환 쌍으로만 — find 는 본문에 실제로 1번만 나오는 7자 이상 고유 구절(습관구 포함)을 그대로. "
+                  '인명·사건·수치 불변. JSON: {"fixes":[{"find":"","replace":""}]}'},
+                 {"role": "user", "content": chapter_text}],
+                temperature=0.3, max_tokens=2500)
+            n = 0
+            for fx in (res.get("fixes") or [])[:30]:
+                f, r = (fx.get("find") or ""), (fx.get("replace") or "")
+                if len(f) >= 7 and chapter_text.count(f) == 1 and r and r != f:
+                    chapter_text = chapter_text.replace(f, r, 1)
+                    n += 1
+            self.bus.emit("quality", "tic_fixes", applied=n, offenders=[p for p, _ in offenders])
+        except Exception:
+            pass
+        return chapter_text
+
+    def _regen_tail(self, chapter_text: str, recent_tails: list[str]) -> str:
+        """말미 훅 재탕 → 마지막 1~2문단만 재작성해 접합(국소) — 본문 보존."""
+        lines = chapter_text.splitlines()
+        keep, tail = "\n".join(lines[:-8]), "\n".join(lines[-8:])
+        try:
+            prev = "\n".join(f"- …{t[-70:]}" for t in recent_tails[-4:])
+            out = self.provider.chat(
+                [{"role": "system", "content":
+                  "회차 말미 교체 작가. 주어진 끝부분을, 직전 회차들과 '다른 축'의 긴장(위기/반전/폭로/결단/관계 균열 중 "
+                  "최근 미사용 축)으로 다시 써라. 길이 비슷하게, 앞 내용과 자연 연결. 본문만.\n[최근 회차들의 끝]\n" + prev},
+                 {"role": "user", "content": f"[앞 문맥(마지막 부분)]\n{keep[-800:]}\n\n[교체할 끝부분]\n{tail}"}],
+                temperature=0.8, max_tokens=1200)
+            if out and len(out.strip()) > 80:
+                self.bus.emit("quality", "tail_regen")
+                return keep + "\n" + sanitize_meta(out.strip())
+        except Exception:
+            pass
+        return chapter_text
 
     def generate(self, ch_no, beat, ontology, rag, wiki, directives=None,
                  prev_chapter_text: str = "", story_so_far: str = "", anchors=None,
-                 closing: bool = False) -> ChapterRecord:
+                 closing: bool = False, recent_tails=None, restraint=None) -> ChapterRecord:
         directives = directives or []
         involved = beat.get("entities") or list(ontology.entities.keys())
         self.bus.emit("plan_chapter", "start", chapter=ch_no, title=beat.get("title", ""))
@@ -115,11 +244,14 @@ class ChapterGenerator:
         voice_cards = "\n".join(f"- {e.name}: {e.voice}"
                                 for e in (ontology.entities.get(i) for i in involved)
                                 if e is not None and getattr(e, "voice", ""))
+        if restraint:   # 전권 과용 표현 절제(작품-전역 원장 → 회차 생성 입력으로, 예방측)
+            voice_cards += ("\n[표현 절제 — 이 작품에서 이미 과용된 표현. 이번 화에서는 거의 쓰지 마라]\n"
+                            + ", ".join(restraint[:8]))
 
         narrative = list(anchors or [])   # 엔딩/아크 앵커(narrative, ground_truth 아님) 상단
         if ch_no > 1:
-            narrative += rag.search(beat.get("summary", ""), ch_no - 1, k=3)
-            narrative += wiki.retrieve(beat.get("summary", ""), ch_no - 1, k=2)
+            narrative += rag.search(beat.get("summary", ""), ch_no - 1, k=getattr(self.settings, "rag_k", 6))
+            narrative += wiki.retrieve(beat.get("summary", ""), ch_no - 1, k=getattr(self.settings, "wiki_k", 3))
         ground_truth = (ontology.canon_facts(involved, ch_no)
                         + ontology.canon_relations(involved, ch_no))   # 확정 관계도 '박기'(ground_truth)
         board = ContextBoard(chapter=ch_no, ground_truth=ground_truth,
@@ -141,7 +273,14 @@ class ChapterGenerator:
             prev = "\n".join(scene_texts)
             self.bus.emit("draft_scene", "start", chapter=ch_no, scene=sc.index, goal=sc.goal[:60])
             _t = self.provider.usage.chat_tokens
-            text = self._draft(board, sc, prev, last=(sc is scenes[-1]), closing=closing)
+            text = sanitize_meta(self._draft(board, sc, prev, last=(sc is scenes[-1]), closing=closing,
+                                             recent_tails=recent_tails))
+            tail_seg = "\n".join(text.splitlines()[-15:])
+            if (fragmentation_score(text) < 22 or fragmentation_score(tail_seg) < 14
+                    or short_line_ratio(text) > 0.15):
+                # 토막 행갈이 붕괴(전체 또는 말미 국소 — '시간이/점점/줄어들고' 류 가짜 긴장) → 조판 복구
+                self.bus.emit("draft_scene", "reformat", chapter=ch_no, scene=sc.index)
+                text = sanitize_meta(self._reformat(text))
             _track("draft", _t)
             best_text, best_hard = text, None     # M5: hard 위반 최소 텍스트 보존
             for r in range(self.settings.max_rewrite_rounds + 1):
@@ -173,11 +312,31 @@ class ChapterGenerator:
                 self.bus.emit("partial_rewrite", "start", chapter=ch_no, scene=sc.index, round=r,
                               fixing=[v.kind for v in text_hard])
                 _t = self.provider.usage.chat_tokens
-                text = self._rewrite(text, text_hard, board)
+                text = sanitize_meta(self._rewrite(text, text_hard, board))
                 _track("rewrite", _t)
             scene_texts.append(best_text)     # M5: 최선본 채택(악화 텍스트 확정 금지)
 
         chapter_text = "\n\n".join(scene_texts)
+        # ---- 품질 결정론 게이트(닫힌 루프): 검출=코드, 교정=국소 ----
+        from .quality_gates import word_tics, hook_repeat_semantic, strip_directive_leak
+        chapter_text = strip_directive_leak(chapter_text)              # 지시어 누출(R7 '절단.') 결정론 제거
+        roster = {ontology.entities[i].name for i in involved if i in ontology.entities}
+        offenders = [(p, n) for p, n in word_tics(chapter_text, roster, cap=4)][:5]
+        if offenders:
+            _t = self.provider.usage.chat_tokens
+            chapter_text = self._fix_tics(chapter_text, offenders)
+            _track("quality", _t)
+        if recent_tails and not closing:
+            tail_now = " ".join([ln for ln in chapter_text.splitlines() if ln.strip()][-3:])
+            if hook_repeat_semantic(self.provider, tail_now, recent_tails) > 0.82:   # 의미 유사(템플릿 재탕)
+                _t = self.provider.usage.chat_tokens
+                chapter_text = self._regen_tail(chapter_text, recent_tails)
+                _track("quality", _t)
+        if getattr(self.settings, "continuity_polish", True):   # 출고 검수(수치·인명·절단·메타·틱·시제) — 패치 후 게이트 재검
+            _t = self.provider.usage.chat_tokens
+            names = [ontology.entities[i].name for i in involved if i in ontology.entities]
+            chapter_text = sanitize_meta(self._continuity_polish(chapter_text, names=names))
+            _track("polish", _t)
         _t = self.provider.usage.chat_tokens
         final = self.checker.check_text(chapter_text, ontology, ch_no, involved)
         _track("check", _t)
@@ -185,14 +344,18 @@ class ChapterGenerator:
         status = ChapterStatus.FINALIZED if not hard_remaining else ChapterStatus.ESCALATED
 
         indexed = pages = 0
-        summary = ""
+        summary = detail_synopsis = ""
         if status == ChapterStatus.FINALIZED:
             indexed = rag.index_chapter(ch_no, chapter_text)
             _t = self.provider.usage.chat_tokens
-            pages = wiki.ingest_chapter(ch_no, chapter_text, ontology, reviewed=True)
+            try:
+                pages = wiki.ingest_chapter(ch_no, chapter_text, ontology, reviewed=True)
+            except Exception:   # 위키는 narrative(비구속) — 실패가 회차 확정을 막으면 안 됨(가시화 후 계속)
+                pages = 0
+                self.bus.emit("finalize", "wiki_failure", chapter=ch_no)
             _track("wiki", _t)
             _t = self.provider.usage.chat_tokens
-            summary = self._summarize(chapter_text, story_so_far)     # 누적 요약 갱신
+            summary, detail_synopsis = self._summarize(chapter_text, story_so_far)   # 2계층 요약(한줄+상세)
             _track("summarize", _t)
             self.bus.emit("finalize", "done", chapter=ch_no, indexed=indexed, wiki_pages=pages,
                           summarized=bool(summary))
@@ -201,6 +364,6 @@ class ChapterGenerator:
 
         return ChapterRecord(
             chapter=ch_no, title=beat.get("title", ""), status=status, text=chapter_text,
-            summary=summary, scenes=len(scenes), n_retrieved=len(narrative), indexed_chunks=indexed,
+            summary=summary, detail_synopsis=detail_synopsis, scenes=len(scenes), n_retrieved=len(narrative), indexed_chunks=indexed,
             wiki_pages_touched=pages, initial_violations=initial_caught or [],
             final_violations=final.violations, rounds=rounds, usage_by_stage=stage_usage)

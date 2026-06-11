@@ -95,7 +95,8 @@ class ChapterRecord(BaseModel):
     title: str = ""
     status: ChapterStatus
     text: str = ""
-    summary: str = ""                 # 회차 줄거리 요약(finalize 시 생성, 누적 story_so_far 재료)
+    summary: str = ""                 # 한 줄 요약(과거 회차의 압축 표현 — 누적 story_so_far 의 원거리 레이어)
+    detail_synopsis: str = ""         # 상세 시놉시스(~1,500자: 사건 인과·감정 변화·물리 디테일·미결 — 근거리 레이어)
     scenes: int = 0
     n_retrieved: int = 0
     indexed_chunks: int = 0
