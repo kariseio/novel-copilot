@@ -58,6 +58,7 @@
     <div class="proj-actions">
       <span id="p-progress" class="pill"></span>
       <span id="p-cost" class="pill cost"></span>
+      <button class="primary" onclick="openViewer()">📖 읽기 모드</button>
       <button onclick="goHome()">← 목록</button>
     </div>
   </div>
@@ -124,6 +125,26 @@
       <div id="inspect-wiki" class="inspect-body hidden">…</div>
     </section>
   </div>
+</main>
+
+<!-- ===== VIEWER (몰입형 읽기) ===== -->
+<main id="view-viewer" class="viewer hidden">
+  <div class="viewer-bar">
+    <button class="viewer-close" onclick="closeViewer()" title="작업실로 돌아가기">✕ 닫기</button>
+    <div class="viewer-work" id="v-work">…</div>
+    <select id="v-jump" class="viewer-jump" onchange="viewerJump(this.value)" title="회차 이동"></select>
+  </div>
+  <article class="viewer-page">
+    <h1 id="v-title" class="viewer-title">…</h1>
+    <div id="v-badge" class="viewer-badge"></div>
+    <div id="v-body" class="viewer-body"></div>
+    <nav class="viewer-nav">
+      <button id="v-prev" onclick="viewerNav(-1)">← 이전 화</button>
+      <span id="v-count" class="viewer-count muted"></span>
+      <button id="v-next" onclick="viewerNav(1)">다음 화 →</button>
+    </nav>
+  </article>
+  <div class="viewer-hint muted">← → 키로 이전·다음 화 · Esc 닫기</div>
 </main>
 
 <script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>

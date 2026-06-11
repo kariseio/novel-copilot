@@ -30,7 +30,7 @@ const api = {
 let STATE = { project:null, activeChapter:null, generating:false };
 
 // ---------- 네비게이션 ----------
-function goHome(){ $("#view-project").classList.add("hidden"); $("#view-home").classList.remove("hidden"); loadProjects(); }
+function goHome(){ $("#view-viewer").classList.add("hidden"); $("#view-project").classList.add("hidden"); $("#view-home").classList.remove("hidden"); loadProjects(); }
 function showProject(){ $("#view-home").classList.add("hidden"); $("#view-project").classList.remove("hidden"); }
 function switchTab(t){
   document.querySelectorAll('.col-reader .tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
@@ -265,6 +265,57 @@ function renderReader(){
     (oc?`<div style="margin-bottom:1.4em">${oc}</div>`:"")+
     `<div>${esc(c.text).replace(/\n/g,"<br>")}</div>`;
 }
+
+// ---------- 뷰어(몰입형 읽기) — 웹소설 플랫폼처럼 이전·다음 화 ----------
+function viewerChapters(){
+  return (STATE.project.chapters||[]).filter(c=>c.text).sort((a,b)=>a.chapter-b.chapter);
+}
+function openViewer(n){
+  const list = viewerChapters();
+  if(!list.length){ alert("아직 읽을 회차가 없습니다. 먼저 회차를 써보세요."); return; }
+  const target = n || STATE.activeChapter || list[list.length-1].chapter;
+  const idx = list.findIndex(c=>c.chapter===target);
+  STATE.viewerIdx = idx>=0 ? idx : 0;
+  $("#view-home").classList.add("hidden");
+  $("#view-project").classList.add("hidden");
+  $("#view-viewer").classList.remove("hidden");
+  $("#v-work").textContent = (STATE.project.world.title) || "무제";
+  $("#v-jump").innerHTML = list.map((c,i)=>`<option value="${i}">${c.chapter}화 · ${esc(c.title||"")}</option>`).join("");
+  renderViewer();
+}
+function renderViewer(){
+  const list = viewerChapters(), c = list[STATE.viewerIdx];
+  if(!c) return;
+  const badge = c.status==="FINALIZED"?'<span class="badge fin">완성</span>':'<span class="badge esc">검토 필요</span>';
+  $("#v-title").textContent = `${c.chapter}화 · ${c.title||""}`;
+  $("#v-badge").innerHTML = badge;
+  // 문단 단위 렌더 — 빈 줄/줄바꿈으로 분리, 대사("…")는 dlg 로 표시
+  $("#v-body").innerHTML = (c.text||"").split(/\n+/).map(s=>s.trim()).filter(Boolean)
+    .map(p=>`<p${/^["“]/.test(p)?' class="dlg"':''}>${esc(p)}</p>`).join("");
+  $("#v-count").textContent = `${STATE.viewerIdx+1} / ${list.length}`;
+  $("#v-prev").disabled = STATE.viewerIdx<=0;
+  $("#v-next").disabled = STATE.viewerIdx>=list.length-1;
+  $("#v-jump").value = String(STATE.viewerIdx);
+  $("#view-viewer").scrollTop = 0;
+}
+function viewerNav(d){
+  const list = viewerChapters(), ni = STATE.viewerIdx + d;
+  if(ni<0 || ni>=list.length) return;
+  STATE.viewerIdx = ni; renderViewer();
+}
+function viewerJump(i){ STATE.viewerIdx = parseInt(i,10)||0; renderViewer(); }
+function closeViewer(){
+  $("#view-viewer").classList.add("hidden");
+  $("#view-project").classList.remove("hidden");
+  const list = viewerChapters(), c = list[STATE.viewerIdx];   // 작업실 리더를 본 회차로 동기화
+  if(c){ STATE.activeChapter = c.chapter; renderChapters(); renderReader(); }
+}
+document.addEventListener("keydown", e=>{
+  if($("#view-viewer").classList.contains("hidden")) return;
+  if(e.key==="ArrowLeft"){ viewerNav(-1); }
+  else if(e.key==="ArrowRight"){ viewerNav(1); }
+  else if(e.key==="Escape"){ closeViewer(); }
+});
 
 // ---------- 회차 생성 (SSE 라이브) ----------
 function generateNext(){
