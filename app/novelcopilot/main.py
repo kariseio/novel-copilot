@@ -30,6 +30,16 @@ def create_app() -> FastAPI:
     def health():
         return {"ok": True, "provider": settings.llm_provider, "model": settings.gen_model}
 
+    # 정적 프론트엔드(html/js/css)는 항상 재검증 — 코드 갱신이 브라우저 디스크 캐시에 묻혀
+    # '옛 화면이 계속 보이는' 문제 차단(no-cache = ETag 재검증 후 변경 시 즉시 반영).
+    @app.middleware("http")
+    async def _no_cache_static(request, call_next):
+        resp = await call_next(request)
+        path = request.url.path
+        if not path.startswith("/api/") and (path == "/" or path.endswith((".html", ".js", ".css"))):
+            resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+        return resp
+
     app.include_router(router)
     app.mount("/", StaticFiles(directory=str(_WEB_DIR), html=True), name="web")
     return app
