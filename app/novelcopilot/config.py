@@ -22,6 +22,7 @@ class Settings(BaseSettings):
 
     # 컨텍스트 예산 — '기아 해소' 재배분(docs/context-redesign.md): 입력 ~40k토큰 목표, 헤드룸 60% 유지.
     gen_max_tokens: int = 3000
+    chapter_max_tokens: int = 9000          # 단일 패스 회차 집필 출력 예산(장면 이어붙이기 폐기 — 재설계)
     max_rewrite_rounds: int = 3
     prev_chapter_context_chars: int = 8000   # 직전 회차 '전문' 수준(실전 1순위 관행 — 기존 4,000자는 56%만 전달)
     story_so_far_chars: int = 12000          # 누적 줄거리(현재 에피소드=상세 시놉시스 1,500자/화 + 과거=한줄·롤업)

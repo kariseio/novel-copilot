@@ -22,7 +22,9 @@ def sanitize_meta(text: str) -> str:
     for ln in text.splitlines():
         s = ln.strip()
         if s and (_META_LINE.match(s) or (_BRACKET_ONLY.match(s)
-                  and re.search(r"END|다음|계속|종료|전환|장면|회차|scene|chapter", s, re.IGNORECASE))):
+                  and re.search(r"END|다음\s*(화|회차)|계속됩니다|회차|scene break|chapter", s, re.IGNORECASE))):
+            continue
+        if s.startswith(("(※", "※", "(* ")) or re.match(r"^\s*[\((]\s*※", s):   # 퇴고 지시문((※ …수정함) 류) 누출 제거
             continue
         if s.startswith(("- \"", "- “", "* \"", "* “")):   # 마크다운 불릿이 대사에 누출된 조판 제거
             ln = ln.replace("- ", "", 1).replace("* ", "", 1)
@@ -88,40 +90,69 @@ class ChapterGenerator:
             self.bus.emit("plan_scenes", "parse_failure", chapter=beat.get("chapter"))
             return [SceneSpec(index=0, goal=beat.get("summary", ""), key_events=beat.get("key_events", []))]
 
-    _HOOKS = {   # 회차 끝맺음 정책(StyleSpec.ending_hook 데이터 주도 — 장르/작가 제어, 상시 강제 제거)
-        "cliffhanger": ("\n\n[이 장면은 회차의 마지막] 끝을 '절단신공'으로 — 깔끔히 닫지 말고 다음 화가 궁금해지는 "
-                        "위기·반전·미끼로 끊어라(마지막 한두 줄이 훅)."),
+    _HOOKS = {   # 회차 끝맺음 정책(StyleSpec.ending_hook 데이터 주도). 작법 '명칭'(절단신공/훅 등)은 모델 입력 금지
+        "cliffhanger": ("\n\n[이 장면은 회차의 마지막] 깔끔히 닫지 말고 다음 화가 궁금해지는 "
+                        "위기·반전·미끼로 끊어라(마지막 한두 줄에서 멈춰라)."),   # 은어 누출('절단.' 단독행) 소스 제거
         "soft": ("\n\n[이 장면은 회차의 마지막] 다음 화가 궁금해질 여지는 남기되, 과도한 위기 조성 없이 "
                  "이 회차의 감정·상황을 자연스러운 여운으로 마무리하라."),
         "none": "",
     }
-    _CLOSING = ("\n\n[이 장면은 '작품 전체의 마지막' 회차다] 절단신공 금지 — 중심 갈등과 감정선을 매듭지어라. "
+    _CLOSING = ("\n\n[이 장면은 '작품 전체의 마지막' 회차다] 다음 화를 예고하는 미끼로 끊지 말고 — 중심 갈등과 감정선을 매듭지어라. "
                 "본문에서 제시된 미결 선택은 반드시 결행하고, 새로운 미스터리·신호·떡밥·세력 도입 금지. 여운 있게 작품을 닫아라.")
 
-    def _draft(self, board, scene, prev_scenes, last=False, closing=False, recent_tails=None) -> str:
+    def _draft(self, board, scene, prev_scenes, last=False, closing=False, recent_tails=None,
+               chapter_mode=False) -> str:
         hook = ""
         if last:
             hook = self._CLOSING if closing else self._HOOKS.get(self.style.ending_hook, self._HOOKS["cliffhanger"])
             if hook and not closing and recent_tails:
                 tails = "\n".join(f"- …{t[-70:]}" for t in recent_tails[-3:] if t)
                 hook += ("\n(최근 회차들의 끝:\n" + tails +
-                         "\n— 위와 같은 유형의 훅('접근하는 신호/누군가 부르는 소리/다가오는 무언가' 류 포함) 반복 절대 금지. "
+                         "\n— 위와 같은 유형의 끝맺음('접근하는 신호/누군가 부르는 소리/다가오는 무언가' 류 포함) 반복 절대 금지. "
                          "위기·반전·폭로·결단·관계 균열 중 최근에 안 쓴 다른 축으로 끊어라.)")
+            if hook and not closing:
+                hook += "\n(예고편 문장 금지 — '다음 위기가 모습을 드러낸다' 류 서술 예고 대신, 장면 '안'의 구체 사건·대사로 끊어라.)"
+        if chapter_mode:   # 회차 집필: 분량·장면 어휘는 모델 입력 금지(절단점은 글자 수가 아니라 극적 순간의 문제)
+            out_instr = ("\n\n이번 회차 본문만 출력(머리말·설명·메타·예고문 금지). "
+                         "분량을 채우기 위한 묘사 늘리기 금지 — 이야기가 자연스러운 절단점에 이르면 거기서 멈춰라. "
+                         "회차 전체에서 시제(과거형 기조)·따옴표 글리프를 일관되게 유지하고, 같은 사건·클라이맥스를 두 번 쓰지 마라.")
+            mt = self.settings.chapter_max_tokens
+        else:
+            out_instr = "\n\n본문만 출력(머리말·설명·메타 금지)."
+            mt = self.settings.gen_max_tokens
         return self.provider.chat(
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
-             {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook
-              + "\n\n이 장면 본문만 출력(머리말·설명·메타 금지)."}],
-            temperature=0.85, max_tokens=self.settings.gen_max_tokens)
+             {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr}],
+            temperature=0.85, max_tokens=mt)
 
-    def _rewrite(self, scene_text, violations, board) -> str:
+    def _continue(self, board, sofar: str, closing=False, recent_tails=None) -> str:
+        """진행 이어쓰기 — 출고 분량은 지시가 아니라 '이야기 전진'으로 채운다(하한 지시=물 타기 차단).
+        전문 말미를 보고 절단점에서 잇는 순차 연속(화 경계 인계와 동일 메커니즘 — 병렬 블록 접합 아님)."""
+        hook = self._CLOSING if closing else self._HOOKS.get(self.style.ending_hook, self._HOOKS["cliffhanger"])
+        if hook and not closing and recent_tails:
+            tails = "\n".join(f"- …{t[-70:]}" for t in recent_tails[-3:] if t)
+            hook += "\n(최근 회차들의 끝:\n" + tails + "\n— 같은 유형의 끝맺음 반복 금지.)"
+        spec = SceneSpec(index=1, goal=(
+            "위 '지금까지 쓴 본문'의 마지막 문장에서 '즉시' 이어서, 이야기를 다음 국면으로 한 단계 전진시켜 계속 써라. "
+            "이미 일어난 사건·대화의 재연·요약 금지, 새 인물 창조 금지. 새 절단점에 이르면 멈춰라."), key_events=[])
+        return self.provider.chat(
+            [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
+             {"role": "user", "content": self.assembler.assemble(board, spec, sofar[-3500:]) + hook
+              + "\n\n이어지는 본문만 출력(이미 쓴 부분 재출력 금지, 머리말·메타 금지)."}],
+            temperature=0.85,
+            max_tokens=self.settings.chapter_max_tokens)
+
+    def _rewrite(self, scene_text, violations, board, max_tokens: int | None = None) -> str:
         vlist = "\n".join(f"- [{v.kind}/{v.grade.value}] {v.entity}: 캐논={v.canon} 위반={v.text}" for v in violations)
         gt = "\n".join(f"- {f.entity}: {f.attr_label}={f.value}" for f in board.ground_truth)
-        return self.provider.chat(
+        out = self.provider.chat(
             [{"role": "system", "content":
               "교정 작가. 지적된 설정 위반만 고치고 문체·줄바꿈·분량은 보존. 확정 설정·세계규칙이 비트보다 우선. "
               "'제거 상태'(사망·소멸 등) 인물의 현재 행동은 회상/환영/삭제로, 속성·관계는 캐논값으로 교정. 본문만.\n" + self.style_block},
              {"role": "user", "content": f"[확정 설정]\n{gt}\n[설정 위반]\n{vlist}\n[원본 본문]\n{scene_text}"}],
-            temperature=0.4, max_tokens=self.settings.gen_max_tokens)
+            temperature=0.4, max_tokens=max_tokens or self.settings.gen_max_tokens)
+        # 길이 보존 가드: 절단/메타응답이 본문을 갉아먹는 회귀 차단(R2 본문 파괴 교훈 — 전량 재작성 채널의 안전망)
+        return out if len(out or "") >= len(scene_text) * 0.6 else scene_text
 
     def _reformat(self, text: str) -> str:
         """토막 행갈이 붕괴 복구 — 내용 불변, 조판만 정상 산문으로(문체 드리프트 루프 차단).
@@ -131,8 +162,42 @@ class ChapterGenerator:
               "조판 교정자. 내용·문장·대사를 단 한 글자도 바꾸지 말고, 과도하게 토막난 행갈이만 정상 산문으로 재조판하라. "
               "대사는 한 줄에 하나 유지, 지문은 2~4문장 문단으로 묶어라. 본문만 출력."},
              {"role": "user", "content": text}],
-            temperature=0.0, max_tokens=self.settings.gen_max_tokens * 2)
-        return out if len(out or "") >= len(text) * 0.6 else text
+            temperature=0.0, max_tokens=max(self.settings.gen_max_tokens * 2,
+                                            self.settings.chapter_max_tokens))
+        # 계약(공백/행갈이만 변경)은 코드로 '완전' 검증 가능 — 길이 60% 차용 가드(40% 손실 허용) 폐기
+        if out and re.sub(r"\s+", "", out) == re.sub(r"\s+", "", text):
+            return out
+        self.bus.emit("draft_chapter", "reformat_rejected", out_chars=len(out or ""), in_chars=len(text))
+        return text
+
+    def _fix_tense(self, chapter_text: str) -> str:
+        """현재형 종결('~ㄴ다.') → 과거형 교정. 패치 방식(find 정확일치·count==1) — 한국어 시제는
+        형태론적 변환(간다→갔다, 불규칙 다수)이라 맹목 정규식 치환 금지, 변환만 LLM·적용은 코드."""
+        from .quality_gates import tense_leak_ratio
+        prose = [ln for ln in chapter_text.splitlines()
+                 if ln.strip() and not ln.strip().startswith(('"', '\u201c', '\u2014'))]
+        sents = [t for ln in prose for t in re.split(r"(?<=다\.)\s+", ln)
+                 if t.strip().endswith("다.") and re.search(r"(?<![었았])[는한온간운인난된친낀]다\.$", t.strip())][:25]
+        if not sents:
+            return chapter_text
+        try:
+            res = self.provider.chat_json(
+                [{"role": "system", "content":
+                  "한국어 시제 교정기. 아래 문장들의 종결을 과거형으로 바꿔라(내용·어순 불변, 종결어미만). "
+                  '본문 구절 정확 치환 쌍으로. JSON: {"fixes":[{"find":"","replace":""}]}'},
+                 {"role": "user", "content": "\n".join(f"- {t.strip()}" for t in sents)}],
+                temperature=0.0, max_tokens=2500)
+            n = 0
+            for fx in (res.get("fixes") or [])[:25]:
+                f, r = fx.get("find") or "", fx.get("replace") or ""
+                if f and r and f != r and chapter_text.count(f) == 1:
+                    chapter_text = chapter_text.replace(f, r, 1)
+                    n += 1
+            self.bus.emit("quality_gate", "tense_fixes", applied=n,
+                          leak_after=round(tense_leak_ratio(chapter_text), 3))
+        except Exception:
+            self.bus.emit("quality_gate", "tense_fix_failed")
+        return chapter_text
 
     def _continuity_polish(self, chapter_text: str, names: list[str] | None = None) -> str:
         """회차 내부 연속성 교정 — 패치 방식: LLM 은 '수정 쌍'만 내고 코드가 정확일치 치환만 적용.
@@ -144,7 +209,7 @@ class ChapterGenerator:
                 [{"role": "system", "content":
                   "출고 검수자. 이 회차에서 다음 결함만 찾아라: ①수치(배터리·산소·식량·GPU·시간)·소지품·위치의 회차 내 모순 "
                   "②공식 인명의 오염(한 글자 다른 오타) ③문두/문중 절단된 깨진 문장 ④화자의 자기 언급 메타문장(예: '이 장의 끝에') "
-                  "⑤같은 부사구·관용구('짧게 말했다','그 순간' 등)의 과도 반복(가장 잦은 것 일부를 동의 표현으로) ⑥현재형 시제 누출(과거형으로). "
+                  "⑤같은 부사구·관용구('짧게 말했다','그 순간' 등)의 과도 반복(가장 잦은 것 일부를 동의 표현으로) ⑥현재형 시제 누출(과거형으로) ⑦장면 이어붙임 중복 — 같은 사건/탈출이 두 번 재생되거나 파괴된 것이 무설명 부활하면 중복 단락을 짧은 경과 문장으로 치환. "
                   "수정은 본문 구절의 정확한 치환 쌍으로만(find=본문에 실제 있는 구절 그대로). "
                   '없으면 빈 배열. JSON: {"fixes":[{"find":"","replace":""}]}'},
                  {"role": "user", "content": roster + chapter_text}],
@@ -240,18 +305,21 @@ class ChapterGenerator:
 
         def _track(stage, before_tokens):
             stage_usage[stage] = stage_usage.get(stage, 0) + (self.provider.usage.chat_tokens - before_tokens)
-        # 보이스 카드: 등장 인물의 말투 시그니처(스타일 지침 — 캐논 아님)
+        # 보이스 카드: 등장 인물 말투의 '결'(스타일 지침 — 캐논 아님). 시그니처 문구의 기계 반복은 틱 생산기(소스 차단)
         voice_cards = "\n".join(f"- {e.name}: {e.voice}"
                                 for e in (ontology.entities.get(i) for i in involved)
                                 if e is not None and getattr(e, "voice", ""))
+        if voice_cards:
+            voice_cards += ("\n(보이스는 태도·어휘의 '결'이다 — 특정 어미·문구를 매 대사에 찍지 마라. "
+                            "시그니처 표현이 있다면 회차당 1~2회, 결정적 순간에만.)")
         if restraint:   # 전권 과용 표현 절제(작품-전역 원장 → 회차 생성 입력으로, 예방측)
             voice_cards += ("\n[표현 절제 — 이 작품에서 이미 과용된 표현. 이번 화에서는 거의 쓰지 마라]\n"
                             + ", ".join(restraint[:8]))
 
         narrative = list(anchors or [])   # 엔딩/아크 앵커(narrative, ground_truth 아님) 상단
         if ch_no > 1:
-            narrative += rag.search(beat.get("summary", ""), ch_no - 1, k=getattr(self.settings, "rag_k", 6))
-            narrative += wiki.retrieve(beat.get("summary", ""), ch_no - 1, k=getattr(self.settings, "wiki_k", 3))
+            narrative += rag.search(beat.get("summary", ""), ch_no - 1, k=self.settings.rag_k)
+            narrative += wiki.retrieve(beat.get("summary", ""), ch_no - 1, k=self.settings.wiki_k)
         ground_truth = (ontology.canon_facts(involved, ch_no)
                         + ontology.canon_relations(involved, ch_no))   # 확정 관계도 '박기'(ground_truth)
         board = ContextBoard(chapter=ch_no, ground_truth=ground_truth,
@@ -261,62 +329,69 @@ class ChapterGenerator:
         self.bus.emit("assemble_memory", "done", chapter=ch_no,
                       ground_truth=len(board.ground_truth), retrieved=len(narrative))
 
-        _t = self.provider.usage.chat_tokens
-        scenes = self.plan_scenes({**beat, "chapter": ch_no}, directives)
-        _track("plan", _t)
-        self.bus.emit("plan_scenes", "done", chapter=ch_no, scenes=len(scenes))
-
+        # ---- 비트 단위 생성 · 코드 조립(재설계: 장면 개념·분량 지시 폐기) ----
+        # 장면 분해(scenes_per_chapter)는 구 토큰 한계 시절 3콜 분할의 유물 — 장면 수는 설계 입력이 아니라 결과다.
+        # 분량도 모델 입력에서 제거: 지시로 누르면 절단점이 글자 수에 종속되고(급결말), 하한을 지시하면 물 타기가 된다.
+        # 모델은 비트 하나를 '자연스러운 절단점'까지 쓰고, 출고 규범(분량)은 코드가 '진행 이어쓰기'로 채운다
+        # — 생성 단위(비트=극적 곡선)와 출고 단위(회차=플랫폼 규범)의 분리. 이어쓰기는 전문을 보고 절단점에서
+        # 잇는 순차 연속(검증된 화 경계 인계와 동일 메커니즘)이지, 실패했던 병렬 블록 접합이 아니다.
+        spec = SceneSpec(index=0, goal=beat.get("summary", ""), key_events=beat.get("key_events", []))
         rounds: list[RoundTrace] = []
         initial_caught = None
-        scene_texts: list[str] = []
-        for sc in scenes:
-            prev = "\n".join(scene_texts)
-            self.bus.emit("draft_scene", "start", chapter=ch_no, scene=sc.index, goal=sc.goal[:60])
+        self.bus.emit("draft_chapter", "start", chapter=ch_no)
+        _t = self.provider.usage.chat_tokens
+        text = sanitize_meta(self._draft(board, spec, "", last=True, closing=closing,
+                                         recent_tails=recent_tails, chapter_mode=True))
+        norm = int(self.style.target_chars_per_chapter * 0.85)   # 출고 규범(코드 판정 — 모델은 분량을 모른다)
+        ext = 0
+        while len(text) < norm and ext < 2:
+            ext += 1
+            self.bus.emit("draft_chapter", "extend", chapter=ch_no, chars=len(text), round=ext)
+            more = sanitize_meta(self._continue(board, text, closing=closing, recent_tails=recent_tails))
+            if len(more.strip()) < 200:      # 무의미 연장 → 중단(짧은 회차로 출고가 낫다)
+                break
+            text = text.rstrip() + "\n\n" + more.strip()
+        tail_seg = "\n".join(text.splitlines()[-15:])
+        if (fragmentation_score(text) < 22 or fragmentation_score(tail_seg) < 14
+                or short_line_ratio(text) > 0.15):
+            # 토막 행갈이 붕괴(전체 또는 말미 국소) → 조판 복구
+            self.bus.emit("draft_chapter", "reformat", chapter=ch_no)
+            text = sanitize_meta(self._reformat(text))
+        _track("draft", _t)
+        best_text, best_hard = text, None     # M5: hard 위반 최소 텍스트 보존
+        ch_budget = self.settings.chapter_max_tokens
+        for r in range(self.settings.max_rewrite_rounds + 1):
             _t = self.provider.usage.chat_tokens
-            text = sanitize_meta(self._draft(board, sc, prev, last=(sc is scenes[-1]), closing=closing,
-                                             recent_tails=recent_tails))
-            tail_seg = "\n".join(text.splitlines()[-15:])
-            if (fragmentation_score(text) < 22 or fragmentation_score(tail_seg) < 14
-                    or short_line_ratio(text) > 0.15):
-                # 토막 행갈이 붕괴(전체 또는 말미 국소 — '시간이/점점/줄어들고' 류 가짜 긴장) → 조판 복구
-                self.bus.emit("draft_scene", "reformat", chapter=ch_no, scene=sc.index)
-                text = sanitize_meta(self._reformat(text))
-            _track("draft", _t)
-            best_text, best_hard = text, None     # M5: hard 위반 최소 텍스트 보존
-            for r in range(self.settings.max_rewrite_rounds + 1):
-                _t = self.provider.usage.chat_tokens
-                res = self.checker.check_text(text, ontology, ch_no, involved)
-                _track("check", _t)
-                hard = res.hard
-                # 본문 재작성으로 고칠 수 있는 위반(QUASI=추출+코드비교)과 SSOT 자기모순(DETERMINISTIC=그래프/시점 내부모순) 분리.
-                # SSOT 모순은 어떤 본문을 써도 안 사라지므로 재작성 루프를 돌리지 않는다(무의미한 LLM 소모·결정론적 영구 ESCALATED 방지) — M4.
-                text_hard = [v for v in hard if v.grade == SignalGrade.QUASI]
-                ssot_hard = [v for v in hard if v.grade == SignalGrade.DETERMINISTIC]
-                rounds.append(RoundTrace(round=r, scene=sc.index, n_violations=len(res.violations),
-                                         n_hard=len(hard), kinds=[v.kind for v in res.violations]))
-                self.bus.emit("consistency_check", "done", chapter=ch_no, scene=sc.index, round=r,
-                              violations=len(res.violations), hard=len(hard),
-                              kinds=[v.kind for v in res.violations])
-                if initial_caught is None:
-                    initial_caught = list(res.violations)
-                if best_hard is None or len(hard) < best_hard:   # M5: 최선본 갱신(마지막 재작성이 악화시켜도 회귀 방지)
-                    best_text, best_hard = text, len(hard)
-                if not text_hard or r == self.settings.max_rewrite_rounds:
-                    if ssot_hard:   # 본문으로 못 고치는 SSOT 자기모순 — 작가에게 가시화(프롬프트 재작성 무의미)
-                        self.bus.emit("scene_loop", "ssot_contradiction", chapter=ch_no, scene=sc.index,
-                                      kinds=[v.kind for v in ssot_hard])
-                    if text_hard and r == self.settings.max_rewrite_rounds:
-                        self.bus.emit("scene_loop", "non_convergence", chapter=ch_no, scene=sc.index,
-                                      hard=[v.kind for v in text_hard])
-                    break
-                self.bus.emit("partial_rewrite", "start", chapter=ch_no, scene=sc.index, round=r,
-                              fixing=[v.kind for v in text_hard])
-                _t = self.provider.usage.chat_tokens
-                text = sanitize_meta(self._rewrite(text, text_hard, board))
-                _track("rewrite", _t)
-            scene_texts.append(best_text)     # M5: 최선본 채택(악화 텍스트 확정 금지)
+            res = self.checker.check_text(text, ontology, ch_no, involved)
+            _track("check", _t)
+            hard = res.hard
+            # 본문 재작성으로 고칠 수 있는 위반(QUASI)과 SSOT 자기모순(DETERMINISTIC) 분리 — M4.
+            text_hard = [v for v in hard if v.grade == SignalGrade.QUASI]
+            ssot_hard = [v for v in hard if v.grade == SignalGrade.DETERMINISTIC]
+            rounds.append(RoundTrace(round=r, scene=0, n_violations=len(res.violations),
+                                     n_hard=len(hard), kinds=[v.kind for v in res.violations]))
+            self.bus.emit("consistency_check", "done", chapter=ch_no, scene=0, round=r,
+                          violations=len(res.violations), hard=len(hard),
+                          kinds=[v.kind for v in res.violations])
+            if initial_caught is None:
+                initial_caught = list(res.violations)
+            if best_hard is None or len(hard) < best_hard:   # M5: 최선본 갱신
+                best_text, best_hard = text, len(hard)
+            if not text_hard or r == self.settings.max_rewrite_rounds:
+                if ssot_hard:   # 본문으로 못 고치는 SSOT 자기모순 — 작가에게 가시화
+                    self.bus.emit("scene_loop", "ssot_contradiction", chapter=ch_no, scene=0,
+                                  kinds=[v.kind for v in ssot_hard])
+                if text_hard and r == self.settings.max_rewrite_rounds:
+                    self.bus.emit("scene_loop", "non_convergence", chapter=ch_no, scene=0,
+                                  hard=[v.kind for v in text_hard])
+                break
+            self.bus.emit("partial_rewrite", "start", chapter=ch_no, scene=0, round=r,
+                          fixing=[v.kind for v in text_hard])
+            _t = self.provider.usage.chat_tokens
+            text = sanitize_meta(self._rewrite(text, text_hard, board, max_tokens=ch_budget))
+            _track("rewrite", _t)
 
-        chapter_text = "\n\n".join(scene_texts)
+        chapter_text = best_text     # M5: 최선본 채택
         # ---- 품질 결정론 게이트(닫힌 루프): 검출=코드, 교정=국소 ----
         from .quality_gates import word_tics, hook_repeat_semantic, strip_directive_leak
         chapter_text = strip_directive_leak(chapter_text)              # 지시어 누출(R7 '절단.') 결정론 제거
@@ -326,6 +401,9 @@ class ChapterGenerator:
             _t = self.provider.usage.chat_tokens
             chapter_text = self._fix_tics(chapter_text, offenders)
             _track("quality", _t)
+            residual = word_tics(chapter_text, roster, cap=4)
+            if residual:   # 교정 후 재검(닫힌 루프) — 잔존은 무음 통과 금지
+                self.bus.emit("quality_gate", "tics_residual", chapter=ch_no, tics=residual[:3])
         if recent_tails and not closing:
             tail_now = " ".join([ln for ln in chapter_text.splitlines() if ln.strip()][-3:])
             if hook_repeat_semantic(self.provider, tail_now, recent_tails) > 0.82:   # 의미 유사(템플릿 재탕)
@@ -337,6 +415,11 @@ class ChapterGenerator:
             names = [ontology.entities[i].name for i in involved if i in ontology.entities]
             chapter_text = sanitize_meta(self._continuity_polish(chapter_text, names=names))
             _track("polish", _t)
+        from .quality_gates import tense_leak_ratio
+        if tense_leak_ratio(chapter_text) > 0.05:   # 시제 누출(현재형 종결 혼입) — 폴리시 ⑥의 결정론 백스톱
+            _t = self.provider.usage.chat_tokens
+            chapter_text = self._fix_tense(chapter_text)
+            _track("quality", _t)
         _t = self.provider.usage.chat_tokens
         final = self.checker.check_text(chapter_text, ontology, ch_no, involved)
         _track("check", _t)
