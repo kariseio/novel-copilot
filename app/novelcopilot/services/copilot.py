@@ -355,7 +355,13 @@ class CopilotService:
 
             active = [d for d in state.directives if d.from_chapter <= next_ch]
             prior = [c for c in state.chapters if c.chapter < next_ch]
-            summaries = [f"{c.chapter}화 {c.title}: {c.summary or c.text[:120]}" for c in prior[-4:]]
+            # 비트 설계용 맥락: 과거=한줄, 직전 화=상세 시놉시스+말미(클리프행어 인계) — 설계 단계 기아 방지
+            summaries = [f"{c.chapter}화 {c.title}: {c.summary or c.text[:120]}" for c in prior[-4:-1]]
+            if prior:
+                pv = prior[-1]
+                summaries.append(f"{pv.chapter}화(직전) 상세: {getattr(pv, 'detail_synopsis', '') or pv.summary or pv.text[:300]}")
+                if pv.text:
+                    summaries.append(f"직전 화 말미(이번 화 도입에서 즉시 이어받아 회수할 것): …{pv.text[-280:]}")
 
             arc = ep = None
             is_finale = False
@@ -366,7 +372,15 @@ class CopilotService:
                 prog_snap = state.narrative_progress.model_copy(deep=True)
                 spine_snap = spine.model_copy(deep=True)
                 planner = ArcPlanner(sess.provider)
-                ep = planner.current_episode(state.world, state.narrative_progress, summaries)
+                ep = planner.current_episode(state.world, state.narrative_progress, summaries,
+                                             remaining=max(2, (state.seed.target_chapters or 12) - next_ch + 1))
+                for _e in state.world.entities:   # 캐스트 플랜 레이어 동기화 — lazy 아크 설계가 낳은 인물(등장 전 설계)
+                    if _e.id not in sess.bundle.ontology.entities:
+                        from ..engine.ontology import Entity as _OntEntity
+                        sess.bundle.ontology.add(_OntEntity(id=_e.id, name=_e.name, etype=_e.etype,
+                                                            attrs=dict(_e.attrs), aliases=list(_e.aliases),
+                                                            provisional=_e.provisional))
+                        sess.bus.emit("cast_plan", "registered", chapter=next_ch, entity=_e.name)
                 if ep is None:                                  # 해소 중 완결 도달
                     self.repo.save(state)
                     return {"completed": True, "reason": "ending_reached",
@@ -386,9 +400,44 @@ class CopilotService:
                         plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
                 beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
                                                 summaries, [d.text for d in active], plant_notes=plant_notes)
+                # ---- 계획 하네스: 비트도 본문처럼 생성→결정론 lint→교정 1회 (무검증 통과 구간 제거) ----
+                from ..engine.plan_lint import lint_beat, beat_repeat_score
+                from ..domain.types import Violation as _V, SignalGrade as _SG
+                plan_viols = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
+                prev_beat_summaries = [c.title + " " + (getattr(c, "detail_synopsis", "") or c.summary)[:200]
+                                       for c in prior[-4:]]
+                rep = beat_repeat_score(sess.provider, f"{beat.title} {beat.summary}", prev_beat_summaries)
+                if rep > 0.86:   # 비트 재탕('같은 절벽') — 설계 단계 차단(본문 생성 전)
+                    plan_viols.append(_V(entity="beat", kind="plan_beat_repeat", grade=_SG.DETERMINISTIC,
+                                         canon="직전 비트들", text=f"유사도 {rep:.2f}",
+                                         evidence="계획 lint: 재탕"))
+                if plan_viols:
+                    sess.bus.emit("plan_lint", "violations", chapter=next_ch,
+                                  kinds=[v.kind for v in plan_viols])
+                    fix_note = "; ".join(f"[{v.kind}] {v.text}" for v in plan_viols)
+                    beat = planner.beat_for_episode(   # 위반 명시 재계획 1회(M4식 — 무한 루프 금지)
+                        state.world, arc, ep, next_ch, is_finale, summaries,
+                        [d.text for d in active] + [f"(계획 결함 교정 필수) {fix_note}"],
+                        plant_notes=plant_notes)
+                    remaining = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
+                    if remaining:   # 잔존 → 가시화 + 보수 폴백(무효/제거 인물만 제외하고 진행 — 정지 금지)
+                        sess.bus.emit("plan_lint", "non_convergence", chapter=next_ch,
+                                      kinds=[v.kind for v in remaining])
+                        bad = {v.entity for v in remaining}
+                        beat.entities = [e for e in beat.entities
+                                         if e in sess.bundle.ontology.entities and
+                                         sess.bundle.ontology.name(e) not in bad] or beat.entities[:1]
                 hint = f"{beat.title} {beat.summary} {' '.join(beat.key_events)} {ep.climax}"
                 anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars, hint)
                 anchors = anchors + _arc_anchors(spine, arc, ep)
+                espec = {e.id: e for e in state.world.entities}
+                for eid in beat.entities:   # 데뷔 집행: 설계 완료된 인물의 첫 등장 — 콜드 드롭 소스 차단
+                    e = espec.get(eid)
+                    if e is not None and not getattr(e, "introduced", False) and getattr(e, "profile", ""):
+                        anchors.append(RetrievedItem(source="cast_debut", ref=eid,
+                                       text=f"[신규 등장 인물 — 이번 화 첫 도입. 첫 등장 시 정체·관계를 알 수 있는 "
+                                            f"소개 앵커 1문장 의무, 기지 인물처럼 다루지 마라] {e.name}: {e.profile[:300]}"))
+                        sess.bus.emit("cast_plan", "debut", chapter=next_ch, entity=e.name)
                 story_so_far, dropped = _build_story_so_far_hier(state, next_ch, self.settings.story_so_far_chars)
             else:                      # 평면 모드(하위호환)
                 beat = BeatPlanner(sess.provider).beat_for(
@@ -421,8 +470,12 @@ class CopilotService:
             # 전권 틱 원장(작품-전역 품질 상태): 지난 회차 전체에서 과용된 습관구 → 이번 화 절제 목록(예방측)
             from ..engine.quality_gates import word_tics as _wt
             roster_names = {e.name for e in sess.bundle.ontology.entities.values()}
+            roster_names |= {k for ent in state.bible.entries for k in (ent.keywords or [])}   # 세계관 고유어 제외(데이터 주도 — 코드 사전 금지)
             corpus = " ".join(c.text for c in prior[-8:] if c.text)
             restraint = [p for p, n in _wt(corpus, roster_names, cap=12)][:8]
+            if prior:   # 틱 모방-증폭 루프 차단(재설계): 직전 화 원문 주입이 말버릇을 '문체'로 학습시키는 고리를 명시 절제로 끊는다
+                restraint += [w for w, _ in _wt(prior[-1].text or "", roster_names, cap=3)]
+                restraint = list(dict.fromkeys(restraint))[:10]
             record = sess.bundle.generator.generate(
                 next_ch, beat.model_dump(), sess.bundle.ontology, sess.bundle.rag,
                 sess.bundle.wiki, directives=active, prev_chapter_text=prev_text,
@@ -432,7 +485,13 @@ class CopilotService:
             # 동적 온톨로지 업데이트(엔진 고도화) — FINALIZED 회차에만
             if record.status == ChapterStatus.FINALIZED:
                 _t0 = sess.provider.usage.chat_tokens
-                proposal = sess.bundle.updater.propose(record.text, sess.bundle.ontology, next_ch)
+                for eid in sess.bundle.ontology.scan_present_ids(record.text):   # 데뷔 완료 마킹(이후 앵커 중복 방지)
+                    e = next((x for x in state.world.entities if x.id == eid), None)
+                    if e is not None and not getattr(e, "introduced", False):
+                        e.introduced = True
+                proposal = sess.bundle.updater.propose(
+                    record.text, sess.bundle.ontology, next_ch,
+                    existing_setting_titles=[b.title for b in state.bible.entries if b.status != "deprecated"])
                 record.usage_by_stage["ontology_propose"] = sess.provider.usage.chat_tokens - _t0
                 changes, new_specs, new_tl, new_edges = sess.bundle.updater.apply(
                     proposal, sess.bundle.ontology, next_ch)

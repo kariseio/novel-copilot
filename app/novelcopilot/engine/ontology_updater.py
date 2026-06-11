@@ -54,13 +54,17 @@ class OntologyUpdater:
                 return "alive"
         return s
 
-    def propose(self, text: str, ontology: Ontology, chapter: int) -> dict:
+    def propose(self, text: str, ontology: Ontology, chapter: int,
+                existing_setting_titles: list[str] | None = None) -> dict:
         roster = [{"id": e.id, "name": e.name, "etype": e.etype} for e in ontology.entities.values()]
         attr_keys = [a.key for a in self.vocab.values()]
         rel_keys = list(ontology.rel_catalog.keys())
         ent_types = list(ontology.entity_types.keys())
         # 생애주기 상태 어휘를 데이터에서 — 'status: alive|dead' 하드코딩 제거(장르별 선언 states 를 그대로 전달)
         state_hint = "; ".join(f"{a.key}:{a.states}" for a in self.vocab.state_specs() if a.states)
+        # 통제어휘를 상류에서 고지(미고지 → 표면 변이 보고 → 하류 escalation 소음의 소스 차단). raw vocab 사용(게이트와 동일 기준)
+        cat_hint = "; ".join(f"{a.key}:{a.vocab}" for a in self.vocab.values()
+                             if a.kind == "categorical" and a.vocab)
         msg = [
             {"role": "system", "content":
              "너는 작품 설정 관리자다. 이번 회차 본문에서 '명시적으로' 드러난 구조적 사실만 보고하라. 추측 금지.\n"
@@ -125,6 +129,10 @@ class OntologyUpdater:
             changes.append(OntologyChange(op="new_entity", entity=name,
                                           detail=f"신규 {etype} 자동 커밋({nc.get('role', '')})", applied=True))
             self.bus.emit("ontology_update", "new_entity", chapter=chapter, entity=name, etype=etype)
+            if etype == "character":
+                # 캐스트 플랜 레이어 위반: 이름 있는 인물이 '설계 없이' 본문에서 발명됨(콜드 드롭) —
+                # 등록(잠정)은 안전망으로 유지하되, 사후 수확이 아니라 공정 위반으로 가시화(다음 아크 설계 입력)
+                self.bus.emit("cast_plan", "uncast_character", chapter=chapter, entity=name)
 
         # 2) 상태 변화 — mutable 정책
         eff = chapter + 1
