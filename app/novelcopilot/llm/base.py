@@ -37,7 +37,7 @@ class LLMProvider(ABC):
         ...
 
     def chat_json(self, messages: list[dict], *, temperature: float = 0.0,
-                  max_tokens: int = 2200) -> dict:
+                  max_tokens: int = 6000) -> dict:
         """구조화 출력 — 실패 시 1회 교정 재시도(PRD §6.3 계승)."""
         txt = self.chat(messages, temperature=temperature, max_tokens=max_tokens, json_mode=True)
         try:

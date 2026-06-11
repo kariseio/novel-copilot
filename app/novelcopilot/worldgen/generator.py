@@ -35,7 +35,9 @@ _SCHEMA_HINT = """{
   ],
   "relations": [],                      // 선택: 작품별 관계 타입(RelationSpec). rel_id 자유
   "seed_edges": [],                     // 선택: 시작 시점 관계 엣지
-  "world_rules": [],                    // 선택: 세계 규칙(있으면 flag 영문 + keywords 한국어)
+  "world_rules": [                      // 선택(비워도 됨). 넣을 땐 반드시 이 형태(flag 영문 필수):
+    {"rule_id":"no_reawaken","text":"각성은 일생에 한 번뿐.","flag":"reawakening","keywords":["재각성"],"extract_hint":"두 번째 각성 사건"}
+  ],
   "timeline": [],                       // 선택: 예정된 상태 전이(예: {"entity_id":"x","attr":"status","value":"dead","eff_from":4})
   "beats": [
     {"chapter":1,"title":"제목","summary":"요약","key_events":["사건1","사건2"],"entities":["hero"]}
@@ -61,7 +63,7 @@ class WorldGenerator:
             "   - categorical(통제어휘 vocab + mutable): 눈색·소속·진영·신분 등\n"
             "   - numeric(monotonic 은 '정말 단조일 때만'; 오르내리면 생략): 등급·내공·호감 등\n"
             "   - state(생애주기): 사망·각성·정체발각·결혼 등 상태 전이. states + irreversible(되돌릴 수 없는 값) "
-            "+ terminal(등장불가='제거', 예 사망) 지정.\n"
+            "+ terminal(등장불가='서사에서 제거됨' — 사망·소멸뿐. 'none' 같은 평범한 초기/기본값을 절대 넣지 마라) 지정.\n"
             "   ※ 장르에 맞춰: 로맨스=관계/비밀/정체, 무협=경지(비단조 가능)/진영, 미스터리=단서/지식, 현판=각성/등급 등.\n"
             "2) entities: 주연 3~4명(character). attrs 는 위 attribute key 로. id 는 영문. "
             "각 인물에 voice(말투 시그니처 — 어미·습관구·말버릇)를 서로 뚜렷이 구분되게 부여(보이스 분화).\n"
@@ -80,19 +82,24 @@ class WorldGenerator:
                 f"주인공 힌트: {seed.protagonist_hint or '(자유)'}\n목표 회차수: {seed.target_chapters}\n"
                 f"제목 힌트: {seed.title or '(자유 창작)'}\n\n스키마 예시(형식만 참고, 내용은 새로):\n{_SCHEMA_HINT}")
 
-    def generate(self, seed: ProjectSeed) -> WorldConfig:
+    def generate(self, seed: ProjectSeed, _retry: bool = True) -> WorldConfig:
         msg = [{"role": "system", "content": self._system(seed.target_chapters)},
                {"role": "user", "content": self._user(seed)}]
-        raw = self.provider.chat_json(msg, temperature=0.6, max_tokens=4000)
+        raw = self.provider.chat_json(msg, temperature=0.6, max_tokens=9000)
         try:
             world = WorldConfig.model_validate(raw)
         except ValidationError as e:
-            fix = self.provider.chat_json(
-                [{"role": "system", "content": "다음 JSON을 스키마에 맞게 교정해 유효한 객체만 출력."},
-                 {"role": "user", "content": f"[오류]\n{e}\n[원본]\n{json.dumps(raw, ensure_ascii=False)}\n"
-                  f"[스키마]\n{_SCHEMA_HINT}"}],
-                temperature=0.0, max_tokens=4000)
-            world = WorldConfig.model_validate(fix)
+            try:
+                fix = self.provider.chat_json(
+                    [{"role": "system", "content": "다음 JSON을 스키마에 맞게 교정해 유효한 객체만 출력."},
+                     {"role": "user", "content": f"[오류]\n{e}\n[원본]\n{json.dumps(raw, ensure_ascii=False)}\n"
+                      f"[스키마]\n{_SCHEMA_HINT}"}],
+                    temperature=0.0, max_tokens=9000)
+                world = WorldConfig.model_validate(fix)
+            except (ValidationError, ValueError):
+                if _retry:                       # 교정 재시도도 실패 → 전체 1회 재생성(일시적 출력 불량 흡수)
+                    return self.generate(seed, _retry=False)
+                raise
         return self._normalize(world, seed)
 
     @staticmethod
@@ -105,6 +112,20 @@ class WorldGenerator:
         if world.genre and "한국 웹소설 작가" in world.style.system_persona:
             world.style.system_persona = world.style.system_persona.replace(
                 "한국 웹소설 작가", f"한국 {world.genre} 웹소설 작가")
+        # 생애주기 선언 새니타이즈: 출연진 과반이 '시작값'으로 갖는 상태가 terminal/irreversible 로 선언되면
+        # 전원이 1화부터 '제거 상태' → 영구 에스컬레이션(파일럿 실측 결함). 의미 오해(none=평범한 초기값)를 결정론 제거.
+        for a in world.attributes:
+            if a.kind in ("state", "status") and (a.terminal or a.irreversible):
+                holders = [e for e in world.entities if a.key in e.attrs]
+                if len(holders) >= 2:
+                    from collections import Counter
+                    counts = Counter(str(e.attrs[a.key]) for e in holders)
+                    for v, n in counts.items():
+                        if n * 2 >= len(holders):   # 과반 시작값 → 제거/비가역일 수 없음
+                            if v in a.terminal:
+                                a.terminal = [t for t in a.terminal if t != v]
+                            if v in a.irreversible:
+                                a.irreversible = [t for t in a.irreversible if t != v]
         # 비트 번호 정렬·재부여
         world.beats.sort(key=lambda b: b.chapter)
         for i, b in enumerate(world.beats, start=1):

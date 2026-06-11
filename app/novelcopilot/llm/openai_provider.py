@@ -22,7 +22,20 @@ class OpenAIProvider(LLMProvider):
         last = None
         for attempt in range(4):
             try:
-                r = self._client.chat.completions.create(**kwargs)
+                try:
+                    r = self._client.chat.completions.create(**kwargs)
+                except Exception as e:   # 신형(gpt-5/o계열) 파라미터 차이 자동 적응 — 모델 교체 시 코드 무변경
+                    msg = str(e)
+                    adapted = False
+                    if "max_tokens" in msg and "max_completion_tokens" in msg:
+                        kwargs["max_completion_tokens"] = kwargs.pop("max_tokens", max_tokens)
+                        adapted = True
+                    if "temperature" in msg and ("unsupported" in msg.lower() or "does not support" in msg.lower()):
+                        kwargs.pop("temperature", None)
+                        adapted = True
+                    if not adapted:
+                        raise
+                    r = self._client.chat.completions.create(**kwargs)
                 self.usage.chat_calls += 1
                 if r.usage:
                     self.usage.chat_tokens += r.usage.total_tokens

@@ -122,7 +122,9 @@ class ArcPlanner:
         char_ids = [e.id for e in world.entities if e.etype == "character"]
         hook = ("이번 회차가 에피소드 절정(finale): 아래 climax 를 이번 회차에서 터뜨려라(끝맺음 방식은 작품 문체 정책을 따름)."
                 if is_finale else "에피소드 절정으로 한 걸음 전진. 아직 절정을 다 터뜨리지 말 것.")
-        sys = ("에피소드 안에서 다음 회차 1개의 beat 를 설계하라. 절정으로 수렴하되 기존 설정과 모순 금지. " + hook + " JSON만.")
+        sys = ("에피소드 안에서 다음 회차 1개의 beat 를 설계하라. 절정으로 수렴하되 기존 설정과 모순 금지. " + hook +
+               " 직전 회차와 같은 장소·같은 대치 상황·같은 비트의 반복 금지 — 공간 또는 상황을 반드시 한 단계 전진시켜라. "
+               "세계 고유 설정(경제·무기·기술 체계)을 사건의 구체 디테일로 쓰라. JSON만.")
         # plant_notes 는 시스템 '참고' 정보 — 작가 지시(authority)와 분리된 슬롯(시스템 개입의 지시 위장 금지, 모드 계약 §1)
         notes_block = f"\n[미회수 복선 — 참고용]{plant_notes}" if plant_notes else ""
         usr = (f"[아크 목표]{arc.goal}\n[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
