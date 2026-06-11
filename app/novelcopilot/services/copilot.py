@@ -143,22 +143,36 @@ class CopilotService:
         return self._wg_provider
 
     # ---- 프로젝트 ----
-    def create_project(self, seed: ProjectSeed) -> tuple[ProjectState, dict]:
+    def create_project(self, seed: ProjectSeed, bus=None) -> tuple[ProjectState, dict]:
+        # bus: 선택적 EventBus — 단계별 진행을 실시간 방출(SSE). 없으면 무음(POST·내부 호출 하위호환).
+        def _emit(ev, **kw):
+            if bus is not None:
+                bus.emit("worldgen", ev, **kw)
         seed.target_chapters = max(1, min(200, int(seed.target_chapters or 12)))   # 방어 클램프(API 외 직접호출 보호)
         before = self.wg_provider.usage.as_dict()
+        _emit("world_start")
         world = WorldGenerator(self.wg_provider).generate(seed)
         if not seed.title:
             seed.title = world.title
+        _emit("world_done", title=world.title,
+              entities=[e.name for e in world.entities if e.etype == "character"])
         # R4: 엔딩-주도 아크/에피소드 spine 설계(실패 시 None=평면 모드 폴백)
+        _emit("spine_start")
         try:
             world.spine = ArcPlanner(self.wg_provider).build_spine(world, seed.target_chapters)
+            _emit("spine_done", arcs=len((world.spine.arcs if world.spine else []) or []))
         except Exception:
             world.spine = None
-        # R2: 장르 카테고리별 설정집 산문 생성(실패 시 빈 설정집)
+            _emit("spine_skip")
+        # R2: 장르 카테고리별 설정집 산문 생성(가장 느린 단계 — 카테고리별 실시간 노출, 실패 시 빈 설정집)
+        _emit("bible_start")
         try:
-            bible = StoryBible(entries=BibleGenerator(self.wg_provider).generate(world, seed))
+            bible = StoryBible(entries=BibleGenerator(self.wg_provider).generate(world, seed, bus=bus))
+            _emit("bible_done", entries=len(bible.entries))
         except Exception:
             bible = StoryBible()
+            _emit("bible_skip")
+        _emit("saving")
         pid = uuid.uuid4().hex[:12]
         state = ProjectState(id=pid, seed=seed, world=world, bible=bible,
                              created_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
@@ -167,6 +181,7 @@ class CopilotService:
         delta = _usage_delta(before, self.wg_provider.usage.as_dict())
         state.usage_total = _accumulate(state.usage_total, delta)
         self.repo.save(state)
+        _emit("done", pid=state.id, title=world.title)
         return state, delta
 
     def get_project(self, pid: str) -> ProjectState | None:

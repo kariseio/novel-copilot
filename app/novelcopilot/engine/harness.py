@@ -447,6 +447,6 @@ class ChapterGenerator:
 
         return ChapterRecord(
             chapter=ch_no, title=beat.get("title", ""), status=status, text=chapter_text,
-            summary=summary, detail_synopsis=detail_synopsis, scenes=len(scenes), n_retrieved=len(narrative), indexed_chunks=indexed,
+            summary=summary, detail_synopsis=detail_synopsis, scenes=1 + ext, n_retrieved=len(narrative), indexed_chunks=indexed,
             wiki_pages_touched=pages, initial_violations=initial_caught or [],
             final_violations=final.violations, rounds=rounds, usage_by_stage=stage_usage)

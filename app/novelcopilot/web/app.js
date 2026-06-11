@@ -3,13 +3,22 @@
 const $ = (s) => document.querySelector(s);
 
 // 진행 로그 — 내부 단계명(코드) → 화면 표현(사용자). 용어 사전: web/DESIGN.md §5
+// 원칙: 화이트리스트. 매핑 안 된 코드는 일반 한글로 폴백 — 영어/내부용어(harness·SSOT·kind코드)가 절대 새지 않게.
 const NODE_LABELS = {
   harness:"집필", plan_chapter:"회차 구상", plan_scenes:"흐름 설계", draft_chapter:"본문 집필",
   draft_scene:"본문 집필", assemble_memory:"맥락 정리", consistency_check:"일관성 검사",
-  partial_rewrite:"부분 교정", scene_loop:"교정", quality_gate:"문장 다듬기", quality:"문장 다듬기",
-  plan_lint:"구성 점검", cast_plan:"등장인물 준비", ontology_update:"설정 갱신",
-  summarize:"줄거리 정리", finalize:"마무리", connect:"연결" };
-function nodeLabel(n){ return NODE_LABELS[n] || n; }
+  partial_rewrite:"부분 교정", scene_loop:"일관성 교정", quality_gate:"문장 다듬기", quality:"문장 다듬기",
+  plan_lint:"구성 점검", cast_plan:"등장인물 준비", ontology_update:"설정 갱신", narrative:"전개 점검",
+  drift:"전개 점검", summarize:"줄거리 정리", finalize:"마무리", worldgen:"세계 설계", connect:"" };
+function nodeLabel(n){ return NODE_LABELS[n] !== undefined ? NODE_LABELS[n] : "진행"; }
+// 일관성/구성 점검의 위반 코드 → 한글. 폴백은 일반어("설정 점검") — 코드값 노출 금지.
+const KIND_LABELS = {
+  state_timeline:"등장 시점", field_value:"설정값", edge_post_death:"사망 후 관계", ssot_ambiguous:"설정 충돌",
+  relation_state:"관계 상태", numeric_monotonic:"수치 변화", vocab_violation:"설정 어휘", categorical_violation:"설정 어휘",
+  plan_dead_cast:"퇴장 인물 배정", plan_unknown_entity:"미등록 인물", plan_beat_repeat:"전개 반복",
+  wiki_dangling_edge:"노트 연결", wiki_orphan_thread:"미회수 복선", wiki_stale:"오래된 노트" };
+function kindLabel(k){ return KIND_LABELS[k] || "설정 점검"; }
+function kindList(arr){ return [...new Set((arr||[]).map(kindLabel))].slice(0,4).join(", "); }
 const api = {
   async get(u){ const r = await fetch(u); if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.status); return r.json(); },
   async post(u,b){ const r = await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b||{})});
@@ -116,19 +125,44 @@ async function loadProjects(){
 }
 async function delProject(pid){ if(!confirm("이 작품을 삭제할까요? 되돌릴 수 없습니다.")) return; await api.del(`/api/projects/${pid}`); loadProjects(); }
 
-async function createProject(ev){
+// 작품 생성 단계(SSE) → 사람이 읽는 진행 문구. 가장 느린 설정집은 카테고리별로 노출.
+function wgStage(ev){
+  switch(ev.event){
+    case "world_start": return "세계관을 구상하는 중…";
+    case "world_done": return `세계관 완성 — 등장인물 ${(ev.entities||[]).length}명${(ev.entities||[]).length?` (${ev.entities.slice(0,4).map(esc).join(", ")}${ev.entities.length>4?" 외":""})`:""}`;
+    case "spine_start": return "이야기 구조(결말·단락)를 설계하는 중…";
+    case "spine_done": return `이야기 구조 완성 — 단락 ${ev.arcs}개`;
+    case "spine_skip": return "이야기 구조 건너뜀";
+    case "bible_start": return "설정집을 쓰기 시작합니다…";
+    case "bible": return `설정집 작성 중 — ${esc(ev.label)} <span class="muted">(${ev.idx}/${ev.total})</span>`;
+    case "bible_done": return `설정집 완성 — ${ev.entries}개 항목`;
+    case "saving": return "마무리하는 중…";
+    default: return "작품 세계를 짓는 중…";
+  }
+}
+function createProject(ev){
   ev.preventDefault();
   const f = ev.target, st = $("#create-status");
-  const body = { title:f.title.value, genre:f.genre.value, tone:f.tone.value, premise:f.premise.value,
-    protagonist_hint:f.protagonist_hint.value, target_chapters:parseInt(f.target_chapters.value||"12",10) };
-  st.innerHTML = '<span class="spin"></span> 작품 세계를 짓는 중… (10~30초)';
-  f.querySelector("button").disabled = true;
-  try{
-    const res = await api.post("/api/projects", body);
+  const p = new URLSearchParams({ title:f.title.value, genre:f.genre.value, tone:f.tone.value,
+    premise:f.premise.value, protagonist_hint:f.protagonist_hint.value,
+    target_chapters:String(parseInt(f.target_chapters.value||"12",10)) });
+  const btn = f.querySelector("button"); btn.disabled = true;
+  st.innerHTML = '<span class="spin"></span> 시작하는 중…';
+  const es = new EventSource(`/api/projects/create_stream?${p.toString()}`);
+  let done = false;
+  es.addEventListener("event", e=>{ st.innerHTML = `<span class="spin"></span> ${wgStage(JSON.parse(e.data))}`; });
+  es.addEventListener("complete", async e=>{
+    done = true; es.close(); btn.disabled = false;
+    const res = JSON.parse(e.data);
     st.innerHTML = `‘${esc(res.world.title)}’ 세계가 만들어졌어요.`;
     await openProject(res.id);
-  }catch(e){ st.innerHTML = `생성하지 못했습니다: ${esc(e.message)}`; }
-  finally{ f.querySelector("button").disabled = false; }
+  });
+  es.addEventListener("failed", e=>{
+    done = true; es.close(); btn.disabled = false;
+    st.innerHTML = `생성하지 못했습니다: ${esc((JSON.parse(e.data)||{}).message||"")}`;
+  });
+  es.onerror = ()=>{ if(!done){ es.close(); btn.disabled = false;
+    st.innerHTML = "연결이 끊겼습니다. 다시 시도해 주세요."; } };
   return false;
 }
 
@@ -252,33 +286,58 @@ function generateNext(){
   es.addEventListener("failed", e=>{ done=true; es.close(); onFail(JSON.parse(e.data)); });
   es.onerror = ()=>{ if(!done){ es.close(); onFail({message:"연결 끊김"}); } };
 }
-function logEvent(ev, det, rawEvent){
-  const cls = ev.event==="escalation"||ev.event==="non_convergence"||ev.event==="failed"?"bad"
-    : (ev.event==="parse_failure"||ev.event==="signal"||ev.event==="story_truncated"||ev.event==="bible_truncated"
-       ||ev.event==="violations"||ev.event==="tics_residual"||ev.event==="reformat_rejected")?"warn"
-    : (ev.event==="done"||ev.event==="new_entity"||ev.event==="relation"||ev.event==="registered"||ev.event==="debut")?"ok":"";
-  let extra = det!==undefined&&det!==""?det:"";
-  if(extra===""){
-    if(ev.hard!==undefined) extra=`충돌 ${ev.hard}건 · 위반 ${ev.violations??0}건`;
-    else if(ev.scenes!==undefined) extra=`흐름 ${ev.scenes}단계`;
-    else if(ev.chars!==undefined) extra=`${ev.chars.toLocaleString?ev.chars.toLocaleString():ev.chars}자까지`;
-    else if(ev.goal!==undefined) extra=ev.goal;
-    else if(ev.rel!==undefined) extra=`${ev.src}→${ev.dst} (${ev.rel})`;
-    else if(ev.entity!==undefined) extra=`${ev.entity} ${ev.attr||ev.etype||""}`.trim();
-    else if(ev.fixing!==undefined) extra=`교정: ${(ev.fixing||[]).join(", ")}`;
-    else if(ev.kinds!==undefined) extra=(ev.kinds||[]).join(", ");
-    else if(ev.tics!==undefined) extra=`반복 표현 ${(ev.tics||[]).map(t=>Array.isArray(t)?t[0]:t).join(", ")}`;
-    else if(ev.applied!==undefined) extra=`${ev.applied}건 다듬음`;
-    else if(ev.ground_truth!==undefined) extra=`공식 설정 ${ev.ground_truth}건`;
-    else if(ev.detail!==undefined) extra=ev.detail;
-    else if(ev.dropped!==undefined) extra=`오래된 맥락 ${ev.dropped}건 압축`;
+// 상태색: 실패/검토=red, 경고=amber, 완료성=green. (이벤트 코드 자체는 화면에 안 나오고 색 분류에만 사용)
+const EV_BAD = new Set(["escalation","non_convergence","failed","parse_failure","wiki_failure","tense_fix_failed"]);
+const EV_WARN = new Set(["story_truncated","bible_truncated","violations","tics_residual","reformat_rejected",
+  "signal","episode_stuck","plant_backlog","uncast_character","ssot_contradiction"]);
+const EV_OK = new Set(["done","new_entity","relation","registered","debut","bible_done","spine_done","world_done"]);
+// (node,event) → 사람이 읽는 한 줄. 미등재는 node 한글명만(코드/영어 노출 0). 두 번째 인자=상세(있을 때만).
+function friendly(ev){
+  const node = nodeLabel(ev.node), e = ev.event;
+  const kinds = kindList(ev.kinds || ev.hard || ev.fixing);   // 위반/교정 코드는 kinds·hard·fixing 중 하나에 담겨 옴
+  // node 기준 우선 처리(consistency_check·partial_rewrite 는 event="done"/"start" 라 일반 분기에 먼저 걸리지 않게)
+  if(ev.node==="consistency_check") return ["일관성 검사", ev.hard>0?`설정 충돌 ${ev.hard}건${kinds?` · ${kinds}`:""}`:"이상 없음"];
+  if(ev.node==="partial_rewrite") return ["부분 교정", kinds?`교정: ${kinds}`:""];
+  switch(e){
+    case "start": return [node, ""];
+    case "done":  return [node, ""];
+    case "extend": return ["분량 보강", "이어서 더 씁니다"];
+    case "reformat": return ["문단 정리", ""];
+    case "reformat_rejected": return ["문단 정리 보류", ""];
+    case "story_truncated": case "bible_truncated": return ["오래된 맥락 정리", ev.dropped?`${ev.dropped}건 압축`:""];
+    case "violations": return ["구성 점검", kinds];
+    case "non_convergence": return ["교정 한계", kinds];
+    case "ssot_contradiction": return ["설정 충돌 검토", kinds];
+    case "tic_fixes": return ["반복 표현 정리", ""];
+    case "tail_regen": return ["결말 다시 쓰기", ""];
+    case "tics_residual": return ["반복 표현 남음", ""];
+    case "tense_fixes": return ["시제 정리", ev.applied?`${ev.applied}건`:""];
+    case "tense_fix_failed": return ["시제 정리 실패", ""];
+    case "continuity_fixes": return ["출고 검수", ""];
+    case "new_entity": return ["새 설정 추가", ev.entity||""];
+    case "relation": return ["관계 추가", ""];
+    case "registered": return ["등장인물 준비", ev.entity||""];
+    case "debut": return ["새 인물 등장", ev.entity||""];
+    case "uncast_character": return ["미설계 인물 감지", ev.entity||""];
+    case "escalation": return ["검토 필요", kinds];
+    case "wiki_failure": return ["노트 정리 일부 실패", ""];
+    case "signal": case "episode_stuck": case "plant_backlog": return ["전개 점검", ""];
+    case "parse_failure": case "dup_skip": case "prop_skip": return [node, ""];
+    // worldgen 단계(작품 생성용 — 회차 로그에는 안 옴, 안전상 포함)
+    case "world_done": case "spine_done": case "bible_done": case "bible": return [node, ""];
   }
-  // 화면 표기: 내부 단계명 → 한글(NODE_LABELS). rawEvent=true 면 event 문구를 그대로 사용(예: "3화 시작")
-  const evtTxt = ev.event && ev.event!=="done" && ev.event!=="connect"
-    ? (rawEvent ? ev.event : "") : "";
+  // 일반 진행: 충돌/위반 카운트가 있으면 점검 한 줄로
+  if(ev.hard!==undefined) return [node, ev.hard>0?`설정 충돌 ${ev.hard}건${kinds?` · ${kinds}`:""}`:"이상 없음"];
+  return [node, ""];
+}
+function logEvent(ev, det, rawEvent){
+  const cls = EV_BAD.has(ev.event)?"bad":EV_WARN.has(ev.event)?"warn":EV_OK.has(ev.event)?"ok":"";
+  let label, extra;
+  if(rawEvent){ label = `${nodeLabel(ev.node)} · ${ev.event}`; extra = det||""; }   // 이미 한글로 만든 문구(예: "3화 시작")
+  else { const f = friendly(ev); label = f[0]; extra = det!==undefined&&det!==""?det:f[1]; }
+  if(ev.round!==undefined && ev.round>0 && ev.event!=="extend") label += ` (${ev.round+1}차 교정)`;
   const line = document.createElement("div");
   line.className = `ev ${cls}`;
-  const label = `${nodeLabel(ev.node)}${evtTxt?" · "+evtTxt:""}${ev.round!==undefined&&ev.round>0?` (${ev.round+1}회차 교정)`:""}`;
   line.innerHTML = `<span class="node">${esc(label)}</span><span class="det">${esc(extra)}</span>`;
   const log = $("#harness-log"); log.appendChild(line); log.scrollTop = log.scrollHeight;
 }

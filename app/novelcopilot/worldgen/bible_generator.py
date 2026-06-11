@@ -49,7 +49,7 @@ class BibleGenerator:
         except Exception:
             return []
 
-    def generate(self, world: WorldConfig, seed: ProjectSeed, deep: bool = True) -> list[BibleEntry]:
+    def generate(self, world: WorldConfig, seed: ProjectSeed, deep: bool = True, bus=None) -> list[BibleEntry]:
         cats = template_for(world.genre or seed.genre)
         out: list[BibleEntry] = []
         ids: set[str] = set()
@@ -68,7 +68,10 @@ class BibleGenerator:
                                   provenance="ai_worldgen", status="ai_unreviewed", promoted=False))
 
         if deep:
-            for cat in cats:                      # 카테고리별 분할 심층 생성(카테고리당 1콜)
+            for i, cat in enumerate(cats):        # 카테고리별 분할 심층 생성(카테고리당 1콜) — 진행 실시간 방출
+                if bus is not None:
+                    bus.emit("worldgen", "bible", label=CATEGORY_LABEL.get(cat, cat),
+                             idx=i + 1, total=len(cats))
                 for e in self._gen_category(world, cat, titles):
                     _add(cat, e)
             if out:
