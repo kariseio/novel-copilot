@@ -76,6 +76,7 @@ class BibleEntry(BaseModel):
     category: str                              # BibleCategory(데이터주도라 str)
     title: str
     prose: str = ""                            # 자유 서술(narrative)
+    keywords: list[str] = Field(default_factory=list)   # 로어북식 주입 트리거(비면 카테고리/제목 기반)
     promoted: bool = False                     # 단일 게이트: 캐논(world_rule)으로 박혔는가
     promote_target: Literal["none", "world_rule"] = "none"
     world_rule_id: str = ""                    # promote 시 생성된 world_rule id(삭제 시 역연산용)

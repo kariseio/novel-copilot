@@ -32,11 +32,21 @@ def entry_to_world_rule(entry: BibleEntry, existing_ids: set[str]) -> WorldRuleS
                          extract_hint=f"세계규칙 '{entry.title}' 위반")
 
 
-def bible_digest(bible: StoryBible, budget: int = 1500) -> tuple[list[RetrievedItem], int]:
-    """설정집 요약을 narrative 앵커로(작가가 든 설정집을 집필 LLM도 참조). promoted 우선, 예산 컷.
-    반환=(items, dropped) — 예산에 안 들어간 항목 수(silent drop 금지: 호출부가 emit)."""
-    ordered = ([e for e in bible.entries if e.promoted and e.status != "deprecated"]
-               + [e for e in bible.entries if not e.promoted and e.status != "deprecated"])
+def bible_digest(bible: StoryBible, budget: int = 1500,
+                 context_hint: str = "") -> tuple[list[RetrievedItem], int]:
+    """설정집 요약을 narrative 앵커로. promoted 상시 + 이번 화 맥락(키워드/제목 매칭) 관련 카드 우선
+    — 로어북식 조건 주입(예산 컷 나열 → 관련도 선별). 반환=(items, dropped)."""
+    live = [e for e in bible.entries if e.status != "deprecated"]
+
+    def score(e):
+        s = 100 if e.promoted else 0
+        if context_hint:
+            s += sum(3 for k in (e.keywords or []) if k and k in context_hint)
+            if e.title and e.title in context_hint:
+                s += 2
+        return s
+
+    ordered = sorted(live, key=score, reverse=True)
     lines, total = [], 0
     for e in ordered:
         cat = CATEGORY_LABEL.get(e.category, e.category)

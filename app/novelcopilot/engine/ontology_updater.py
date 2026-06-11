@@ -68,9 +68,12 @@ class OntologyUpdater:
              "2) 기존 엔티티의 상태/소속/등급 변화(본문이 분명히 말한 것만).\n"
              "3) 엔티티 사이 관계(동맹/적대/사제/소속/소유/위치/친구/연모/앎 등). 제시된 관계키 우선, 없으면 간결한 자유 라벨. "
              "관계의 질적 현재 상태가 드러나면 state(예: '소원해짐','잃어버림','짝사랑').\n"
+             "4) 이번 회차에서 새로 드러난 '세계 설정'(장소의 내력, 체계의 규칙/예외, 세력의 관습 등 — 인물 상태 말고 세계 지식). "
+             "기존 설정집 제목과 중복 금지, 최대 2개.\n"
              "JSON: {\"new_entities\":[{\"name\":\"\",\"etype\":\"\",\"aliases\":[],\"role\":\"\"}],"
              "\"state_changes\":[{\"id\":\"명부 id\",\"attr\":\"속성키\",\"value\":\"새 값\",\"note\":\"\"}],"
-             "\"relations\":[{\"src\":\"명부 id 또는 새 이름\",\"dst\":\"명부 id 또는 새 이름\",\"rel_id\":\"관계키 또는 자유 라벨\",\"state\":\"\",\"note\":\"\"}]}"},
+             "\"relations\":[{\"src\":\"명부 id 또는 새 이름\",\"dst\":\"명부 id 또는 새 이름\",\"rel_id\":\"관계키 또는 자유 라벨\",\"state\":\"\",\"note\":\"\"}],"
+             "\"new_settings\":[{\"category\":\"\",\"title\":\"\",\"prose\":\"3~5문장\",\"keywords\":[\"\"]}]}"},
             {"role": "user", "content":
              f"[기존 명부]\n{json.dumps(roster, ensure_ascii=False)}\n"
              f"[엔티티 타입]{ent_types}\n[추적 속성키]{attr_keys}\n[생애주기 상태값]{state_hint}\n[관계키(자유 라벨 가능)]{rel_keys}\n"
@@ -159,6 +162,15 @@ class OntologyUpdater:
                                                   applied=False, reason="비가역 상태 이탈(escalation)"))
                     self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
                     continue
+                # 동일 시점(eid,attr,eff)에 이미 다른 ground_truth 값 존재 → 커밋하면 ssot_ambiguous 영구 점등.
+                # (시드 예약 vs 자동추출 충돌 — 시뮬 실측) 커밋 대신 escalation 으로 작가에게.
+                if any(t2[0] == eid and t2[1] == attr and t2[3] == eff and t2[5] == "ground_truth"
+                       and str(t2[2]) != newv for t2 in ontology.timeline):
+                    changes.append(OntologyChange(op="contradiction", entity=ent.name,
+                                                  detail=f"{slabel} {eff}화 시점에 상충 예약 존재({newv} vs 기존)",
+                                                  applied=False, reason="동시점 충돌 — 작가 확인 필요(escalation)"))
+                    self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
+                    continue
                 # 비가역/제거 전이 = 작가 확정 전 비구속(narrative_inferred). 가역 전이 = '전진만' 자동커밋(ground_truth).
                 binding_irrev = (newv in irr) or (newv in term)
                 tier = "narrative_inferred" if binding_irrev else "ground_truth"
@@ -188,6 +200,14 @@ class OntologyUpdater:
                 except (ValueError, TypeError):
                     pass
 
+            # categorical 통제어휘 검증 — 어휘 밖 자유값을 ground_truth 로 자동커밋하면
+            # 이후 모든 회차가 '쓰레기 캐논 vs 어휘값' 영구 불일치로 ESCALATED 에 갇힌다(시뮬 실측 결함).
+            if spec and spec.kind == "categorical" and spec.vocab and str(val).strip() not in spec.vocab:
+                changes.append(OntologyChange(op="contradiction", entity=ent.name,
+                                              detail=f"{self.vocab.label(attr)} 통제어휘 밖 값 '{val}'",
+                                              applied=False, reason="어휘 밖 — 사람 확인 필요(escalation)"))
+                self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
+                continue
             mutable = bool(spec and spec.mutable)
             if mutable:
                 # M1: 캐논 주입집합 = 게이트집합. 신규 추적 속성 키를 엔티티에 등록해

@@ -29,32 +29,62 @@ class BibleGenerator:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
 
-    def generate(self, world: WorldConfig, seed: ProjectSeed) -> list[BibleEntry]:
-        cats = template_for(world.genre or seed.genre)
-        cat_desc = ", ".join(f"{c}({CATEGORY_LABEL.get(c, c)})" for c in cats)
-        sys = ("너는 웹소설 세계관 설정집 작성자다. 작품에 맞는 설정집 항목을 카테고리별로 1~2개씩 작성하라. "
-               "각 항목은 title(짧게)과 prose(3~6문장, 구체적 산문)로. 설정 수치(눈색·등급 등 추적값)는 적지 마라(그건 온톨로지 소유). "
-               "세계의 작동 원리·분위기·디테일 위주. JSON만.")
+    def _gen_category(self, world: WorldConfig, cat: str, done_titles: list[str]) -> list[dict]:
+        """카테고리 1개 심층 생성 — 개요 1 + 세부 4~6항목(항목당 5~8문장 + 주입 트리거 키워드).
+        단일 콜 13카테고리 일괄(→12항목 빈약)의 깊이 한계를 분할로 해소: '책 한 권' 분량으로 가는 단위."""
+        label = CATEGORY_LABEL.get(cat, cat)
+        sys = (f"너는 웹소설 세계관 설정집 작성자다. '{label}' 카테고리만 깊게 판다. "
+               "1) overview: 이 카테고리의 전체 그림 1항목(6~10문장). "
+               "2) 세부 항목 4~6개: 각각 title(고유명 위주) + prose(5~8문장 — 작동 원리·역사·예외·구체 사례·갈등 소재까지) "
+               "+ keywords(본문에 이 설정이 관련될 때 등장할 단어 3~5개). "
+               "설정 수치(눈색·등급 등 추적값)는 쓰지 마라(온톨로지 소유). 이미 있는 항목과 중복 금지. JSON만.")
         usr = (f"[작품] {world.title} / {world.genre} / {world.tone}\n전제: {world.premise}\n시놉시스: {world.synopsis}\n"
-               f"[작성할 카테고리]\n{cat_desc}\n\n"
-               '{"entries":[{"category":"<카테고리 키>","title":"","prose":""}]}')
+               f"[이미 있는 항목]{done_titles[-30:]}\n\n"
+               '{"entries":[{"title":"","prose":"","keywords":["",""]}]}')
         try:
             raw = self.provider.chat_json([{"role": "system", "content": sys},
                                            {"role": "user", "content": usr}],
-                                          temperature=0.6, max_tokens=3000)
-            items = raw.get("entries", []) or []
+                                          temperature=0.7, max_tokens=4500)
+            return raw.get("entries", []) or []
         except Exception:
             return []
+
+    def generate(self, world: WorldConfig, seed: ProjectSeed, deep: bool = True) -> list[BibleEntry]:
+        cats = template_for(world.genre or seed.genre)
         out: list[BibleEntry] = []
         ids: set[str] = set()
-        for e in items:
-            cat = normalize_category(e.get("category"))
+        titles: list[str] = []
+
+        def _add(cat: str, e: dict):
             title = (e.get("title") or "").strip()
-            if not title:
-                continue
+            if not title or title in titles:
+                return
             eid = _slug(title, ids)
             ids.add(eid)
-            out.append(BibleEntry(entry_id=eid, category=cat, title=title,
+            titles.append(title)
+            out.append(BibleEntry(entry_id=eid, category=normalize_category(cat), title=title,
                                   prose=(e.get("prose") or "").strip(),
+                                  keywords=[k for k in (e.get("keywords") or []) if k][:5],
                                   provenance="ai_worldgen", status="ai_unreviewed", promoted=False))
+
+        if deep:
+            for cat in cats:                      # 카테고리별 분할 심층 생성(카테고리당 1콜)
+                for e in self._gen_category(world, cat, titles):
+                    _add(cat, e)
+            if out:
+                return out
+        # 폴백/얕은 모드: 기존 단일 콜
+        cat_desc = ", ".join(f"{c}({CATEGORY_LABEL.get(c, c)})" for c in cats)
+        sys = ("너는 웹소설 세계관 설정집 작성자다. 작품에 맞는 설정집 항목을 카테고리별로 1~2개씩 작성하라. "
+               "각 항목은 title 과 prose(3~6문장), keywords(3개). 설정 수치는 쓰지 마라. JSON만.")
+        usr = (f"[작품] {world.title} / {world.genre} / {world.tone}\n전제: {world.premise}\n시놉시스: {world.synopsis}\n"
+               f"[작성할 카테고리]\n{cat_desc}\n\n"
+               '{"entries":[{"category":"<카테고리 키>","title":"","prose":"","keywords":[""]}]}')
+        try:
+            raw = self.provider.chat_json([{"role": "system", "content": sys},
+                                           {"role": "user", "content": usr}], temperature=0.6, max_tokens=3000)
+            for e in raw.get("entries", []) or []:
+                _add(e.get("category") or "glossary", e)
+        except Exception:
+            pass
         return out
