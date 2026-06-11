@@ -19,6 +19,17 @@ BASE = "http://127.0.0.1:8000/api"
 LOG: dict = {"persona": "한도윤(29) 밀리터리/아포칼립스 SF, 문피아 지망", "actions": [], "chapters": []}
 
 
+
+def record(row: dict):
+    """테스트 원장 — 모든 회차 평가·런 요약을 누적 기록(append-only JSONL, 덮어쓰기 없음)."""
+    import datetime
+    row = {"ts": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), **row}
+    hp = Path(__file__).parent / "reports" / "test_history.jsonl"
+    hp.parent.mkdir(exist_ok=True)
+    with open(hp, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def act(kind, **kw):
     LOG["actions"].append({"t": time.strftime("%H:%M:%S"), "kind": kind, **kw})
     print(f"[{time.strftime('%H:%M:%S')}] {kind}: {json.dumps(kw, ensure_ascii=False)[:170]}")
@@ -55,8 +66,9 @@ def main():
         pid = sys.argv[2]
         LOG["pid"] = pid
         cur = requests.get(f"{BASE}/projects/{pid}", timeout=120).json()["current_chapter"]
-        act("resume", pid=pid, from_chapter=cur + 1)
-        run_serial(pid, start_ch=cur, t0=time.time())
+        mx = int(sys.argv[3]) if len(sys.argv) > 3 else 20   # --resume <pid> [최대화수]
+        act("resume", pid=pid, from_chapter=cur + 1, max_ch=mx)
+        run_serial(pid, start_ch=cur, t0=time.time(), max_ch=mx)
         return
     # ① 작품 생성 — 시드 한 줄(페르소나의 컨셉)
     seed = {
@@ -146,6 +158,8 @@ def eval_chapter(text: str, ch: int, roster: set | None = None) -> dict:
             sc["style"] = min(sc.get("style", 10), 4)
         if det["directive_leak"]:
             sc["consistency"] = min(sc.get("consistency", 10), 3)
+        if det["tense_leak"] > 0.2:
+            sc["style"] = min(sc.get("style", 10), 6)
         r["det"] = {k: det[k] for k in ("short_line_ratio", "tense_leak", "hook_sim")}
         r["avg"] = round(sum(sc.values()) / max(1, len(sc)), 1)
         return r
@@ -197,6 +211,10 @@ def run_serial(pid: str, start_ch: int, t0: float, max_ch: int = 20):
                 run_serial.pending_fix = ev["fix_directive"]
                 act("eval_steer_next", after_chapter=rec.get("chapter"), fix=ev["fix_directive"][:80])
             LOG.setdefault("evals", []).append({"chapter": rec.get("chapter"), **{k: ev.get(k) for k in ("avg", "scores", "defects", "det")}})
+            record({"type": "chapter_eval", "pid": pid, "chapter": rec.get("chapter"),
+                    "status": rec.get("status"), "chars": len(rec.get("text", "")),
+                    "avg": ev.get("avg"), "scores": ev.get("scores"), "det": ev.get("det"),
+                    "defects": [(x or "")[:80] for x in (ev.get("defects") or [])[:3]]})
         row = {"chapter": rec.get("chapter"), "status": rec.get("status"), "chars": len(rec.get("text", "")),
                "title": rec.get("title", ""), "secs": round(time.time() - t1),
                "init_viol": len(rec.get("initial_violations", [])),
@@ -216,6 +234,13 @@ def run_serial(pid: str, start_ch: int, t0: float, max_ch: int = 20):
             if rec2.get("status") == "FINALIZED":
                 ch = d2.get("current_chapter", ch)
                 act("escalation_resolved", chapter=ch)
+                ev2 = eval_chapter(rec2.get("text", ""), rec2.get("chapter", 0), roster)
+                act("eval", chapter=rec2.get("chapter"), avg=ev2.get("avg"))
+                LOG.setdefault("evals", []).append({"chapter": rec2.get("chapter"),
+                    **{k: ev2.get(k) for k in ("avg", "scores", "defects", "det")}})
+                record({"type": "chapter_eval", "pid": pid, "chapter": rec2.get("chapter"),
+                        "status": "FINALIZED(재시도)", "chars": len(rec2.get("text", "")),
+                        "avg": ev2.get("avg"), "det": ev2.get("det")})
             else:
                 fails += 1
 
@@ -224,6 +249,12 @@ def run_serial(pid: str, start_ch: int, t0: float, max_ch: int = 20):
     out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(LOG, ensure_ascii=False, indent=2), encoding="utf-8")
     fin = [c for c in LOG["chapters"] if c["status"] == "FINALIZED"]
+    evs = [e.get("avg") for e in LOG.get("evals", []) if e.get("avg", 0) > 0]
+    record({"type": "run_summary", "pid": pid, "finalized": len(fin),
+            "escalated": len(LOG["chapters"]) - len(fin),
+            "avg_eval": round(sum(evs) / len(evs), 2) if evs else None,
+            "avg_chars": sum(c["chars"] for c in fin) // max(1, len(fin)),
+            "total_secs": LOG.get("total_secs")})
     print(f"\n===== 시뮬레이션 종료: {ch}화 / {LOG['total_secs']}s =====")
     print(f"FINALIZED {len(fin)} / ESCALATED {len(LOG['chapters']) - len(fin)}")
     print(f"평균 분량 {sum(c['chars'] for c in fin) // max(1, len(fin))}자, 로그: {out}")
