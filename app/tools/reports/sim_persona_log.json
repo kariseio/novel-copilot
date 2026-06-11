@@ -1,0 +1,296 @@
+{
+  "persona": "한도윤(29) 밀리터리/아포칼립스 SF, 문피아 지망",
+  "actions": [
+    {
+      "t": "10:07:09",
+      "kind": "create_project",
+      "pid": "5494254d624b",
+      "title": "코어 더스트: 폐허의 연산자",
+      "tone": "건조하고 긴장감 넘치는 디스토피아, 생존과 기술의 냉혹함이 교차하는 어둡고 황량한 분위기",
+      "attrs": [
+        "affiliation",
+        "core_ownership",
+        "emp_exposure",
+        "trust_level",
+        "identity_revealed"
+      ],
+      "entities": [
+        "린",
+        "유다",
+        "다나",
+        "코렉스"
+      ],
+      "arcs": 2,
+      "persona": "너는 인기 한국 SF 포스트아포칼립스 웹소설 작가다. 생존의 냉혹함, 기술과 인간성의 경계, 폐허의 적막함을",
+      "ending_hook": "cliffhanger"
+    },
+    {
+      "t": "10:07:21",
+      "kind": "worldgen_turn",
+      "applied": 6,
+      "blocked": 2,
+      "kinds": [
+        "entity",
+        "entity",
+        "relation",
+        "bible",
+        "bible",
+        "bible"
+      ]
+    },
+    {
+      "t": "10:07:30",
+      "kind": "worldgen_turn",
+      "applied": 6,
+      "blocked": 0,
+      "kinds": [
+        "entity",
+        "entity",
+        "relation",
+        "relation",
+        "bible",
+        "bible"
+      ]
+    },
+    {
+      "t": "10:07:30",
+      "kind": "bible_review",
+      "entries": 47
+    },
+    {
+      "t": "10:07:30",
+      "kind": "promote_bible",
+      "title": "Overview: 코어 기반 생존 기술 체계",
+      "ok": true
+    },
+    {
+      "t": "10:07:30",
+      "kind": "style_policy",
+      "chars": 5300,
+      "hook": "cliffhanger",
+      "plant": "gentle"
+    },
+    {
+      "t": "10:09:07",
+      "kind": "eval",
+      "chapter": 1,
+      "avg": 8.2,
+      "defects": [
+        "토막행갈이: 일부 문단이 지나치게 짧아 리듬이 다소 불안정함(예: '구도시 폐허의 적막함 ",
+        "반복대사: 린과 유다의 대화에서 '그래', '알아', '조심해라' 등 짧은 응답이 반복적으",
+        "진행감: 폐허 내부 진입~코어 신호 탐색~보안 해킹~AI 등장까지의 전개가 디테일에 치중해"
+      ]
+    },
+    {
+      "t": "10:09:07",
+      "kind": "chapter",
+      "chapter": 1,
+      "status": "FINALIZED",
+      "chars": 3978,
+      "secs": 97,
+      "init_viol": 1,
+      "final_viol": 2
+    },
+    {
+      "t": "10:11:08",
+      "kind": "eval",
+      "chapter": 2,
+      "avg": 8.2,
+      "defects": [
+        "토막행갈이: 일부 문단이 지나치게 짧아 리듬이 불필요하게 끊김. 예: '린은 고개를 끄덕였",
+        "반복대사: '목적, 생존.' 등 유사한 의도와 문장이 여러 번 반복됨. 대사와 내적 독백의",
+        "수치모순: 연산력 단위(TF) 언급이 여러 번 나오나, 전체 자원량과 사용량의 구체적 상관"
+      ]
+    },
+    {
+      "t": "10:11:08",
+      "kind": "chapter",
+      "chapter": 2,
+      "status": "FINALIZED",
+      "chars": 5379,
+      "secs": 121,
+      "init_viol": 1,
+      "final_viol": 0
+    },
+    {
+      "t": "10:13:59",
+      "kind": "eval",
+      "chapter": 3,
+      "avg": 8.4,
+      "defects": [
+        "토막행갈이: 일부 문단에서 불필요하게 짧은 행갈이가 반복되어 리듬이 다소 끊김.",
+        "메타텍스트 누출: 없음.",
+        "수치모순: 코렉스 신뢰도 00.7% 등, 소수점 표현이 지나치게 낮아 현실감이 다소 떨어질"
+      ]
+    },
+    {
+      "t": "10:13:59",
+      "kind": "chapter",
+      "chapter": 3,
+      "status": "FINALIZED",
+      "chars": 5168,
+      "secs": 171,
+      "init_viol": 0,
+      "final_viol": 2
+    }
+  ],
+  "chapters": [
+    {
+      "chapter": 1,
+      "status": "FINALIZED",
+      "chars": 3978,
+      "title": "잊힌 네트워크의 문턱",
+      "secs": 97,
+      "init_viol": 1,
+      "final_viol": 2,
+      "rounds": 4,
+      "drift": [],
+      "onto_changes": 9,
+      "usage_by_stage": {
+        "plan": 757,
+        "draft": 15138,
+        "check": 14996,
+        "rewrite": 2105,
+        "polish": 3138,
+        "wiki": 4080,
+        "summarize": 3949,
+        "ontology_propose": 4402
+      },
+      "usage_total": {
+        "chat_calls": 25,
+        "chat_tokens": 80763,
+        "embed_calls": 1,
+        "embed_items": 37
+      }
+    },
+    {
+      "chapter": 2,
+      "status": "FINALIZED",
+      "chars": 5379,
+      "title": "침묵의 신호",
+      "secs": 121,
+      "init_viol": 1,
+      "final_viol": 0,
+      "rounds": 3,
+      "drift": [],
+      "onto_changes": 9,
+      "usage_by_stage": {
+        "plan": 847,
+        "draft": 32794,
+        "check": 14934,
+        "quality": 4424,
+        "polish": 3937,
+        "wiki": 6367,
+        "summarize": 6382,
+        "ontology_propose": 5658
+      },
+      "usage_total": {
+        "chat_calls": 38,
+        "chat_tokens": 156106,
+        "embed_calls": 8,
+        "embed_items": 112
+      }
+    },
+    {
+      "chapter": 3,
+      "status": "FINALIZED",
+      "chars": 5168,
+      "title": "전류의 미로",
+      "secs": 171,
+      "init_viol": 0,
+      "final_viol": 2,
+      "rounds": 3,
+      "drift": [],
+      "onto_changes": 5,
+      "usage_by_stage": {
+        "plan": 923,
+        "draft": 41682,
+        "check": 26869,
+        "quality": 4256,
+        "polish": 3777,
+        "wiki": 7165,
+        "summarize": 5781,
+        "ontology_propose": 5198
+      },
+      "usage_total": {
+        "chat_calls": 52,
+        "chat_tokens": 251757,
+        "embed_calls": 15,
+        "embed_items": 213
+      }
+    }
+  ],
+  "pid": "5494254d624b",
+  "evals": [
+    {
+      "chapter": 1,
+      "avg": 8.2,
+      "scores": {
+        "hook": 8,
+        "style": 8,
+        "world": 9,
+        "consistency": 9,
+        "progress": 7
+      },
+      "defects": [
+        "토막행갈이: 일부 문단이 지나치게 짧아 리듬이 다소 불안정함(예: '구도시 폐허의 적막함 속. 통로 너머에서, 간헐적으로 깜빡이는 실내등.').",
+        "반복대사: 린과 유다의 대화에서 '그래', '알아', '조심해라' 등 짧은 응답이 반복적으로 사용되어 대화의 개성이 약간 희석됨.",
+        "진행감: 폐허 내부 진입~코어 신호 탐색~보안 해킹~AI 등장까지의 전개가 디테일에 치중해 약간 느리게 느껴질 수 있음.",
+        "메타텍스트 누출: 없음.",
+        "수치모순: 없음."
+      ],
+      "det": {
+        "short_line_ratio": 0.0,
+        "tense_leak": 0.195,
+        "hook_sim": 0.0
+      }
+    },
+    {
+      "chapter": 2,
+      "avg": 8.2,
+      "scores": {
+        "hook": 8,
+        "style": 8,
+        "world": 9,
+        "consistency": 8,
+        "progress": 8
+      },
+      "defects": [
+        "토막행갈이: 일부 문단이 지나치게 짧아 리듬이 불필요하게 끊김. 예: '린은 고개를 끄덕였다. …그래.' 등.",
+        "반복대사: '목적, 생존.' 등 유사한 의도와 문장이 여러 번 반복됨. 대사와 내적 독백의 중복이 있음.",
+        "수치모순: 연산력 단위(TF) 언급이 여러 번 나오나, 전체 자원량과 사용량의 구체적 상관관계가 불명확함.",
+        "메타텍스트 누출: 없음.",
+        "제자리걸음: 중반부(EMP 트랩, 보안 게이트, 드론 회피 등)에서 유사한 긴장감이 반복되어 진행감이 일시적으로 정체됨."
+      ],
+      "det": {
+        "short_line_ratio": 0.08,
+        "tense_leak": 0.112,
+        "hook_sim": 0.0
+      }
+    },
+    {
+      "chapter": 3,
+      "avg": 8.4,
+      "scores": {
+        "hook": 8,
+        "style": 8,
+        "world": 9,
+        "consistency": 9,
+        "progress": 8
+      },
+      "defects": [
+        "토막행갈이: 일부 문단에서 불필요하게 짧은 행갈이가 반복되어 리듬이 다소 끊김.",
+        "메타텍스트 누출: 없음.",
+        "수치모순: 코렉스 신뢰도 00.7% 등, 소수점 표현이 지나치게 낮아 현실감이 다소 떨어질 수 있음.",
+        "반복대사: '유다. 응답.' 등 무전기 호출 대사가 유사하게 반복됨.",
+        "제자리걸음: EMP 이후 장비 복구 시도와 탈출 준비 과정이 약간 반복적으로 묘사되어 진행감이 다소 저하됨."
+      ],
+      "det": {
+        "short_line_ratio": 0.11,
+        "tense_leak": 0.15,
+        "hook_sim": 0.0
+      }
+    }
+  ],
+  "total_secs": 610
+}

@@ -67,7 +67,8 @@ def test_ontology_comprehensive() -> bool:
     proposal = {
         "new_entities": [{"name": "흑막길드", "etype": "faction", "role": "적"},
                          {"name": "고대유적", "etype": "place"}],
-        "state_changes": [{"id": "hero", "attr": "affiliation", "value": "B"}],     # mutable→timeline
+        "state_changes": [{"id": "hero", "attr": "affiliation", "value": "B"},      # mutable→timeline
+                          {"id": "rival", "attr": "affiliation", "value": "수상한 자유값"}],  # 어휘 밖→escalation(커밋 금지)
         "relations": [{"src": "hero", "dst": "흑막길드", "rel_id": "enemy_of"},       # valid(신규 dst)
                       {"src": "hero", "dst": "rival", "rel_id": "ally_of"},          # valid
                       {"src": "hero", "dst": "rival", "rel_id": "옛_동료", "state": "소원해짐"},  # 자유 타입+상태 valid
@@ -79,6 +80,8 @@ def test_ontology_comprehensive() -> bool:
     ok &= any(sp.etype == "faction" and sp.name == "흑막길드" for sp in new_specs)
     ok &= any(sp.etype == "place" for sp in new_specs)                              # 신규: any etype
     ok &= any(t.attr == "affiliation" and t.value == "B" for t in new_tl)           # mutable 상태변화
+    ok &= not any(t.value == "수상한 자유값" for t in new_tl)                        # 어휘 밖 값 커밋 금지
+    ok &= any(c.op == "contradiction" and "어휘" in c.reason for c in changes)       # escalation 으로 보고
     ok &= len(new_edges) == 3 and all(e.trust_tier == "narrative_inferred" and e.provenance == ["machine"]
                                       for e in new_edges)                            # 자유 타입 포함 유효 3건, 비binding
     ok &= any(e.rel_id == "옛_동료" and e.state == "소원해짐" for e in new_edges)     # 자유 타입+질적 상태 보존

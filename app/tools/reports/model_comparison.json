@@ -1,0 +1,129 @@
+[
+  {
+    "model": "gpt-4.1",
+    "chapters": [
+      {
+        "ch": 1,
+        "status": "FINALIZED",
+        "chars": 4754,
+        "secs": 106,
+        "judge_avg": -1,
+        "defects": [
+          "chat_json: 재시도 후에도 JSON 파싱 실패: Unterminated string starting "
+        ]
+      },
+      {
+        "ch": 2,
+        "status": "FINALIZED",
+        "chars": 4603,
+        "secs": 119,
+        "judge_avg": -1,
+        "defects": [
+          "chat_json: 재시도 후에도 JSON 파싱 실패: Unterminated string starting "
+        ]
+      },
+      {
+        "ch": 3,
+        "status": "FINALIZED",
+        "chars": 5330,
+        "secs": 183,
+        "judge_avg": -1,
+        "defects": [
+          "chat_json: 재시도 후에도 JSON 파싱 실패: Unterminated string starting "
+        ]
+      }
+    ],
+    "world_ok": true,
+    "tokens": 208088,
+    "total_secs": 526,
+    "judge_mean": null,
+    "avg_chars": 0
+  },
+  {
+    "model": "gpt-4.1-mini",
+    "chapters": [
+      {
+        "ch": 1,
+        "status": "FINALIZED",
+        "chars": 2808,
+        "secs": 126,
+        "judge_avg": 4.6,
+        "defects": [
+          "반복: '이상 신호/재밍과 연산이 섞임/위험하지만 가야 함/계산 완료/접근 계속'이 같은 의미로 여러 단락 ",
+          "반복: 대화가 정보 확인→위험 언급→결의의 순환 구조로 3회 이상 반복되어 장면이 제자리걸음",
+          "문체/조판: 설명문 비중 과다(분석·정의·일반론)로 서사 대신 설정 브리핑처럼 읽힘"
+        ]
+      },
+      {
+        "ch": 2,
+        "status": "FINALIZED",
+        "chars": 4314,
+        "secs": 130,
+        "judge_avg": -1,
+        "defects": [
+          "chat_json: 재시도 후에도 JSON 파싱 실패: Unterminated string starting "
+        ]
+      },
+      {
+        "ch": 3,
+        "status": "FINALIZED",
+        "chars": 5505,
+        "secs": 214,
+        "judge_avg": -1,
+        "defects": [
+          "chat_json: 재시도 후에도 JSON 파싱 실패: Unterminated string starting "
+        ]
+      }
+    ],
+    "world_ok": true,
+    "tokens": 181312,
+    "total_secs": 717,
+    "judge_mean": 4.6,
+    "avg_chars": 2808
+  },
+  {
+    "model": "gpt-5.1-chat-latest",
+    "chapters": [
+      {
+        "ch": 1,
+        "status": "FINALIZED",
+        "chars": 5562,
+        "secs": 112,
+        "judge_avg": -1,
+        "defects": [
+          "chat_json: 재시도 후에도 JSON 파싱 실패: Unterminated string starting "
+        ]
+      },
+      {
+        "ch": 2,
+        "status": "FINALIZED",
+        "chars": 6349,
+        "secs": 131,
+        "judge_avg": -1,
+        "defects": [
+          "chat_json: 재시도 후에도 JSON 파싱 실패: Unterminated string starting "
+        ]
+      },
+      {
+        "ch": 3,
+        "status": "FINALIZED",
+        "chars": 6530,
+        "secs": 112,
+        "judge_avg": -1,
+        "defects": [
+          "chat_json: 재시도 후에도 JSON 파싱 실패: Unterminated string starting "
+        ]
+      }
+    ],
+    "world_ok": true,
+    "tokens": 175674,
+    "total_secs": 482,
+    "judge_mean": null,
+    "avg_chars": 0
+  },
+  {
+    "model": "gpt-5.2",
+    "world_ok": false,
+    "error": "chat_json: 재시도 후에도 JSON 파싱 실패: Expecting value: line 454 column 18 (char 10313)"
+  }
+]
