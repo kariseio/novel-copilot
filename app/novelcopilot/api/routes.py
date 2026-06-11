@@ -151,7 +151,7 @@ def get_project(pid: str, request: Request):
     return {
         "id": state.id, "seed": state.seed.model_dump(), "world": state.world.model_dump(),
         "created_at": state.created_at, "current_chapter": state.current_chapter,
-        "total_beats": len(state.world.beats) or state.seed.target_chapters,
+        "total_beats": state.seed.target_chapters or len(state.world.beats),
         "has_spine": state.world.spine is not None,
         "completed": state.narrative_progress.completed, "usage_total": state.usage_total,
         "directives": [d.model_dump() for d in state.directives],
