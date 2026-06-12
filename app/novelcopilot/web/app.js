@@ -27,11 +27,62 @@ const api = {
     if(!r.ok) throw new Error((await r.json().catch(()=>({}))).detail||r.status); return r.json(); },
   async del(u){ const r = await fetch(u,{method:"DELETE"}); return r.json(); },
 };
-let STATE = { project:null, activeChapter:null, generating:false };
+let STATE = { project:null, activeChapter:null, generating:false, chapterPage:null };
+const CH_PAGE = 24;                         // 회차 네비 페이지당 칸 수(200화 대응)
+function chPageOf(n){ return Math.max(0, Math.floor(((n||1) - 1) / CH_PAGE)); }
 
-// ---------- 네비게이션 ----------
-function goHome(){ $("#view-viewer").classList.add("hidden"); $("#view-create").classList.add("hidden"); $("#view-project").classList.add("hidden"); $("#view-home").classList.remove("hidden"); loadProjects(); }
-function showProject(){ $("#view-home").classList.add("hidden"); $("#view-project").classList.remove("hidden"); }
+// ---------- 해시 라우팅 ----------
+// 단일 진실: location.hash 가 현재 뷰/딥링크. 뒤로/앞으로·새로고침·공유 링크 지원.
+//  #/  홈 · #/new 작품 만들기(대화) · #/p/{pid} 작업실 · #/p/{pid}/ch/{n} 회차 · #/read/{pid}/{n} 뷰어
+let _routing = false;
+function go(hash){ if(location.hash === hash) router(); else location.hash = hash; }       // 동일 해시면 강제 재라우팅
+let _suppress = false;
+function setHashSilent(hash){   // URL 만 갱신(재라우팅 없이). 발생할 hashchange 1회를 리스너가 소비.
+  if(location.hash === hash) return;
+  _suppress = true;
+  location.replace(location.pathname + location.search + hash);
+}
+function _onlyView(id){ ["view-home","view-create","view-project","view-viewer"].forEach(v=>$("#"+v).classList.toggle("hidden", v!==id)); }
+async function router(){
+  if(_routing) return; _routing = true;
+  try{
+    const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean);
+    if(!parts.length){ _onlyView("view-home"); loadProjects(); return; }
+    if(parts[0] === "new"){
+      if(STATE.draft && STATE.draft.id !== undefined){ _onlyView("view-create"); }
+      else { location.replace("#/"); }
+      return;
+    }
+    if(parts[0] === "p" && parts[1]){
+      const pid = parts[1];
+      if(!STATE.project || STATE.project.id !== pid){
+        try{ await openProject(pid); }
+        catch(e){ alert("작품을 열 수 없습니다: " + (e.message||"")); location.replace("#/"); return; }
+      }
+      const ch = (parts[2] === "ch" && parts[3]) ? parseInt(parts[3], 10) : null;
+      _onlyView("view-project");
+      if(ch && (STATE.project.chapters||[]).some(c=>c.chapter===ch)){
+        STATE.activeChapter = ch; STATE.chapterPage = chPageOf(ch);
+        switchTab("reader"); renderChapters(); renderReader();
+      }
+      return;
+    }
+    if(parts[0] === "read" && parts[1]){
+      const pid = parts[1], n = parseInt(parts[2], 10);
+      if(!STATE.project || STATE.project.id !== pid){
+        try{ await openProject(pid); }
+        catch(e){ location.replace("#/"); return; }
+      }
+      renderViewerAt(n);   // 뷰어 표시 + 해당 화
+      return;
+    }
+    location.replace("#/");   // 알 수 없는 경로 → 홈
+  } finally { _routing = false; }
+}
+window.addEventListener("hashchange", ()=>{ if(_suppress){ _suppress = false; return; } router(); });   // 무음 갱신 1회 소비
+
+// ---------- 네비게이션(해시로 위임) ----------
+function goHome(){ go("#/"); }
 function switchTab(t){
   document.querySelectorAll('.col-reader .tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
   ["reader","bible","graph","arc","worldgen"].forEach(x=>$("#tab-"+x).classList.toggle("hidden",x!==t));
@@ -116,7 +167,7 @@ async function loadProjects(){
     const list = await api.get("/api/projects");
     if(!list.length){ el.innerHTML = '<p class="muted">아직 작품이 없습니다. 왼쪽에서 첫 작품을 시작해 보세요.</p>'; return; }
     el.innerHTML = list.map(p=>`
-      <div class="pcard" onclick="openProject('${p.id}')">
+      <div class="pcard" onclick="go('#/p/${p.id}')">
         <div><div class="pc-title">${esc(p.title||"무제")}</div>
         <div class="pc-meta">${esc(p.genre||"")} · ${p.current_chapter}/${p.total_chapters}화 · ${esc(p.created_at||"")}</div></div>
         <button class="del" onclick="event.stopPropagation();delProject('${p.id}')">삭제</button>
@@ -190,8 +241,7 @@ function startCreate(ev){
   ev.preventDefault();
   const seed = (ev.target.seed.value||"").trim(); if(!seed) return false;
   STATE.draft = { id:null, locks:{} }; _prevBrief = {};
-  $("#view-home").classList.add("hidden");
-  $("#view-create").classList.remove("hidden");
+  go("#/new");   // 라우팅(STATE.draft 설정 후 — 라우터가 create 뷰 표시, 뒤로가기=홈)
   $("#cc-log").innerHTML = ""; $("#cc-questions").innerHTML = ""; $("#cc-gaps").innerHTML = "";
   hideConfirm();
   renderControlChips();
@@ -312,18 +362,18 @@ function finalizeGo(){
   let done = false;
   es.addEventListener("event", e=>{ msg.innerHTML = wgStage(JSON.parse(e.data)); });
   es.addEventListener("complete", async e=>{ done = true; es.close(); ov.classList.add("hidden");
-    const res = JSON.parse(e.data); STATE.draft = null; await openProject(res.id); });
+    const res = JSON.parse(e.data); STATE.draft = null; go(`#/p/${res.id}`); });
   es.addEventListener("failed", e=>{ done = true; es.close();
     msg.innerHTML = `생성하지 못했습니다: ${esc((JSON.parse(e.data)||{}).message||"")} <button class="primary" onclick="finalizeGo()">다시 시도</button>`; });
   es.onerror = ()=>{ if(!done){ es.close();
     msg.innerHTML = `연결이 끊겼습니다. <button class="primary" onclick="finalizeGo()">다시 시도</button> <button onclick="document.querySelector('#cc-overlay').classList.add('hidden')">닫기</button>`; } };
 }
 
-// ---------- 프로젝트 열기 ----------
+// ---------- 프로젝트 열기(로드+렌더 — 뷰 표시는 라우터가) ----------
 async function openProject(pid){
   STATE.project = await api.get(`/api/projects/${pid}`);
   STATE.activeChapter = STATE.project.current_chapter || null;
-  showProject();
+  STATE.chapterPage = null;          // null → renderChapters 가 최신(마지막) 페이지로
   renderHeader(); renderChapters(); renderReader();
   loadOntology(); switchTab('reader'); switchInspect('onto');
   $("#harness-log").innerHTML = ""; $("#gen-result").innerHTML = "";
@@ -395,16 +445,30 @@ async function addBible(){
 
 // ---------- 회차/리더 ----------
 function renderChapters(){
-  const p = STATE.project;
-  const nav = $("#chapter-nav");
-  if(!p.chapters.length){ nav.innerHTML = '<span class="muted small">아직 생성된 회차가 없습니다.</span>'; return; }
-  nav.innerHTML = p.chapters.map(c=>{
-    const esc2 = c.status==="ESCALATED"?"escalated":"";
-    const act = c.chapter===STATE.activeChapter?"active":"";
-    return `<button class="cn ${act} ${esc2}" onclick="selectChapter(${c.chapter})">${c.chapter}화</button>`;
-  }).join("");
+  const p = STATE.project, nav = $("#chapter-nav");
+  const chs = (p.chapters||[]).slice().sort((a,b)=>a.chapter-b.chapter);
+  if(!chs.length){ nav.innerHTML = '<span class="muted small">아직 생성된 회차가 없습니다.</span>'; return; }
+  const pages = Math.ceil(chs.length / CH_PAGE);
+  let pg = STATE.chapterPage;
+  if(pg == null) pg = pages - 1;          // 기본=최신 페이지
+  pg = Math.max(0, Math.min(pg, pages - 1));
+  STATE.chapterPage = pg;
+  const start = pg * CH_PAGE, slice = chs.slice(start, start + CH_PAGE);
+  const pager = pages > 1
+    ? `<div class="ch-pager">
+         <button class="cn-nav" ${pg<=0?"disabled":""} onclick="chapterPage(${pg-1})" title="이전 묶음">◀</button>
+         <span class="cn-range">${start+1}–${start+slice.length} <span class="muted">/ ${chs.length}화</span></span>
+         <button class="cn-nav" ${pg>=pages-1?"disabled":""} onclick="chapterPage(${pg+1})" title="다음 묶음">▶</button>
+       </div>` : "";
+  const grid = '<div class="ch-grid">' + slice.map(c=>{
+    const e = c.status==="ESCALATED" ? "escalated" : "";
+    const a = c.chapter===STATE.activeChapter ? "active" : "";
+    return `<button class="cn ${a} ${e}" onclick="selectChapter(${c.chapter})">${c.chapter}화</button>`;
+  }).join("") + '</div>';
+  nav.innerHTML = pager + grid;
 }
-function selectChapter(n){ STATE.activeChapter = n; renderChapters(); renderReader(); }
+function chapterPage(i){ STATE.chapterPage = i; renderChapters(); }   // 페이지 넘김(라우팅 아님 — 뷰 내 탐색)
+function selectChapter(n){ go(`#/p/${STATE.project.id}/ch/${n}`); }   // 회차 선택은 라우팅(뒤로/딥링크)
 function renderReader(){
   const p = STATE.project, body = $("#chapter-body");
   const c = (p.chapters||[]).find(x=>x.chapter===STATE.activeChapter);
@@ -445,15 +509,18 @@ function renderReader(){
 function viewerChapters(){
   return (STATE.project.chapters||[]).filter(c=>c.text).sort((a,b)=>a.chapter-b.chapter);
 }
-function openViewer(n){
+function openViewer(n){   // 진입(버튼) → 라우팅
   const list = viewerChapters();
   if(!list.length){ alert("아직 읽을 회차가 없습니다. 먼저 회차를 써보세요."); return; }
   const target = n || STATE.activeChapter || list[list.length-1].chapter;
-  const idx = list.findIndex(c=>c.chapter===target);
-  STATE.viewerIdx = idx>=0 ? idx : 0;
-  $("#view-home").classList.add("hidden");
-  $("#view-project").classList.add("hidden");
-  $("#view-viewer").classList.remove("hidden");
+  go(`#/read/${STATE.project.id}/${target}`);
+}
+function renderViewerAt(n){   // 라우터가 호출 — 뷰어 표시 + 해당 화
+  const list = viewerChapters();
+  if(!list.length){ location.replace(`#/p/${STATE.project.id}`); return; }
+  const idx = list.findIndex(c=>c.chapter===n);
+  STATE.viewerIdx = idx>=0 ? idx : list.length-1;
+  _onlyView("view-viewer");
   $("#v-work").textContent = (STATE.project.world.title) || "무제";
   $("#v-jump").innerHTML = list.map((c,i)=>`<option value="${i}">${c.chapter}화 · ${esc(c.title||"")}</option>`).join("");
   renderViewer();
@@ -473,17 +540,19 @@ function renderViewer(){
   $("#v-jump").value = String(STATE.viewerIdx);
   $("#view-viewer").scrollTop = 0;
 }
+function _viewerSyncHash(){   // 현재 보는 화를 URL에 반영(재라우팅 없이 — 새로고침/공유 일관)
+  const c = viewerChapters()[STATE.viewerIdx];
+  if(c) setHashSilent(`#/read/${STATE.project.id}/${c.chapter}`);
+}
 function viewerNav(d){
   const list = viewerChapters(), ni = STATE.viewerIdx + d;
   if(ni<0 || ni>=list.length) return;
-  STATE.viewerIdx = ni; renderViewer();
+  STATE.viewerIdx = ni; renderViewer(); _viewerSyncHash();
 }
-function viewerJump(i){ STATE.viewerIdx = parseInt(i,10)||0; renderViewer(); }
+function viewerJump(i){ STATE.viewerIdx = parseInt(i,10)||0; renderViewer(); _viewerSyncHash(); }
 function closeViewer(){
-  $("#view-viewer").classList.add("hidden");
-  $("#view-project").classList.remove("hidden");
-  const list = viewerChapters(), c = list[STATE.viewerIdx];   // 작업실 리더를 본 회차로 동기화
-  if(c){ STATE.activeChapter = c.chapter; renderChapters(); renderReader(); }
+  const c = viewerChapters()[STATE.viewerIdx];   // 작업실 리더를 본 회차로 동기화하며 복귀
+  go(c ? `#/p/${STATE.project.id}/ch/${c.chapter}` : `#/p/${STATE.project.id}`);
 }
 document.addEventListener("keydown", e=>{
   if($("#view-viewer").classList.contains("hidden")) return;
@@ -598,6 +667,8 @@ async function onComplete(data){
   // 상태 갱신
   STATE.project = await api.get(`/api/projects/${STATE.project.id}`);
   STATE.activeChapter = r.chapter;
+  STATE.chapterPage = chPageOf(r.chapter);
+  setHashSilent(`#/p/${STATE.project.id}/ch/${r.chapter}`);   // 새 회차를 URL에 반영(재라우팅 없이)
   renderHeader(); renderChapters(); renderReader(); loadOntology();
   if(!$("#inspect-wiki").classList.contains("hidden")) loadWiki();
   if(!$("#tab-graph").classList.contains("hidden")) loadGraph();
@@ -758,4 +829,4 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,m=>({"&":"&amp;"
 async function health(){ try{ const h=await api.get("/api/health"); const el=$("#health");
   el.textContent="연결됨"; el.title=`${h.provider} · ${h.model}`; }catch(e){ const el=$("#health"); if(el) el.textContent="연결 끊김"; } }
 
-health(); loadProjects(); renderStartExamples();
+health(); renderStartExamples(); router();   // 라우터가 현재 해시(기본=홈) 렌더 — 새로고침/딥링크 복원

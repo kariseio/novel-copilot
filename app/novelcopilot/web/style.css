@@ -107,7 +107,11 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .tab.active{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
 
 /* ---- chapter nav + reader ---- */
-.chapter-nav{display:flex;flex-wrap:wrap;gap:.4em;margin-bottom:1.1em}
+.chapter-nav{margin-bottom:1.1em}
+.ch-pager{display:flex;align-items:center;gap:.6em;margin-bottom:.6em}
+.ch-pager .cn-nav{padding:.25em .6em;font-size:.85rem;line-height:1}
+.ch-pager .cn-range{font-size:.82rem;color:var(--ink-soft);font-weight:600}
+.ch-grid{display:flex;flex-wrap:wrap;gap:.4em}
 .chapter-nav .cn{padding:.34em .7em;font-size:.8rem;border-radius:8px;min-width:2.6em;color:var(--ink-soft)}
 .chapter-nav .cn.active{background:var(--ink);color:var(--paper);border-color:var(--ink)}
 .chapter-nav .cn.escalated{border-color:var(--warn);color:var(--warn)}
