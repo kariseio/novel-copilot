@@ -445,11 +445,15 @@ class ChapterGenerator:
             _track("summarize", _t)
             self.bus.emit("finalize", "done", chapter=ch_no, indexed=indexed, wiki_pages=pages,
                           summarized=bool(summary))
-        else:
-            self.bus.emit("finalize", "escalation", chapter=ch_no, hard=[v.kind for v in hard_remaining])
+        recovery_hints = []
+        if status != ChapterStatus.FINALIZED:
+            from .recovery import recovery_report
+            recovery_hints = recovery_report(hard_remaining)   # 작가용 자연어 진단+회복 레버(결정론·LLM 0콜)
+            self.bus.emit("finalize", "escalation", chapter=ch_no,
+                          hard=[v.kind for v in hard_remaining], recovery=recovery_hints)
 
         return ChapterRecord(
             chapter=ch_no, title=beat.get("title", ""), status=status, text=chapter_text,
             summary=summary, detail_synopsis=detail_synopsis, scenes=1 + ext, n_retrieved=len(narrative), indexed_chunks=indexed,
-            wiki_pages_touched=pages, initial_violations=initial_caught or [],
+            wiki_pages_touched=pages, initial_violations=initial_caught or [], recovery_hints=recovery_hints,
             final_violations=final.violations, rounds=rounds, usage_by_stage=stage_usage)

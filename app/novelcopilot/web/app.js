@@ -427,8 +427,16 @@ function renderReader(){
   const badge = c.status==="FINALIZED"?'<span class="badge fin">완성</span>':'<span class="badge esc">검토 필요</span>';
   const oc = (c.ontology_changes||[]).map(o=>`<div class="onto-change ${o.op==='new_entity'?'new':o.op==='contradiction'?'con':'chg'}">${o.applied?"✓":"✗"} ${esc(o.entity)}: ${esc(o.detail)}${o.reason?` <span class="muted">(${esc(o.reason)})</span>`:""}</div>`).join("");
   const chars = (c.text||"").length;
+  // ESCALATED 회복 안내: 무엇이 충돌하고 어떻게 고칠지 자연어로(진행 차단에서 빠져나오는 길)
+  const rec = (c.status!=="FINALIZED" && (c.recovery_hints||[]).length)
+    ? `<div class="recovery"><div class="rec-head">이 회차는 설정과 충돌해 검토가 필요해요. 이렇게 풀 수 있어요:</div>`
+      + c.recovery_hints.map(h=>`<div class="rec-item"><div class="rec-diag">${esc(h.diagnosis||"")}</div>`
+        + `<ul class="rec-fix">${(h.fix||[]).map(f=>`<li>${esc(f)}</li>`).join("")}</ul></div>`).join("")
+      + `<div class="rec-foot"><button onclick="generateNext()">이대로 다시 생성</button> <span class="muted small">설정을 고친 뒤 다시 생성하면 반영됩니다</span></div></div>`
+    : "";
   body.innerHTML = `<h4>${c.chapter}화 · ${esc(c.title)} ${badge}</h4>`+
     `<div class="reader-meta">${chars.toLocaleString()}자${c.wiki_pages_touched?` · 인물 노트 ${c.wiki_pages_touched}건 갱신`:""}</div>`+
+    rec+
     (oc?`<div style="margin-bottom:1.4em">${oc}</div>`:"")+
     `<div>${esc(c.text).replace(/\n/g,"<br>")}</div>`;
 }

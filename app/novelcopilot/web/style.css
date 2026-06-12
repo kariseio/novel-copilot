@@ -118,6 +118,15 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .chapter-body h4{font-family:var(--font-sans);color:var(--ink);font-size:1.05rem;margin-bottom:.2em;
   padding-bottom:.6em;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:.5em;flex-wrap:wrap}
 .reader-meta{font-family:var(--font-sans);color:var(--muted);font-size:.78rem;margin:.6em 0 1.2em}
+/* ESCALATED 회복 안내 카드 */
+.recovery{font-family:var(--font-sans);border:1px solid var(--warn);background:var(--warn-soft);
+  border-radius:var(--r-ctrl);padding:.9em 1.1em;margin:0 0 1.4em}
+.recovery .rec-head{font-weight:600;color:var(--ink);margin-bottom:.7em;font-size:.9rem}
+.recovery .rec-item{margin-bottom:.7em}
+.recovery .rec-diag{font-size:.86rem;color:var(--ink-soft);margin-bottom:.3em}
+.recovery .rec-fix{margin:0;padding-left:1.2em}
+.recovery .rec-fix li{font-size:.84rem;color:var(--ink-soft);line-height:1.6;margin-bottom:.2em}
+.recovery .rec-foot{margin-top:.6em;display:flex;align-items:center;gap:.6em;flex-wrap:wrap}
 
 /* ---- engine column ---- */
 .directive-lbl{margin-bottom:.6em}
