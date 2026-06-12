@@ -264,15 +264,15 @@ class CopilotService:
         try:
             d.locks = self._merge_locks(d.locks, params)
             self._apply_locks(d.brief, d.locks)
-            state, delta = self.create_project(self._brief_to_seed(d.brief), bus=bus)
+            state, delta = self.create_project(self._brief_to_seed(d.brief), bus=bus, brief=d.brief)
             self._drafts.pop(did, None)
             return state, delta
         finally:
             self._finalizing.discard(did)
 
     # ---- 프로젝트 ----
-    def create_project(self, seed: ProjectSeed, bus=None) -> tuple[ProjectState, dict]:
-        # bus: 선택적 EventBus — 단계별 진행을 실시간 방출(SSE). 없으면 무음(POST·내부 호출 하위호환).
+    def create_project(self, seed: ProjectSeed, bus=None, brief=None) -> tuple[ProjectState, dict]:
+        # bus: 선택적 EventBus(SSE). brief: 선택적 ConceptBrief — 첫 설계(build_spine)에 대화 핵심을 충실 주입(컨텍스트 보강).
         def _emit(ev, **kw):
             if bus is not None:
                 bus.emit("worldgen", ev, **kw)
@@ -287,7 +287,7 @@ class CopilotService:
         # R4: 엔딩-주도 아크/에피소드 spine 설계(실패 시 None=평면 모드 폴백)
         _emit("spine_start")
         try:
-            world.spine = ArcPlanner(self.wg_provider).build_spine(world, seed.target_chapters)
+            world.spine = ArcPlanner(self.wg_provider).build_spine(world, seed.target_chapters, brief=brief)
             _emit("spine_done", arcs=len((world.spine.arcs if world.spine else []) or []))
         except Exception:
             world.spine = None

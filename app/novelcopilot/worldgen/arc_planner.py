@@ -20,7 +20,7 @@ class ArcPlanner:
         self.provider = provider
 
     # ---- 1) 엔딩-주도 spine 생성(작품 시작 시 1회) ----
-    def build_spine(self, world: WorldConfig, target_chapters: int) -> NarrativeSpine:
+    def build_spine(self, world: WorldConfig, target_chapters: int, brief=None) -> NarrativeSpine:
         chars = [{"id": e.id, "name": e.name} for e in world.entities if e.etype == "character"]
         # 아크 수를 목표에 비례(상한 8) — 4 고정 시 share/arc 가 에피소드 천장(4×10=40)을 넘어
         # 200화가 ~168화에서 조기완결되던 페이싱 결함 해소(분모 18=아크당 ~17~38화, 웹소설 아크 길이대).
@@ -28,8 +28,23 @@ class ArcPlanner:
         sys = ("너는 웹소설 아크 설계자다. '엔딩을 먼저 확정'하고 거기서 역순(backward)으로 아크를 설계하라. "
                "각 에피소드는 절정(climax — 그 장르의 카타르시스: 액션의 쾌감, 로맨스의 감정 폭발, 미스터리의 반전 등)을 "
                "먼저 정하고 그 절정으로 수렴하게 짜라. "
+               "전제·시놉시스·세계규칙·작가 설계에 담긴 '이야기의 시작(발단 사건·전환 장치)부터 결말까지의 흐름'을 살려 설계하라 "
+               "— 도입의 설정 장치(회귀·빙의·각성·시스템 등 무엇이든)는 그것이 일어나는 시점의 아크에 자연히 담기게. "
                "복선(plants)은 미리 심고 payoffs로 회수하되 마감 강제는 없다(슬로우번 허용). JSON만.")
+        # 설계 컨텍스트 충실 주입(harness over model): 세계규칙 + 작가가 대화로 정한 핵심(브리프)까지 — 빈약하면 정의적 장치가 척추에서 누락됨
+        rules = "\n".join(f"- {r.text}" for r in world.world_rules) or "(없음)"
+        brief_block = ""
+        if brief is not None:
+            bp = []
+            if getattr(brief, "logline", ""): bp.append(f"로그라인: {brief.logline}")
+            if getattr(brief, "conflicts", None): bp.append("핵심 갈등: " + " / ".join(brief.conflicts))
+            if getattr(brief, "themes", None): bp.append("주제: " + ", ".join(brief.themes))
+            cw = "; ".join(f"{c.name}({c.role}): {c.want}".strip(" :()")
+                           for c in (brief.characters or []) if getattr(c, "name", ""))
+            if cw: bp.append("인물 동기: " + cw)
+            if bp: brief_block = "[작가가 대화로 정한 핵심 설계]\n" + "\n".join(bp) + "\n"
         usr = (f"[작품] {world.title} / {world.genre} / {world.tone}\n전제: {world.premise}\n시놉시스: {world.synopsis}\n"
+               f"[세계 규칙]\n{rules}\n{brief_block}"
                f"[인물]{json.dumps(chars, ensure_ascii=False)}\n[목표 회차수]{target_chapters}\n"
                f"아크 {n_arcs}개(각 goal/central_conflict/turning_point). **첫 아크만** 에피소드 3~4개로 분해하고 "
                f"나머지 아크는 episodes 를 빈 배열로 둬라(진행하며 생성). 각 에피소드: title/premise/climax/"
@@ -119,12 +134,16 @@ class ArcPlanner:
     def _gen_episodes(self, world: WorldConfig, arc: Arc, recent: list[str],
                       remaining: int | None = None) -> None:
         chars = [{"id": e.id, "name": e.name} for e in world.entities if e.etype == "character"]
-        ending = world.spine.ending.ending if world.spine and world.spine.ending else ""
+        end = world.spine.ending if world.spine and world.spine.ending else None
+        ending = end.ending if end else ""
+        cq = end.central_question if end else ""
         sys = ("아크를 에피소드(3~4개)로 분해하라. 각 에피소드는 절정(climax)을 먼저 정하고 수렴하게. 엔딩을 향해 전진. "
                "이 아크에 필요한 신규 인물(조연·적대) 0~4명은 new_cast 로 '등장 전에 설계'하라 — "
                "지금까지의 이야기 상태에서 태어나야 한다. profile=배경·성격·욕망·기존 인물과의 관계(말투 지정 금지). JSON만.")
         budget_line = f"[남은 회차 예산]{remaining}화 — 에피소드 target_chapters 합이 이 예산에 맞게.\n" if remaining else ""
+        # 작품 척추(전제·중심질문)를 lazy 단계에도 물려줌 — 엔딩 한 줄만 보고 핵심 장치를 잃지 않게
         usr = (budget_line +
+               f"[작품 전제]{(world.premise or '')[:300]}\n[중심 질문]{cq}\n"
                f"[엔딩]{ending}\n[아크]{arc.title} / 목표:{arc.goal} / 갈등:{arc.central_conflict} / 전환:{arc.turning_point}\n"
                f"[인물]{json.dumps(chars, ensure_ascii=False)}\n[최근 줄거리]\n" + "\n".join(recent) +
                '\n{"episodes":[{"title":"","premise":"","climax":"","required_events":[],"required_cast":[],'
@@ -195,7 +214,11 @@ class ArcPlanner:
                "세계 고유 설정(경제·무기·기술 체계)을 사건의 구체 디테일로 쓰라. title 은 회차 제목만(시리즈명·화수 붙이지 마라). JSON만.")
         # plant_notes 는 시스템 '참고' 정보 — 작가 지시(authority)와 분리된 슬롯(시스템 개입의 지시 위장 금지, 모드 계약 §1)
         notes_block = f"\n[미회수 복선 — 참고용]{plant_notes}" if plant_notes else ""
-        usr = (f"[아크 목표]{arc.goal}\n[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
+        end = world.spine.ending if world.spine and world.spine.ending else None
+        spine_block = (f"[작품 전제]{(world.premise or '')[:240]}\n[중심 질문]{end.central_question}\n"
+                       if end else "")   # 회차 비트도 작품 척추(전제·중심질문)를 보게 — 핵심 장치 유실 방지
+        usr = (spine_block +
+               f"[아크 목표]{arc.goal}\n[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
                f"[필수 사건]{episode.required_events}\n[등장해야 할 인물 id]{episode.required_cast}\n"
                f"[인물 id]{char_ids}\n[최근 줄거리]\n" + "\n".join(recent) +
                f"\n[작가 지시]{json.dumps(directives, ensure_ascii=False)}{notes_block}\n[회차]{chapter} (에피소드 내 finale={is_finale})\n"
