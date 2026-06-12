@@ -22,7 +22,9 @@ class ArcPlanner:
     # ---- 1) 엔딩-주도 spine 생성(작품 시작 시 1회) ----
     def build_spine(self, world: WorldConfig, target_chapters: int) -> NarrativeSpine:
         chars = [{"id": e.id, "name": e.name} for e in world.entities if e.etype == "character"]
-        n_arcs = max(2, min(4, round((target_chapters or 12) / 12)))
+        # 아크 수를 목표에 비례(상한 8) — 4 고정 시 share/arc 가 에피소드 천장(4×10=40)을 넘어
+        # 200화가 ~168화에서 조기완결되던 페이싱 결함 해소(분모 18=아크당 ~17~38화, 웹소설 아크 길이대).
+        n_arcs = max(2, min(8, round((target_chapters or 12) / 18)))
         sys = ("너는 웹소설 아크 설계자다. '엔딩을 먼저 확정'하고 거기서 역순(backward)으로 아크를 설계하라. "
                "각 에피소드는 절정(climax — 그 장르의 카타르시스: 액션의 쾌감, 로맨스의 감정 폭발, 미스터리의 반전 등)을 "
                "먼저 정하고 그 절정으로 수렴하게 짜라. "
