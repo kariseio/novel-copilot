@@ -483,188 +483,204 @@ class CopilotService:
             is_finale = False
             anchors, bible_dropped = [], 0   # 설정집 다이제스트는 beat 확정 후 '관련 카드 선별'로(아래)
             prog_snap = spine_snap = None
-            if spine and spine.arcs:   # R4 spine 모드: 에피소드(절정 backward) 단위로 beat 파생
-                # B: 커서/spine 변이를 트랜잭션으로 — FINALIZED 아니면 롤백(재시도 결정성·orphan/조기 arc.done 방지)
-                prog_snap = state.narrative_progress.model_copy(deep=True)
-                spine_snap = spine.model_copy(deep=True)
-                planner = ArcPlanner(sess.provider)
-                ep = planner.current_episode(state.world, state.narrative_progress, summaries,
-                                             remaining=max(2, (state.seed.target_chapters or 12) - next_ch + 1))
-                for _e in state.world.entities:   # 캐스트 플랜 레이어 동기화 — lazy 아크 설계가 낳은 인물(등장 전 설계)
-                    if _e.id not in sess.bundle.ontology.entities:
-                        from ..engine.ontology import Entity as _OntEntity
-                        sess.bundle.ontology.add(_OntEntity(id=_e.id, name=_e.name, etype=_e.etype,
-                                                            attrs=dict(_e.attrs), aliases=list(_e.aliases),
-                                                            provisional=_e.provisional))
-                        sess.bus.emit("cast_plan", "registered", chapter=next_ch, entity=_e.name)
-                if ep is None:                                  # 해소 중 완결 도달
-                    self.repo.save(state)
-                    return {"completed": True, "reason": "ending_reached",
-                            "current_chapter": state.current_chapter,
-                            "total_beats": (state.seed.target_chapters or len(state.world.beats)),
-                            "usage_total": state.usage_total}
-                arc = spine.arc(state.narrative_progress.current_arc_id)
-                is_finale = (state.narrative_progress.chapters_in_episode + 1) >= ep.target_chapters
-                # 떡밥 회수 되먹임 — 비강제 원칙(슬로우번 존중) + 작가 제어(plant_reminder) + 참고 슬롯(작가 지시 위장 금지).
-                plant_notes = ""
-                policy = getattr(state.world, "plant_reminder", "gentle")
-                outstanding = _outstanding_plants(spine)
-                if outstanding and policy != "off":
-                    plant_notes = (f"{outstanding[:self.settings.plant_inject_cap]} — 회수는 절정과 자연스럽게 맞물릴 때만. "
-                                   "억지 회수 금지(슬로우번은 정당한 기법)")
-                    if policy == "active" and is_finale:
-                        plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
-                beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
-                                                summaries, [d.text for d in active], plant_notes=plant_notes)
-                # ---- 계획 하네스: 비트도 본문처럼 생성→결정론 lint→교정 1회 (무검증 통과 구간 제거) ----
-                from ..engine.plan_lint import lint_beat, beat_repeat_score
-                from ..domain.types import Violation as _V, SignalGrade as _SG
-                plan_viols = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
-                prev_beat_summaries = [c.title + " " + (getattr(c, "detail_synopsis", "") or c.summary)[:200]
-                                       for c in prior[-4:]]
-                rep = beat_repeat_score(sess.provider, f"{beat.title} {beat.summary}", prev_beat_summaries)
-                if rep > 0.86:   # 비트 재탕('같은 절벽') — 설계 단계 차단(본문 생성 전)
-                    plan_viols.append(_V(entity="beat", kind="plan_beat_repeat", grade=_SG.DETERMINISTIC,
-                                         canon="직전 비트들", text=f"유사도 {rep:.2f}",
-                                         evidence="계획 lint: 재탕"))
-                if plan_viols:
-                    sess.bus.emit("plan_lint", "violations", chapter=next_ch,
-                                  kinds=[v.kind for v in plan_viols])
-                    fix_note = "; ".join(f"[{v.kind}] {v.text}" for v in plan_viols)
-                    beat = planner.beat_for_episode(   # 위반 명시 재계획 1회(M4식 — 무한 루프 금지)
-                        state.world, arc, ep, next_ch, is_finale, summaries,
-                        [d.text for d in active] + [f"(계획 결함 교정 필수) {fix_note}"],
-                        plant_notes=plant_notes)
-                    remaining = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
-                    if remaining:   # 잔존 → 가시화 + 보수 폴백(무효/제거 인물만 제외하고 진행 — 정지 금지)
-                        sess.bus.emit("plan_lint", "non_convergence", chapter=next_ch,
-                                      kinds=[v.kind for v in remaining])
-                        bad = {v.entity for v in remaining}
-                        beat.entities = [e for e in beat.entities
-                                         if e in sess.bundle.ontology.entities and
-                                         sess.bundle.ontology.name(e) not in bad] or beat.entities[:1]
-                hint = f"{beat.title} {beat.summary} {' '.join(beat.key_events)} {ep.climax}"
-                anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars, hint)
-                anchors = anchors + _arc_anchors(spine, arc, ep)
-                espec = {e.id: e for e in state.world.entities}
-                for eid in beat.entities:   # 데뷔 집행: 설계 완료된 인물의 첫 등장 — 콜드 드롭 소스 차단
-                    e = espec.get(eid)
-                    if e is not None and not getattr(e, "introduced", False) and getattr(e, "profile", ""):
-                        anchors.append(RetrievedItem(source="cast_debut", ref=eid,
-                                       text=f"[신규 등장 인물 — 이번 화 첫 도입. 첫 등장 시 정체·관계를 알 수 있는 "
-                                            f"소개 앵커 1문장 의무, 기지 인물처럼 다루지 마라] {e.name}: {e.profile[:300]}"))
-                        sess.bus.emit("cast_plan", "debut", chapter=next_ch, entity=e.name)
-                story_so_far, dropped = _build_story_so_far_hier(state, next_ch, self.settings.story_so_far_chars)
-            else:                      # 평면 모드(하위호환)
-                beat = BeatPlanner(sess.provider).beat_for(
-                    state.world, next_ch, summaries, [d.text for d in active])
-                anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars,
-                                                      f"{beat.title} {beat.summary}")
-                story_so_far, dropped = _build_story_so_far(prior, self.settings.story_so_far_chars)
+            def _fail_rollback():   # 예외 경로: 메모리 커서/spine 복원 + 세션 evict(다음 요청은 디스크=클린에서 재수화)
+                if spine_snap is not None:
+                    state.narrative_progress = prog_snap
+                    state.world.spine = spine_snap
+                try:
+                    sess.bus.emit('narrative', 'generate_failed', chapter=next_ch)
+                except Exception:
+                    pass
+                self.sessions.evict(pid)
+            saved = False
+            try:
+                if spine and spine.arcs:   # R4 spine 모드: 에피소드(절정 backward) 단위로 beat 파생
+                    # B: 커서/spine 변이를 트랜잭션으로 — FINALIZED 아니면 롤백(재시도 결정성·orphan/조기 arc.done 방지)
+                    prog_snap = state.narrative_progress.model_copy(deep=True)
+                    spine_snap = spine.model_copy(deep=True)
+                    planner = ArcPlanner(sess.provider)
+                    ep = planner.current_episode(state.world, state.narrative_progress, summaries,
+                                                 remaining=max(2, (state.seed.target_chapters or 12) - next_ch + 1))
+                    for _e in state.world.entities:   # 캐스트 플랜 레이어 동기화 — lazy 아크 설계가 낳은 인물(등장 전 설계)
+                        if _e.id not in sess.bundle.ontology.entities:
+                            from ..engine.ontology import Entity as _OntEntity
+                            sess.bundle.ontology.add(_OntEntity(id=_e.id, name=_e.name, etype=_e.etype,
+                                                                attrs=dict(_e.attrs), aliases=list(_e.aliases),
+                                                                provisional=_e.provisional))
+                            sess.bus.emit("cast_plan", "registered", chapter=next_ch, entity=_e.name)
+                    if ep is None:                                  # 해소 중 완결 도달
+                        self.repo.save(state)
+                        return {"completed": True, "reason": "ending_reached",
+                                "current_chapter": state.current_chapter,
+                                "total_beats": (state.seed.target_chapters or len(state.world.beats)),
+                                "usage_total": state.usage_total}
+                    arc = spine.arc(state.narrative_progress.current_arc_id)
+                    is_finale = (state.narrative_progress.chapters_in_episode + 1) >= ep.target_chapters
+                    # 떡밥 회수 되먹임 — 비강제 원칙(슬로우번 존중) + 작가 제어(plant_reminder) + 참고 슬롯(작가 지시 위장 금지).
+                    plant_notes = ""
+                    policy = getattr(state.world, "plant_reminder", "gentle")
+                    outstanding = _outstanding_plants(spine)
+                    if outstanding and policy != "off":
+                        plant_notes = (f"{outstanding[:self.settings.plant_inject_cap]} — 회수는 절정과 자연스럽게 맞물릴 때만. "
+                                       "억지 회수 금지(슬로우번은 정당한 기법)")
+                        if policy == "active" and is_finale:
+                            plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
+                    beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
+                                                    summaries, [d.text for d in active], plant_notes=plant_notes)
+                    # ---- 계획 하네스: 비트도 본문처럼 생성→결정론 lint→교정 1회 (무검증 통과 구간 제거) ----
+                    from ..engine.plan_lint import lint_beat, beat_repeat_score
+                    from ..domain.types import Violation as _V, SignalGrade as _SG
+                    plan_viols = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
+                    prev_beat_summaries = [c.title + " " + (getattr(c, "detail_synopsis", "") or c.summary)[:200]
+                                           for c in prior[-4:]]
+                    rep = beat_repeat_score(sess.provider, f"{beat.title} {beat.summary}", prev_beat_summaries)
+                    if rep > 0.86:   # 비트 재탕('같은 절벽') — 설계 단계 차단(본문 생성 전)
+                        plan_viols.append(_V(entity="beat", kind="plan_beat_repeat", grade=_SG.DETERMINISTIC,
+                                             canon="직전 비트들", text=f"유사도 {rep:.2f}",
+                                             evidence="계획 lint: 재탕"))
+                    if plan_viols:
+                        sess.bus.emit("plan_lint", "violations", chapter=next_ch,
+                                      kinds=[v.kind for v in plan_viols])
+                        fix_note = "; ".join(f"[{v.kind}] {v.text}" for v in plan_viols)
+                        beat = planner.beat_for_episode(   # 위반 명시 재계획 1회(M4식 — 무한 루프 금지)
+                            state.world, arc, ep, next_ch, is_finale, summaries,
+                            [d.text for d in active] + [f"(계획 결함 교정 필수) {fix_note}"],
+                            plant_notes=plant_notes)
+                        remaining = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
+                        if remaining:   # 잔존 → 가시화 + 보수 폴백(무효/제거 인물만 제외하고 진행 — 정지 금지)
+                            sess.bus.emit("plan_lint", "non_convergence", chapter=next_ch,
+                                          kinds=[v.kind for v in remaining])
+                            bad = {v.entity for v in remaining}
+                            beat.entities = [e for e in beat.entities
+                                             if e in sess.bundle.ontology.entities and
+                                             sess.bundle.ontology.name(e) not in bad] or beat.entities[:1]
+                    hint = f"{beat.title} {beat.summary} {' '.join(beat.key_events)} {ep.climax}"
+                    anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars, hint)
+                    anchors = anchors + _arc_anchors(spine, arc, ep)
+                    espec = {e.id: e for e in state.world.entities}
+                    for eid in beat.entities:   # 데뷔 집행: 설계 완료된 인물의 첫 등장 — 콜드 드롭 소스 차단
+                        e = espec.get(eid)
+                        if e is not None and not getattr(e, "introduced", False) and getattr(e, "profile", ""):
+                            anchors.append(RetrievedItem(source="cast_debut", ref=eid,
+                                           text=f"[신규 등장 인물 — 이번 화 첫 도입. 첫 등장 시 정체·관계를 알 수 있는 "
+                                                f"소개 앵커 1문장 의무, 기지 인물처럼 다루지 마라] {e.name}: {e.profile[:300]}"))
+                            sess.bus.emit("cast_plan", "debut", chapter=next_ch, entity=e.name)
+                    story_so_far, dropped = _build_story_so_far_hier(state, next_ch, self.settings.story_so_far_chars)
+                else:                      # 평면 모드(하위호환)
+                    beat = BeatPlanner(sess.provider).beat_for(
+                        state.world, next_ch, summaries, [d.text for d in active])
+                    anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars,
+                                                          f"{beat.title} {beat.summary}")
+                    story_so_far, dropped = _build_story_so_far(prior, self.settings.story_so_far_chars)
 
-            prev = state.chapter(next_ch - 1)
-            prev_text = prev.text if prev else ""
+                prev = state.chapter(next_ch - 1)
+                prev_text = prev.text if prev else ""
 
-            before = sess.provider.usage.as_dict()
-            sess.bus.reset()
-            if dropped:   # 오래된 맥락이 예산에서 잘림 — 조용한 정지 금지(가시화)
-                sess.bus.emit("assemble_memory", "story_truncated", chapter=next_ch, dropped=dropped)
-            if bible_dropped:   # 설정집 다이제스트 예산 컷 가시화(silent drop 금지)
-                sess.bus.emit("assemble_memory", "bible_truncated", chapter=next_ch, dropped=bible_dropped)
-            if spine and spine.arcs:
-                _out = _outstanding_plants(spine)
-                if len(_out) >= self.settings.plant_backlog_threshold:   # 복선 적체 경보(advisory — 작가 가시화)
-                    sess.bus.emit("narrative", "plant_backlog", chapter=next_ch, outstanding=_out[:8])
-            # 작품 완결 화 감지: ①스파인 소진(마지막 아크의 마지막 에피소드 finale) 또는 ②목표 회차 도달
-            # — 어느 쪽이든 마지막으로 나가는 화는 절단신공 대신 '닫는' 회차(미결 선택은 결행, 새 떡밥 금지)
-            target = state.seed.target_chapters or 12
-            closing = bool(next_ch >= target or (spine and ep and is_finale
-                           and not any((not a.done) and a.arc_id != ep.arc_id for a in spine.arcs)
-                           and not any((not e2.done) and e2.episode_id != ep.episode_id
-                                       for a in spine.arcs for e2 in a.episodes)))
-            recent_tails = [c.text[-160:] for c in prior[-3:] if c.text]   # 훅 유형 로테이션 재료
-            # 전권 틱 원장(작품-전역 품질 상태): 지난 회차 전체에서 과용된 습관구 → 이번 화 절제 목록(예방측)
-            from ..engine.quality_gates import word_tics as _wt
-            roster_names = {e.name for e in sess.bundle.ontology.entities.values()}
-            roster_names |= {k for ent in state.bible.entries for k in (ent.keywords or [])}   # 세계관 고유어 제외(데이터 주도 — 코드 사전 금지)
-            corpus = " ".join(c.text for c in prior[-8:] if c.text)
-            restraint = [p for p, n in _wt(corpus, roster_names, cap=12)][:8]
-            if prior:   # 틱 모방-증폭 루프 차단(재설계): 직전 화 원문 주입이 말버릇을 '문체'로 학습시키는 고리를 명시 절제로 끊는다
-                restraint += [w for w, _ in _wt(prior[-1].text or "", roster_names, cap=3)]
-                restraint = list(dict.fromkeys(restraint))[:10]
-            record = sess.bundle.generator.generate(
-                next_ch, beat.model_dump(), sess.bundle.ontology, sess.bundle.rag,
-                sess.bundle.wiki, directives=active, prev_chapter_text=prev_text,
-                story_so_far=story_so_far, anchors=anchors, closing=closing,
-                recent_tails=recent_tails, restraint=restraint)
+                before = sess.provider.usage.as_dict()
+                sess.bus.reset()
+                if dropped:   # 오래된 맥락이 예산에서 잘림 — 조용한 정지 금지(가시화)
+                    sess.bus.emit("assemble_memory", "story_truncated", chapter=next_ch, dropped=dropped)
+                if bible_dropped:   # 설정집 다이제스트 예산 컷 가시화(silent drop 금지)
+                    sess.bus.emit("assemble_memory", "bible_truncated", chapter=next_ch, dropped=bible_dropped)
+                if spine and spine.arcs:
+                    _out = _outstanding_plants(spine)
+                    if len(_out) >= self.settings.plant_backlog_threshold:   # 복선 적체 경보(advisory — 작가 가시화)
+                        sess.bus.emit("narrative", "plant_backlog", chapter=next_ch, outstanding=_out[:8])
+                # 작품 완결 화 감지: ①스파인 소진(마지막 아크의 마지막 에피소드 finale) 또는 ②목표 회차 도달
+                # — 어느 쪽이든 마지막으로 나가는 화는 절단신공 대신 '닫는' 회차(미결 선택은 결행, 새 떡밥 금지)
+                target = state.seed.target_chapters or 12
+                closing = bool(next_ch >= target or (spine and ep and is_finale
+                               and not any((not a.done) and a.arc_id != ep.arc_id for a in spine.arcs)
+                               and not any((not e2.done) and e2.episode_id != ep.episode_id
+                                           for a in spine.arcs for e2 in a.episodes)))
+                recent_tails = [c.text[-160:] for c in prior[-3:] if c.text]   # 훅 유형 로테이션 재료
+                # 전권 틱 원장(작품-전역 품질 상태): 지난 회차 전체에서 과용된 습관구 → 이번 화 절제 목록(예방측)
+                from ..engine.quality_gates import word_tics as _wt
+                roster_names = {e.name for e in sess.bundle.ontology.entities.values()}
+                roster_names |= {k for ent in state.bible.entries for k in (ent.keywords or [])}   # 세계관 고유어 제외(데이터 주도 — 코드 사전 금지)
+                corpus = " ".join(c.text for c in prior[-8:] if c.text)
+                restraint = [p for p, n in _wt(corpus, roster_names, cap=12)][:8]
+                if prior:   # 틱 모방-증폭 루프 차단(재설계): 직전 화 원문 주입이 말버릇을 '문체'로 학습시키는 고리를 명시 절제로 끊는다
+                    restraint += [w for w, _ in _wt(prior[-1].text or "", roster_names, cap=3)]
+                    restraint = list(dict.fromkeys(restraint))[:10]
+                record = sess.bundle.generator.generate(
+                    next_ch, beat.model_dump(), sess.bundle.ontology, sess.bundle.rag,
+                    sess.bundle.wiki, directives=active, prev_chapter_text=prev_text,
+                    story_so_far=story_so_far, anchors=anchors, closing=closing,
+                    recent_tails=recent_tails, restraint=restraint)
 
-            # 동적 온톨로지 업데이트(엔진 고도화) — FINALIZED 회차에만
-            if record.status == ChapterStatus.FINALIZED:
-                _t0 = sess.provider.usage.chat_tokens
-                for eid in sess.bundle.ontology.scan_present_ids(record.text):   # 데뷔 완료 마킹(이후 앵커 중복 방지)
-                    e = next((x for x in state.world.entities if x.id == eid), None)
-                    if e is not None and not getattr(e, "introduced", False):
-                        e.introduced = True
-                proposal = sess.bundle.updater.propose(
-                    record.text, sess.bundle.ontology, next_ch,
-                    existing_setting_titles=[b.title for b in state.bible.entries if b.status != "deprecated"])
-                record.usage_by_stage["ontology_propose"] = sess.provider.usage.chat_tokens - _t0
-                changes, new_specs, new_tl, new_edges = sess.bundle.updater.apply(
-                    proposal, sess.bundle.ontology, next_ch)
-                record.ontology_changes = changes
-                state.runtime_entities += new_specs
-                state.runtime_timeline += new_tl
-                state.runtime_edges += new_edges          # 자동추출 관계(narrative_inferred) 영속
-                # 설정집 연재 증분: 회차에서 드러난 세계 설정 → 미승인 초안으로만 append(작가 promote 게이트 보존)
-                existing_titles = {b.title.strip() for b in state.bible.entries}
-                for ns in (proposal.get("new_settings") or [])[:2]:
-                    t = (ns.get("title") or "").strip()
-                    if t and t not in existing_titles:
-                        existing_titles.add(t)
-                        state.bible.entries.append(BibleEntry(
-                            entry_id=_slug(t, {e.entry_id for e in state.bible.entries}),
-                            category=normalize_category(ns.get("category")), title=t,
-                            prose=(ns.get("prose") or "").strip(),
-                            keywords=[k for k in (ns.get("keywords") or []) if k][:5],
-                            provenance="ai_worldgen", status="ai_unreviewed"))
-                state.current_chapter = next_ch
-                self._esc.pop((pid, next_ch), None)       # 성공 → 연속 escalation 카운터 리셋
-                # R4: 에피소드 커서 전진 + finale 시 롤업 요약·결정론 드리프트(advisory)
-                if spine and ep:
-                    record.arc_id, record.episode_id = ep.arc_id, ep.episode_id
-                    state.narrative_progress.chapters_in_episode += 1
-                    if is_finale:
-                        ep.done = True
-                        ep_chs = [c for c in state.chapters if c.episode_id == ep.episode_id] + [record]
-                        ep.summary = _rollup_episode(sess.provider, ep, ep_chs)
-                        record.drift_signals = episode_drift_signals(
-                            ep, [c.text for c in ep_chs], sess.bundle.ontology)
-                        for dsig in record.drift_signals:
-                            sess.bus.emit("drift", "signal", chapter=next_ch, detail=dsig)
-            elif spine and spine_snap is not None:
-                # ESCALATED: 커서/spine 변이 롤백(재시도 결정성·orphan 에피소드/조기 arc.done 영속 방지)
-                state.narrative_progress = prog_snap
-                state.world.spine = spine_snap
-                k = (pid, next_ch)                         # #11: 같은 회차 연속 ESCALATED → 갇힘 경보(가시화)
-                self._esc[k] = self._esc.get(k, 0) + 1
-                if self._esc[k] >= 2:
-                    sess.bus.emit("narrative", "episode_stuck", chapter=next_ch,
-                                  attempts=self._esc[k], episode=(ep.episode_id if ep else None))
+                # 동적 온톨로지 업데이트(엔진 고도화) — FINALIZED 회차에만
+                if record.status == ChapterStatus.FINALIZED:
+                    _t0 = sess.provider.usage.chat_tokens
+                    for eid in sess.bundle.ontology.scan_present_ids(record.text):   # 데뷔 완료 마킹(이후 앵커 중복 방지)
+                        e = next((x for x in state.world.entities if x.id == eid), None)
+                        if e is not None and not getattr(e, "introduced", False):
+                            e.introduced = True
+                    proposal = sess.bundle.updater.propose(
+                        record.text, sess.bundle.ontology, next_ch,
+                        existing_setting_titles=[b.title for b in state.bible.entries if b.status != "deprecated"])
+                    record.usage_by_stage["ontology_propose"] = sess.provider.usage.chat_tokens - _t0
+                    changes, new_specs, new_tl, new_edges = sess.bundle.updater.apply(
+                        proposal, sess.bundle.ontology, next_ch)
+                    record.ontology_changes = changes
+                    state.runtime_entities += new_specs
+                    state.runtime_timeline += new_tl
+                    state.runtime_edges += new_edges          # 자동추출 관계(narrative_inferred) 영속
+                    # 설정집 연재 증분: 회차에서 드러난 세계 설정 → 미승인 초안으로만 append(작가 promote 게이트 보존)
+                    existing_titles = {b.title.strip() for b in state.bible.entries}
+                    for ns in (proposal.get("new_settings") or [])[:2]:
+                        t = (ns.get("title") or "").strip()
+                        if t and t not in existing_titles:
+                            existing_titles.add(t)
+                            state.bible.entries.append(BibleEntry(
+                                entry_id=_slug(t, {e.entry_id for e in state.bible.entries}),
+                                category=normalize_category(ns.get("category")), title=t,
+                                prose=(ns.get("prose") or "").strip(),
+                                keywords=[k for k in (ns.get("keywords") or []) if k][:5],
+                                provenance="ai_worldgen", status="ai_unreviewed"))
+                    state.current_chapter = next_ch
+                    self._esc.pop((pid, next_ch), None)       # 성공 → 연속 escalation 카운터 리셋
+                    # R4: 에피소드 커서 전진 + finale 시 롤업 요약·결정론 드리프트(advisory)
+                    if spine and ep:
+                        record.arc_id, record.episode_id = ep.arc_id, ep.episode_id
+                        state.narrative_progress.chapters_in_episode += 1
+                        if is_finale:
+                            ep.done = True
+                            ep_chs = [c for c in state.chapters if c.episode_id == ep.episode_id] + [record]
+                            ep.summary = _rollup_episode(sess.provider, ep, ep_chs)
+                            record.drift_signals = episode_drift_signals(
+                                ep, [c.text for c in ep_chs], sess.bundle.ontology)
+                            for dsig in record.drift_signals:
+                                sess.bus.emit("drift", "signal", chapter=next_ch, detail=dsig)
+                elif spine and spine_snap is not None:
+                    # ESCALATED: 커서/spine 변이 롤백(재시도 결정성·orphan 에피소드/조기 arc.done 영속 방지)
+                    state.narrative_progress = prog_snap
+                    state.world.spine = spine_snap
+                    k = (pid, next_ch)                         # #11: 같은 회차 연속 ESCALATED → 갇힘 경보(가시화)
+                    self._esc[k] = self._esc.get(k, 0) + 1
+                    if self._esc[k] >= 2:
+                        sess.bus.emit("narrative", "episode_stuck", chapter=next_ch,
+                                      attempts=self._esc[k], episode=(ep.episode_id if ep else None))
 
-            # 기존 회차 재생성이면 교체, 아니면 추가
-            state.chapters = [c for c in state.chapters if c.chapter != next_ch] + [record]
-            state.chapters.sort(key=lambda c: c.chapter)
+                # 기존 회차 재생성이면 교체, 아니면 추가
+                state.chapters = [c for c in state.chapters if c.chapter != next_ch] + [record]
+                state.chapters.sort(key=lambda c: c.chapter)
 
-            delta = _usage_delta(before, sess.provider.usage.as_dict())
-            state.usage_total = _accumulate(state.usage_total, delta)
-            sess.snapshot_into(state)
-            self.repo.save(state)
+                delta = _usage_delta(before, sess.provider.usage.as_dict())
+                state.usage_total = _accumulate(state.usage_total, delta)
+                sess.snapshot_into(state)
+                self.repo.save(state)
+                saved = True
 
-            failures = sess.bus.failures()
-            return {"record": record, "events": list(sess.bus.buffer), "usage_delta": delta,
-                    "usage_total": state.usage_total, "failures": failures, "completed": False,
-                    "current_chapter": state.current_chapter,
-                    "total_beats": (state.seed.target_chapters or len(state.world.beats))}
+                failures = sess.bus.failures()
+                return {"record": record, "events": list(sess.bus.buffer), "usage_delta": delta,
+                        "usage_total": state.usage_total, "failures": failures, "completed": False,
+                        "current_chapter": state.current_chapter,
+                        "total_beats": (state.seed.target_chapters or len(state.world.beats))}
+            except Exception:
+                if not saved:   # save 전 실패만 롤백 — save 후 예외는 디스크가 권위(롤백 금지)
+                    _fail_rollback()
+                raise
 
     # ---- 인스펙터 ----
     def ontology_snapshot(self, pid: str) -> dict | None:

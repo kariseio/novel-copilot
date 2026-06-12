@@ -132,8 +132,67 @@ def test_escalated_rollback() -> bool:
     return ok
 
 
+def test_generate_exception_rollback() -> bool:
+    """generate 가 예외(LLM 타임아웃 등)를 던지면 커서 롤백 + 세션 evict → 오염 커서 재사용 차단. LLM 0콜."""
+    import tempfile
+    from pathlib import Path
+    from novelcopilot.repository import FilesystemProjectRepository
+    from novelcopilot.services import CopilotService
+    from novelcopilot.domain.world import Beat
+    import novelcopilot.worldgen.arc_planner as apmod
+
+    s = get_settings()
+    svc = CopilotService(s, FilesystemProjectRepository(Path(tempfile.mkdtemp())))
+    w = WorldConfig(title="t", genre="x", entities=[EntitySpec(id="hero", name="주인공")])
+    w.spine = NarrativeSpine(ending=EndingSpec(ending="E"), arcs=[
+        Arc(arc_id="arc1", order=1, title="A1", episodes=[
+            Episode(episode_id="arc1_ep1", arc_id="arc1", order=1, climax="c1", target_chapters=3)])])
+    st = ProjectState(id="t", seed=ProjectSeed(target_chapters=6), world=w, created_at="t")
+    svc.repo.save(st)
+    sess, _ = svc.get_session("t")
+    apmod.ArcPlanner.beat_for_episode = lambda self, world, arc, ep, ch, fin, rec, direc, plant_notes="": \
+        Beat(chapter=ch, entities=["hero"], arc_id=ep.arc_id, episode_id=ep.episode_id)
+    def _boom(*a, **k):
+        raise RuntimeError("LLM timeout")
+    sess.bundle.generator.generate = _boom
+    raised = False
+    try:
+        svc.generate_next_chapter("t")
+    except RuntimeError:
+        raised = True
+    st2 = svc.get_project("t")   # 디스크(미저장=클린) 재읽기
+    ok = (raised
+          and "t" not in svc.sessions._sessions               # 세션 evict 됨(오염 커서 폐기)
+          and st2.current_chapter == 0                          # 미전진
+          and st2.narrative_progress.current_episode_id is None
+          and not any(e.done for a in st2.world.spine.arcs for e in a.episodes))
+    print(f"[{'OK' if ok else 'FAIL'}] 예외 롤백: 커서 롤백·세션 evict·current_chapter 미전진(raised={raised})")
+    return ok
+
+
+def test_pacing_budget() -> bool:
+    """페이싱 산술 정합 — n_arcs·_rebalance 가 목표 회차에 닿는가(조기완결/하드캡 회피). LLM 0콜.
+    200화에서 share/arc 가 에피소드 천장(4×10)을 넘어 ~168화 조기완결되던 결함의 회귀 가드."""
+    ok = True
+    for target in (12, 50, 100, 150, 200, 300):
+        n_arcs = max(2, min(8, round((target or 12) / 18)))      # build_spine 과 동일 공식
+        sp = NarrativeSpine(arcs=[Arc(arc_id=f"arc{i+1}", order=i + 1, title="A") for i in range(n_arcs)])
+        for ei in range(4):   # 첫 아크만 분해(build_spine 패턴)
+            sp.arcs[0].episodes.append(Episode(episode_id=f"arc1_ep{ei+1}", arc_id="arc1",
+                                               order=ei + 1, climax="c", target_chapters=5))
+        ArcPlanner._rebalance(sp, target)
+        share = max(2, round(target / n_arcs))
+        first_sum = sum(e.target_chapters for e in sp.arcs[0].episodes)
+        hit = abs(first_sum - share) <= max(2, share * 0.15)     # 천장 부족으로 인한 구조적 미달 없음
+        ok &= hit
+        print(f"   target={target:4} n_arcs={n_arcs} share={share:3} 첫아크합={first_sum:3} [{'OK' if hit else 'MISS'}]")
+    print(f"[{'OK' if ok else 'FAIL'}] 페이싱 예산 정합(목표 회차 ≈ 아크 예산 합)")
+    return ok
+
+
 if __name__ == "__main__":
     results = [test_cursor(), test_anchors_and_drift(), test_hier_summary(),
-               test_completion(), test_escalated_rollback()]
+               test_completion(), test_escalated_rollback(), test_generate_exception_rollback(),
+               test_pacing_budget()]
     print("\nR4 검증:", "ALL GREEN ✅" if all(results) else "FAIL ❌")
     sys.exit(0 if all(results) else 1)
