@@ -148,10 +148,30 @@ class CopilotService:
         return self._wg_provider
 
     # ---- 컨셉 드래프트(대화로 빚는 세계관) ----
-    def start_draft(self) -> WorldDraft:
-        d = WorldDraft(id=uuid.uuid4().hex[:12], created_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+    def _new_draft_locked(self) -> WorldDraft:
+        """_draft_lock 보유 상태에서 드래프트 생성(start_draft 재호출 시 재진입 데드락 회피)."""
+        d = WorldDraft(id=uuid.uuid4().hex[:12], created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                       last_touched=time.time())
         self._drafts[d.id] = d
         return d
+
+    def _sweep_drafts_locked(self) -> None:
+        """만료(TTL 초과) 드래프트 폐기 + 개수 하드캡. finalize 중인 것은 보존. _draft_lock 보유 상태에서."""
+        now = time.time()
+        ttl = self.settings.draft_ttl_sec
+        for k in [k for k, d in self._drafts.items()
+                  if k not in self._finalizing and now - (d.last_touched or 0) > ttl]:
+            self._drafts.pop(k, None)
+        if len(self._drafts) > self.settings.max_drafts:   # TTL 내 폭주 방어(오래된 순 폐기)
+            alive = sorted((d for d in self._drafts.values() if d.id not in self._finalizing),
+                           key=lambda d: d.last_touched or 0)
+            for d in alive[: len(self._drafts) - self.settings.max_drafts]:
+                self._drafts.pop(d.id, None)
+
+    def start_draft(self) -> WorldDraft:
+        with self._draft_lock:
+            self._sweep_drafts_locked()
+            return self._new_draft_locked()
 
     def get_draft(self, did: str) -> "WorldDraft | None":
         return self._drafts.get(did)
@@ -183,19 +203,26 @@ class CopilotService:
     def draft_turn(self, did: str, message: str, params: dict | None = None) -> dict:
         """대화 한 턴 — 브리프 갱신 + 변경점·추천 질문·되묻기 반환. (드래프트 없으면 새로 시작)
         params(작가가 컨트롤로 정한 장르·분위기·회차)는 AI 갱신보다 우선 — 12화로 되돌아가는 일 방지."""
-        d = self._drafts.get(did)
-        if d is None:
-            d = self.start_draft()
-        d.locks = self._merge_locks(d.locks, params)
-        d.chat.append({"role": "author", "text": message})
-        d.chat = d.chat[-60:]                                   # 무한 누적·토큰 폭주 방지
-        r = ConceptChat(self.wg_provider).turn(d.brief, d.chat, message, locked=d.locks or None)
-        d.brief = self._apply_locks(ConceptBrief.model_validate(r["brief"]), d.locks)   # 작가 잠금이 항상 우선
-        d.open_questions = r.get("questions", [])
-        d.chat.append({"role": "ai", "text": r.get("reply", "")})
-        r["brief"] = d.brief.model_dump()
-        r["draft_id"] = d.id
-        r["completeness"] = d.brief.completeness()
+        with self._draft_lock:               # 부기(생성·정리·터치)만 락 안에서 — LLM 콜은 락 밖(드래프트 간 직렬화 방지)
+            self._sweep_drafts_locked()
+            d = self._drafts.get(did) or self._new_draft_locked()
+            d.locks = self._merge_locks(d.locks, params)
+            d.last_touched = time.time()
+            d.chat.append({"role": "author", "text": message})
+            d.chat = d.chat[-60:]                               # 무한 누적·토큰 폭주 방지
+            did, brief_in, chat_in, locks_in = d.id, d.brief, list(d.chat), dict(d.locks)
+        r = ConceptChat(self.wg_provider).turn(brief_in, chat_in, message, locked=locks_in or None)
+        with self._draft_lock:
+            d = self._drafts.get(did)
+            if d is None:                     # 턴 사이 만료/폐기된 극단 — 새로 만들어 결과 보존(영구망각 방지)
+                d = self._new_draft_locked(); did = d.id
+            d.brief = self._apply_locks(ConceptBrief.model_validate(r["brief"]), d.locks)   # 작가 잠금이 항상 우선
+            d.open_questions = r.get("questions", [])
+            d.chat.append({"role": "ai", "text": r.get("reply", "")})
+            d.last_touched = time.time()
+            r["brief"] = d.brief.model_dump()
+            r["draft_id"] = did
+            r["completeness"] = d.brief.completeness()
         return r
 
     def _brief_to_seed(self, brief: ConceptBrief) -> ProjectSeed:
@@ -660,7 +687,8 @@ class CopilotService:
                     self._esc[k] = self._esc.get(k, 0) + 1
                     if self._esc[k] >= 2:
                         sess.bus.emit("narrative", "episode_stuck", chapter=next_ch,
-                                      attempts=self._esc[k], episode=(ep.episode_id if ep else None))
+                                      attempts=self._esc[k], episode=(ep.episode_id if ep else None),
+                                      recovery=getattr(record, "recovery_hints", []))   # 갇힘 경보에 회복 안내 동봉
 
                 # 기존 회차 재생성이면 교체, 아니면 추가
                 state.chapters = [c for c in state.chapters if c.chapter != next_ch] + [record]

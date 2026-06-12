@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     bible_digest_chars: int = 3500           # 설정집 카드(키워드 선별 — 심층 설정집 41+항목 대응)
     rag_k: int = 6                           # 과거 회차 의미 검색 청크 수(기존 3 하드코딩)
     wiki_k: int = 3                          # 인물카드 주입 수(기존 2 하드코딩)
+    # 메모리 상한(장수 프로세스 OOM 방지 — 축출/만료해도 정보 손실 0: 세션=디스크 재수화, 드래프트=휘발 명세)
+    max_live_sessions: int = 32              # 동시 캐시 세션 수(LRU)
+    draft_ttl_sec: int = 6 * 3600            # 미접촉 컨셉 드래프트 폐기 기준(초)
+    max_drafts: int = 200                    # 드래프트 하드캡(TTL 내 폭주 방어)
     continuity_polish: bool = True           # 회차 내부(수치·소지품) 연속성 교정 패스(+1콜/화)
     plant_backlog_threshold: int = 3         # 미회수 복선 적체 경보 임계(advisory)
     plant_inject_cap: int = 5                # 비트 설계에 참고로 노출할 미회수 복선 최대 수

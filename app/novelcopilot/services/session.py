@@ -6,6 +6,7 @@ writer_lock(단일 소유)으로 회차 생성을 직렬화(append-only 안전).
 """
 from __future__ import annotations
 import threading
+from collections import OrderedDict
 
 from ..config import Settings
 from ..domain.project import ProjectState
@@ -57,23 +58,37 @@ class EngineSession:
 
 
 class SessionManager:
-    """프로젝트별 세션 캐시. 비대칭: 메모리 우선, 없으면 repo 에서 재수화."""
+    """프로젝트별 세션 캐시(LRU). 비대칭: 메모리 우선, 없으면 repo 에서 재수화 — 축출해도 정보 손실 0(디스크=권위).
+    상한 초과 시 가장 오래 안 쓴 세션부터 축출하되, 생성 중(lock 보유)인 세션은 건너뛴다(lost update 방지)."""
     def __init__(self, settings: Settings):
         self.settings = settings
-        self._sessions: dict[str, EngineSession] = {}
+        self._sessions: "OrderedDict[str, EngineSession]" = OrderedDict()
         self._guard = threading.Lock()
+        self._cap = max(1, getattr(settings, "max_live_sessions", 32))
 
     def get_or_create(self, state: ProjectState) -> EngineSession:
         with self._guard:
             sess = self._sessions.get(state.id)
             if sess is not None:
                 sess.world = state.world      # 최신 world 참조 동기화
+                self._sessions.move_to_end(state.id)   # LRU 갱신(최근 사용 = 뒤)
                 return sess
             provider = create_provider(self.settings)
             sess = EngineSession(state.id, state.world, provider, self.settings)
             sess.rehydrate(state)
             self._sessions[state.id] = sess
+            self._sessions.move_to_end(state.id)
+            self._evict_over_cap_locked()
             return sess
+
+    def _evict_over_cap_locked(self) -> None:
+        """상한 초과분 축출(오래된 순). 단 생성 중(lock 보유) 세션은 보존 — in-flight 객체 분기 방지."""
+        for pid in list(self._sessions.keys()):       # OrderedDict: 앞=오래됨
+            if len(self._sessions) <= self._cap:
+                break
+            s = self._sessions[pid]
+            if not s.lock.locked():                    # 작업 중이 아닐 때만 축출(정보 손실 0)
+                self._sessions.pop(pid, None)
 
     def evict(self, project_id: str) -> None:
         with self._guard:

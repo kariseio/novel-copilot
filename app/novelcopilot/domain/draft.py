@@ -49,3 +49,4 @@ class WorldDraft(BaseModel):
     open_questions: list[str] = Field(default_factory=list)
     locks: dict = Field(default_factory=dict)           # 작가가 컨트롤로 직접 정한 파라미터(장르·분위기·회차) — AI 갱신보다 우선
     created_at: str = ""
+    last_touched: float = 0.0                           # epoch — TTL GC 기준(휘발)
