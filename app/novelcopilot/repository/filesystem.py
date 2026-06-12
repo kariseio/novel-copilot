@@ -104,7 +104,7 @@ class FilesystemProjectRepository(ProjectRepository):
                 continue
             out.append({"id": s.id, "title": s.world.title, "genre": s.world.genre,
                         "created_at": s.created_at, "current_chapter": s.current_chapter,
-                        "total_chapters": len(s.world.beats)})
+                        "total_chapters": (s.seed.target_chapters or len(s.world.beats))})   # 비트 축소 후 목표 회차 기준(get_project 와 동일)
         out.sort(key=lambda x: x["created_at"], reverse=True)
         return out
 
