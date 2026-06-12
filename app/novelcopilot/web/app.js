@@ -408,7 +408,21 @@ function selectChapter(n){ STATE.activeChapter = n; renderChapters(); renderRead
 function renderReader(){
   const p = STATE.project, body = $("#chapter-body");
   const c = (p.chapters||[]).find(x=>x.chapter===STATE.activeChapter);
-  if(!c){ body.classList.add("muted"); body.textContent = "가운데에서 다음 회차를 써보세요."; return; }
+  if(!c){
+    if(!(p.chapters||[]).length && !p.completed){   // 0회차: 첫 회차 쓰기로 화면 전체가 수렴(첫 여정 막힘 해소)
+      body.classList.remove("muted");
+      body.innerHTML = `<div class="reader-empty">
+        <div class="re-mark">✍︎</div>
+        <h3>세계가 준비됐어요. 이제 1화를 써볼까요?</h3>
+        <p class="muted">AI가 초고를 쓰고, 설정이 어긋나면 자동으로 점검합니다. 한 화는 보통 1~3분 걸려요.</p>
+        <button class="primary re-cta" onclick="generateNext()" ${STATE.generating?"disabled":""}>${STATE.generating?"집필 중…":"1화 쓰기 →"}</button>
+      </div>`;
+    } else {
+      body.classList.add("muted");
+      body.textContent = "왼쪽에서 회차를 고르거나, 가운데에서 다음 회차를 써보세요.";
+    }
+    return;
+  }
   body.classList.remove("muted");
   const badge = c.status==="FINALIZED"?'<span class="badge fin">완성</span>':'<span class="badge esc">검토 필요</span>';
   const oc = (c.ontology_changes||[]).map(o=>`<div class="onto-change ${o.op==='new_entity'?'new':o.op==='contradiction'?'con':'chg'}">${o.applied?"✓":"✗"} ${esc(o.entity)}: ${esc(o.detail)}${o.reason?` <span class="muted">(${esc(o.reason)})</span>`:""}</div>`).join("");
@@ -471,6 +485,16 @@ document.addEventListener("keydown", e=>{
 });
 
 // ---------- 회차 생성 (SSE 라이브) ----------
+// 전역 집필 진행 표시 — 어느 탭에 있든 헤더에 'N화 집필 중 · 경과시간'. 멈춤 오해·이탈 방지(UX).
+let _genTimer = null, _genT0 = 0, _genLabel = "집필 준비 중";
+function genStart(){ _genT0 = Date.now(); _genLabel = "집필 준비 중";
+  const el = $("#p-genstatus"); if(el) el.classList.remove("hidden");
+  if(_genTimer) clearInterval(_genTimer); _genTimer = setInterval(genTick, 1000); genTick(); }
+function genTick(){ const el = $("#p-genstatus"); if(!el) return;
+  const s = Math.floor((Date.now()-_genT0)/1000);
+  el.innerHTML = `<span class="spin"></span> ${esc(_genLabel)} · ${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; }
+function genStop(){ if(_genTimer){ clearInterval(_genTimer); _genTimer = null; } const el = $("#p-genstatus"); if(el) el.classList.add("hidden"); }
+
 function generateNext(){
   if(STATE.generating) return;
   const pid = STATE.project.id;
@@ -478,13 +502,15 @@ function generateNext(){
   STATE.generating = true;
   $("#gen-btn").disabled = true;
   $("#harness-log").innerHTML = "";
-  $("#gen-result").innerHTML = '<span class="spin"></span> 집필 중…';
+  $("#gen-result").innerHTML = '<span class="spin"></span> 집필 중… <span class="muted small">보통 1~3분 걸려요. 다른 탭을 봐도 계속 진행됩니다.</span>';
+  renderReader();   // 0회차 빈 상태였다면 '집필 중'으로 갱신
+  genStart();
   logEvent({node:"harness",event:"connect"},"");
 
   const url = `/api/projects/${pid}/generate?directive=${encodeURIComponent(directive)}`;
   const es = new EventSource(url);
   let done = false;
-  es.addEventListener("start", e=>{ const d=JSON.parse(e.data); logEvent({node:"plan_chapter",event:`${d.chapter}화 시작`},"",true); });
+  es.addEventListener("start", e=>{ const d=JSON.parse(e.data); _genLabel = `${d.chapter}화 집필 중`; logEvent({node:"plan_chapter",event:`${d.chapter}화 시작`},"",true); });
   es.addEventListener("event", e=> logEvent(JSON.parse(e.data)));
   es.addEventListener("complete", e=>{ done=true; es.close(); onComplete(JSON.parse(e.data)); });
   es.addEventListener("failed", e=>{ done=true; es.close(); onFail(JSON.parse(e.data)); });
@@ -546,7 +572,7 @@ function logEvent(ev, det, rawEvent){
   const log = $("#harness-log"); log.appendChild(line); log.scrollTop = log.scrollHeight;
 }
 async function onComplete(data){
-  STATE.generating = false; $("#directive").value="";
+  STATE.generating = false; genStop(); $("#directive").value="";
   if(data.completed){   // 엔딩 도달 → 완결
     $("#gen-btn").disabled = true; $("#gen-btn").textContent = "완결되었습니다";
     $("#gen-result").innerHTML = `작품이 완결되었습니다 · ${data.current_chapter}화`;
@@ -570,9 +596,10 @@ async function onComplete(data){
   if(!$("#tab-arc").classList.contains("hidden")) loadSpine();
 }
 function onFail(data){
-  STATE.generating = false; $("#gen-btn").disabled = false;
-  $("#gen-result").innerHTML = `회차를 쓰지 못했습니다: ${esc(data.message||"")}`;
+  STATE.generating = false; genStop(); $("#gen-btn").disabled = false;
+  $("#gen-result").innerHTML = `회차를 쓰지 못했습니다: ${esc(data.message||"")} <button class="primary" onclick="generateNext()">다시 시도</button>`;
   logEvent({node:"harness",event:"실패"}, data.message||"", true);
+  renderReader();
 }
 
 // ---------- 인스펙터 ----------

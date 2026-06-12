@@ -86,6 +86,14 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .pill{background:var(--surface-2);border:1px solid var(--line);border-radius:999px;
   padding:.32em .85em;font-size:.76rem;color:var(--ink-soft);white-space:nowrap}
 .pill.cost{color:var(--warn);background:var(--warn-soft);border-color:transparent}
+.pill.genstatus{color:var(--accent);background:var(--accent-soft);border-color:transparent;font-weight:600}
+
+/* 작업실 0회차 빈 상태 — 첫 회차로 수렴 */
+.reader-empty{text-align:center;padding:3.5em 1.5em;max-width:30em;margin:2em auto}
+.reader-empty .re-mark{font-size:2.2rem;color:var(--accent);margin-bottom:.4em}
+.reader-empty h3{font-family:var(--font-serif);font-size:1.3rem;margin-bottom:.5em}
+.reader-empty p{font-size:.9rem;line-height:1.7;margin-bottom:1.6em}
+.reader-empty .re-cta{font-size:1.05rem;padding:.75em 2em}
 
 .proj-grid{display:grid;grid-template-columns:1.3fr 1.05fr .9fr;gap:1.1em;align-items:start}
 .col-engine,.col-inspect,.col-reader{min-height:60vh}
