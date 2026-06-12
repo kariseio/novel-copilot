@@ -95,49 +95,6 @@ async def finalize_draft(did: str, request: Request, target_chapters: int = 0, g
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
-@router.get("/projects/create_stream")
-async def create_stream(request: Request, genre: str = "", premise: str = "", title: str = "",
-                        tone: str = "", protagonist_hint: str = "", target_chapters: int = 12):
-    """SSE: 작품 생성(세계관→이야기 구조→설정집)의 단계별 진행을 실시간 방출(긴 대기 가시화)."""
-    from ..engine.observability import EventBus
-    svc = _svc(request)
-    seed = ProjectSeed(title=title, genre=genre, tone=tone, premise=premise,
-                       protagonist_hint=protagonist_hint, target_chapters=target_chapters)
-    loop = asyncio.get_event_loop()
-    q: "queue.Queue" = queue.Queue()
-    bus = EventBus()
-    unsub = bus.subscribe(lambda e: q.put(("event", e)))
-
-    def work():
-        try:
-            state, usage = svc.create_project(seed, bus=bus)
-            q.put(("complete", {"id": state.id, "world": state.world.model_dump(),
-                                "usage": usage, "created_at": state.created_at}))
-        except Exception as e:  # noqa
-            q.put(("failed", {"message": str(e)}))
-
-    async def stream():
-        fut = loop.run_in_executor(None, work)
-        try:
-            yield _sse("start", {})
-            while True:
-                try:
-                    kind, data = q.get_nowait()
-                except queue.Empty:
-                    if fut.done() and q.empty():
-                        break
-                    await asyncio.sleep(0.12)
-                    continue
-                yield _sse(kind, data)
-                if kind in ("complete", "failed"):
-                    break
-        finally:
-            unsub()
-
-    return StreamingResponse(stream(), media_type="text/event-stream",
-                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-
 @router.get("/projects")
 def list_projects(request: Request):
     return _svc(request).list_projects()

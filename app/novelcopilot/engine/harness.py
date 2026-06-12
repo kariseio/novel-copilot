@@ -135,9 +135,12 @@ class ChapterGenerator:
         spec = SceneSpec(index=1, goal=(
             "위 '지금까지 쓴 본문'의 마지막 문장에서 '즉시' 이어서, 이야기를 다음 국면으로 한 단계 전진시켜 계속 써라. "
             "이미 일어난 사건·대화의 재연·요약 금지, 새 인물 창조 금지. 새 절단점에 이르면 멈춰라."), key_events=[])
+        # 이어쓰기 프롬프트에는 직전 회차 전문·누적 줄거리를 빼고 '지금 쓴 본문 말미'만 준다 —
+        # 둘이 함께 들어가면 모델이 요약된 과거를 '재서술'하는 압력(재설계 리뷰 P0-2). 캐논(ground_truth)·보이스는 유지.
+        cont_board = board.model_copy(update={"prev_chapter": "", "story_so_far": ""})
         return self.provider.chat(
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
-             {"role": "user", "content": self.assembler.assemble(board, spec, sofar[-3500:]) + hook
+             {"role": "user", "content": self.assembler.assemble(cont_board, spec, sofar[-3500:]) + hook
               + "\n\n이어지는 본문만 출력(이미 쓴 부분 재출력 금지, 머리말·메타 금지)."}],
             temperature=0.85,
             max_tokens=self.settings.chapter_max_tokens)
