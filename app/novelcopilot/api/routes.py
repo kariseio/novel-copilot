@@ -5,8 +5,10 @@ import asyncio
 import json
 import queue
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, Request, HTTPException
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, Response
 
 from ..domain.project import ProjectSeed
 from .schemas import (CreateProjectRequest, DirectiveRequest, EntityRequest,
@@ -286,6 +288,34 @@ def get_chapter(pid: str, n: int, request: Request):
     if not ch:
         raise HTTPException(404, "chapter not found")
     return ch.model_dump()
+
+
+@router.get("/projects/{pid}/export")
+def export_project(pid: str, request: Request, fmt: str = "txt"):
+    """작품 전체를 다운로드 파일로 — fmt=txt|md. 본문 있는 회차를 순서대로 합쳐 원고로."""
+    state = _svc(request).get_project(pid)
+    if not state:
+        raise HTTPException(404, "project not found")
+    title = (state.world.title or "무제").strip()
+    chs = sorted([c for c in state.chapters if (c.text or "").strip()], key=lambda c: c.chapter)
+    if fmt == "md":
+        parts = [f"# {title}", ""]
+        if state.world.premise:
+            parts += [f"> {state.world.premise}", ""]
+        for c in chs:
+            parts += [f"## {c.chapter}화 · {c.title or ''}".rstrip(" ·"), "", c.text.strip(), ""]
+        body, ext, mime = "\n".join(parts), "md", "text/markdown"
+    else:   # txt
+        parts = [title, "=" * max(4, len(title) * 2)]
+        if state.world.premise:
+            parts += ["", state.world.premise]
+        for c in chs:
+            head = f"{c.chapter}화 · {c.title or ''}".rstrip(" ·")
+            parts += ["", "", head, "-" * 24, "", c.text.strip()]
+        body, ext, mime = "\n".join(parts), "txt", "text/plain"
+    fname = quote(f"{title}.{ext}")
+    return Response(content=body, media_type=f"{mime}; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename=\"export.{ext}\"; filename*=UTF-8''{fname}"})
 
 
 @router.get("/projects/{pid}/generate")

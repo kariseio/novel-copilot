@@ -88,6 +88,15 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .pill.cost{color:var(--warn);background:var(--warn-soft);border-color:transparent}
 .pill.genstatus{color:var(--accent);background:var(--accent-soft);border-color:transparent;font-weight:600}
 
+/* 내보내기 드롭다운 */
+.export-wrap{position:relative;display:inline-block}
+.export-menu{display:none;position:absolute;right:0;top:calc(100% + .35em);z-index:30;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r-ctrl);
+  box-shadow:var(--shadow);padding:.3em;min-width:11em}
+.export-wrap.open .export-menu{display:block}
+.export-menu button{display:block;width:100%;text-align:left;border:none;background:transparent;padding:.5em .7em;border-radius:7px}
+.export-menu button:hover{background:var(--surface-2)}
+
 /* 작업실 0회차 빈 상태 — 첫 회차로 수렴 */
 .reader-empty{text-align:center;padding:3.5em 1.5em;max-width:30em;margin:2em auto}
 .reader-empty .re-mark{font-size:2.2rem;color:var(--accent);margin-bottom:.4em}

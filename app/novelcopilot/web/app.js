@@ -509,6 +509,14 @@ function renderReader(){
 function viewerChapters(){
   return (STATE.project.chapters||[]).filter(c=>c.text).sort((a,b)=>a.chapter-b.chapter);
 }
+function exportNovel(fmt){   // 작품 전체를 파일로 다운로드(Content-Disposition attachment)
+  if(!STATE.project){ return; }
+  if(!(STATE.project.chapters||[]).some(c=>(c.text||"").trim())){ alert("아직 내보낼 회차가 없습니다."); return; }
+  document.querySelectorAll(".export-wrap.open").forEach(el=>el.classList.remove("open"));
+  const a = document.createElement("a");
+  a.href = `/api/projects/${STATE.project.id}/export?fmt=${fmt}`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
 function openViewer(n){   // 진입(버튼) → 라우팅
   const list = viewerChapters();
   if(!list.length){ alert("아직 읽을 회차가 없습니다. 먼저 회차를 써보세요."); return; }

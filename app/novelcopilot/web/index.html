@@ -120,6 +120,13 @@
       <span id="p-genstatus" class="pill genstatus hidden"></span>
       <span id="p-progress" class="pill"></span>
       <span id="p-cost" class="pill cost"></span>
+      <span class="export-wrap">
+        <button onclick="this.parentElement.classList.toggle('open')">📤 내보내기 ▾</button>
+        <div class="export-menu">
+          <button onclick="exportNovel('txt')">텍스트 (.txt)</button>
+          <button onclick="exportNovel('md')">마크다운 (.md)</button>
+        </div>
+      </span>
       <button class="primary" onclick="openViewer()">📖 읽기 모드</button>
       <button onclick="goHome()">← 목록</button>
     </div>
