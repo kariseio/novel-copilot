@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 from .world import WorldConfig, TimelineEntry, EntitySpec
 from .types import AuthorDirective, WikiPage, ChapterRecord, RelationEdge
 from .narrative import NarrativeProgress
+from .ledger import PromiseLedger
 from .bible import StoryBible
 
 
@@ -39,6 +40,7 @@ class ProjectState(BaseModel):
     chapters: list[ChapterRecord] = Field(default_factory=list)
     directives: list[AuthorDirective] = Field(default_factory=list)
     narrative_progress: NarrativeProgress = Field(default_factory=NarrativeProgress)   # spine 커서
+    promise_ledger: PromiseLedger = Field(default_factory=PromiseLedger)   # G1: 재미 회계 장부(약속-지불 추적)
     bible: StoryBible = Field(default_factory=StoryBible)   # R2 설정집(편집 가능 descriptive layer)
     bible_migrated: bool = False                            # 기존 프로젝트 1회 부트스트랩 완료 표식
     worldgen_chat: list[dict] = Field(default_factory=list)  # R3 월드빌딩 대화 로그 [{role,text}]

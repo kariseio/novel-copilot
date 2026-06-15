@@ -287,8 +287,11 @@ class CopilotService:
         # R4: 엔딩-주도 아크/에피소드 spine 설계(실패 시 None=평면 모드 폴백)
         _emit("spine_start")
         try:
-            world.spine = ArcPlanner(self.wg_provider).build_spine(world, seed.target_chapters, brief=brief)
-            _emit("spine_done", arcs=len((world.spine.arcs if world.spine else []) or []))
+            world.spine = ArcPlanner(self.wg_provider).build_spine(
+                world, seed.target_chapters, brief=brief, bus=bus)   # G8: bus 로 spine 미완 가시화
+            _emit("spine_done", arcs=len((world.spine.arcs if world.spine else []) or []),
+                  ending_ok=bool(world.spine and world.spine.ending
+                                 and (world.spine.ending.ending or "").strip()))
         except Exception:
             world.spine = None
             _emit("spine_skip")
@@ -543,9 +546,15 @@ class CopilotService:
                                 "usage_total": state.usage_total}
                     arc = spine.arc(state.narrative_progress.current_arc_id)
                     is_finale = (state.narrative_progress.chapters_in_episode + 1) >= ep.target_chapters
-                    # 떡밥 회수 되먹임 — 비강제 원칙(슬로우번 존중) + 작가 제어(plant_reminder) + 참고 슬롯(작가 지시 위장 금지).
+                    # G1: 약속 원장 동기화(설계 라벨 미러, 가산적) + 텔레메트리(미지불 잔고·지불 경과 가시화)
+                    # 원장은 '데이터+작가 가시화'다 — 생성 프롬프트에 회수 지시를 주입하지 않는다(억지 회수=전개 붕괴, 작가가 빨간펜으로 조향).
+                    from ..engine.ledger_ops import sync_ledger_from_spine, ledger_telemetry
+                    sync_ledger_from_spine(state.promise_ledger, spine, state.current_chapter)
+                    tele = ledger_telemetry(state.promise_ledger, next_ch)   # 가시화 emit 은 bus.reset 이후로(아래)
+                    # 떡밥 리마인더 — 작가가 plant_reminder 로 '명시 opt-in' 했을 때만 비트에 참고 주입(기본 off=주입 안 함).
+                    # 시스템이 기본으로 떡밥을 밀어넣지 않는다(비강제). 켰을 때도 '억지 회수 금지' 슬롯(작가 지시 위장 금지).
                     plant_notes = ""
-                    policy = getattr(state.world, "plant_reminder", "gentle")
+                    policy = getattr(state.world, "plant_reminder", "off")
                     outstanding = _outstanding_plants(spine)
                     if outstanding and policy != "off":
                         plant_notes = (f"{outstanding[:self.settings.plant_inject_cap]} — 회수는 절정과 자연스럽게 맞물릴 때만. "
@@ -554,7 +563,7 @@ class CopilotService:
                             plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
                     beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
                                                     summaries, [d.text for d in active], plant_notes=plant_notes)
-                    # ---- 계획 하네스: 비트도 본문처럼 생성→결정론 lint→교정 1회 (무검증 통과 구간 제거) ----
+                    # ---- 계획 하네스: 비트도 본문처럼 생성→결정론 lint(캐논 정합만)→교정 1회 ----
                     from ..engine.plan_lint import lint_beat, beat_repeat_score
                     from ..domain.types import Violation as _V, SignalGrade as _SG
                     plan_viols = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
@@ -613,6 +622,8 @@ class CopilotService:
                     _out = _outstanding_plants(spine)
                     if len(_out) >= self.settings.plant_backlog_threshold:   # 복선 적체 경보(advisory — 작가 가시화)
                         sess.bus.emit("narrative", "plant_backlog", chapter=next_ch, outstanding=_out[:8])
+                    if tele["open"]:   # G1: 약속 원장 텔레메트리(미지불 잔고·지불 경과 — 회차 이벤트 스트림에 노출)
+                        sess.bus.emit("ledger", "promise_state", chapter=next_ch, **tele)
                 # 작품 완결 화 감지: ①스파인 소진(마지막 아크의 마지막 에피소드 finale) 또는 ②목표 회차 도달
                 # — 어느 쪽이든 마지막으로 나가는 화는 절단신공 대신 '닫는' 회차(미결 선택은 결행, 새 떡밥 금지)
                 target = state.seed.target_chapters or 12
@@ -769,11 +780,13 @@ class CopilotService:
         if not spine:
             return {"has_spine": False}
         prog = state.narrative_progress
+        from ..engine.ledger_ops import ledger_telemetry
         return {
             "has_spine": True, "completed": prog.completed,
             "ending": spine.ending.model_dump() if spine.ending else None,
             "current_arc_id": prog.current_arc_id, "current_episode_id": prog.current_episode_id,
             "chapters_in_episode": prog.chapters_in_episode,
+            "promise_ledger": ledger_telemetry(state.promise_ledger, state.current_chapter + 1),   # G1: 재미 회계 가시화
             "arcs": [{"arc_id": a.arc_id, "title": a.title, "goal": a.goal, "done": a.done,
                       "episodes": [{"episode_id": e.episode_id, "title": e.title, "climax": e.climax,
                                     "target_chapters": e.target_chapters, "done": e.done,

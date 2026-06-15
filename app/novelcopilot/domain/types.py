@@ -103,6 +103,11 @@ class ChapterRecord(BaseModel):
     wiki_pages_touched: int = 0
     arc_id: Optional[str] = None      # spine 모드: 이 회차가 속한 아크/에피소드
     episode_id: Optional[str] = None
+    # G4: 비트의 기능 차원을 회차 기록에 영속 — 다음 회차 설계가 '최근 훅 유형 이력'을 결정론 비교(반복 차단)
+    chapter_function: str = ""
+    hook_type: str = ""
+    time_advance: str = ""
+    place: str = ""
     drift_signals: list[str] = Field(default_factory=list)   # 결정론 드리프트 advisory
     recovery_hints: list[dict] = Field(default_factory=list)  # ESCALATED 시 작가용 자연어 진단+회복 레버(engine.recovery)
     initial_violations: list[Violation] = Field(default_factory=list)

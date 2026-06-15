@@ -118,7 +118,7 @@ def test_escalated_rollback() -> bool:
     st = ProjectState(id="t", seed=ProjectSeed(target_chapters=6), world=w, created_at="t")
     svc.repo.save(st)
     sess, _ = svc.get_session("t")
-    apmod.ArcPlanner.beat_for_episode = lambda self, world, arc, ep, ch, fin, rec, direc, plant_notes="": \
+    apmod.ArcPlanner.beat_for_episode = lambda self, world, arc, ep, ch, fin, rec, direc, plant_notes="", **kw: \
         Beat(chapter=ch, entities=["hero"], arc_id=ep.arc_id, episode_id=ep.episode_id)
     sess.bundle.generator.generate = lambda ch_no, beat, ont, rag, wiki, **kw: \
         ChapterRecord(chapter=ch_no, status=ChapterStatus.ESCALATED, text="x")
@@ -150,7 +150,7 @@ def test_generate_exception_rollback() -> bool:
     st = ProjectState(id="t", seed=ProjectSeed(target_chapters=6), world=w, created_at="t")
     svc.repo.save(st)
     sess, _ = svc.get_session("t")
-    apmod.ArcPlanner.beat_for_episode = lambda self, world, arc, ep, ch, fin, rec, direc, plant_notes="": \
+    apmod.ArcPlanner.beat_for_episode = lambda self, world, arc, ep, ch, fin, rec, direc, plant_notes="", **kw: \
         Beat(chapter=ch, entities=["hero"], arc_id=ep.arc_id, episode_id=ep.episode_id)
     def _boom(*a, **k):
         raise RuntimeError("LLM timeout")

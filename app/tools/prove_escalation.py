@@ -46,8 +46,8 @@ def test_escalated_path() -> bool:
     gen = b.generator
     # 오염주입: 항상 hard 위반을 뱉는 checker + 항등 _rewrite + 고정 draft/plan(LLM 우회)
     gen.plan_scenes = lambda beat, directives: [SceneSpec(index=0, goal="g", key_events=["e"])]
-    gen._draft = lambda board, scene, prev, last=False: "사망자가 칼을 휘둘렀다."
-    gen._rewrite = lambda text, viols, board: text     # 항등 → 비수렴 강제
+    gen._draft = lambda board, scene, prev, last=False, **kw: "사망자가 칼을 휘둘렀다."   # **kw: 단일패스 재설계 후 closing/recent_tails/chapter_mode 흡수
+    gen._rewrite = lambda text, viols, board, **kw: text     # 항등 → 비수렴 강제(max_tokens 등 흡수)
     gen.checker.check_text = lambda text, ont, ch, inv: CheckResult(
         violations=[Violation(entity="나", kind="state_timeline", grade=SignalGrade.QUASI,
                               canon="2화 사망", text="현재 행동", evidence="주입")], claims=[])

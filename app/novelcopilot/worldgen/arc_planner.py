@@ -20,7 +20,33 @@ class ArcPlanner:
         self.provider = provider
 
     # ---- 1) 엔딩-주도 spine 생성(작품 시작 시 1회) ----
-    def build_spine(self, world: WorldConfig, target_chapters: int, brief=None) -> NarrativeSpine:
+    @staticmethod
+    def _spine_gaps(raw: dict) -> list[str]:
+        """'엔딩 먼저' 계약 완결성 검사(G8) — 비어 있는 필수 항목을 반환(구조 검증, 창작 강제 아님).
+        엔딩/중심질문/아크 목표/첫 아크 에피소드 절정이 빈 값으로 통과하면 매 회차가 '결말 없는 질문'만 보고 쓴다."""
+        gaps: list[str] = []
+        end = raw.get("ending") or {}
+        if not (end.get("ending") or "").strip():
+            gaps.append("ending.ending(확정 결말)")
+        if not (end.get("central_question") or "").strip():
+            gaps.append("ending.central_question(중심 질문)")
+        arcs = raw.get("arcs") or []
+        if not arcs:
+            gaps.append("arcs(아크 0개)")
+            return gaps
+        for i, a in enumerate(arcs, 1):
+            if not (a.get("goal") or "").strip():
+                gaps.append(f"arc{i}.goal")
+        eps = (arcs[0].get("episodes") or [])
+        if not eps:
+            gaps.append("arc1.episodes(첫 아크 미분해)")
+        else:
+            for j, e in enumerate(eps, 1):
+                if not (e.get("climax") or "").strip():
+                    gaps.append(f"arc1.ep{j}.climax")
+        return gaps
+
+    def build_spine(self, world: WorldConfig, target_chapters: int, brief=None, bus=None) -> NarrativeSpine:
         chars = [{"id": e.id, "name": e.name} for e in world.entities if e.etype == "character"]
         # 아크 수를 목표에 비례(상한 8) — 4 고정 시 share/arc 가 에피소드 천장(4×10=40)을 넘어
         # 200화가 ~168화에서 조기완결되던 페이싱 결함 해소(분모 18=아크당 ~17~38화, 웹소설 아크 길이대).
@@ -57,12 +83,40 @@ class ArcPlanner:
                '"episodes":[{"title":"","premise":"","climax":"","required_events":[],"required_cast":[],'
                '"plants":[],"payoffs":[],"target_chapters":4}],'
                '"new_cast":[{"name":"","profile":"","debut_episode":1}]}]}')
+        # G8: max_tokens 를 아크 수에 비례(고정 3000 이 다아크 spine+new_cast 를 절단 → 엔딩/아크 빈 값으로 통과하던 결함)
+        max_tokens = min(8000, 2200 + n_arcs * 500)
+
+        def _emit(ev, **kw):
+            if bus is not None:
+                try:
+                    bus.emit("worldgen", ev, **kw)
+                except Exception:
+                    pass
         try:
             raw = self.provider.chat_json([{"role": "system", "content": sys},
                                            {"role": "user", "content": usr}],
-                                          temperature=0.5, max_tokens=3000)
+                                          temperature=0.5, max_tokens=max_tokens)
         except Exception:
+            _emit("spine_gen_failed")
             return NarrativeSpine()
+        # G8: '엔딩 먼저' 계약 검증 → 빈 필수 항목만 교정 재호출 1회(worldgen 의 검증→교정 패턴 복제, silent 빈 폴백 제거)
+        gaps = self._spine_gaps(raw)
+        if gaps:
+            try:
+                fix = self.provider.chat_json(
+                    [{"role": "system", "content":
+                      "다음 웹소설 설계 JSON에서 '비어 있는 필수 항목'만 채워 완전한 설계로 출력하라. "
+                      "이미 채워진 값은 그대로 보존하고, 빈 ending/central_question/goal/climax 만 작품에 맞게 완성하라. JSON만."},
+                     {"role": "user", "content": f"[비어 있는 필수 항목]\n{gaps}\n[원본 설계]\n"
+                      f"{json.dumps(raw, ensure_ascii=False)}"}],
+                    temperature=0.3, max_tokens=max_tokens)
+                if isinstance(fix, dict) and len(self._spine_gaps(fix)) < len(gaps):   # 개선됐을 때만 채택
+                    raw = fix
+                    gaps = self._spine_gaps(raw)
+            except Exception:
+                pass
+        if gaps:   # 잔존 누락 — 조용한 빈 폴백 금지(작가 가시화)
+            _emit("spine_incomplete", missing=gaps[:6])
         spine = NarrativeSpine(ending=EndingSpec(**(raw.get("ending") or {})))
         for ai, a in enumerate(raw.get("arcs", []) or [], start=1):
             arc = Arc(arc_id=f"arc{ai}", order=ai, title=a.get("title", ""), goal=a.get("goal", ""),
@@ -211,7 +265,13 @@ class ArcPlanner:
                 if is_finale else "에피소드 절정으로 한 걸음 전진. 아직 절정을 다 터뜨리지 말 것.")
         sys = ("에피소드 안에서 다음 회차 1개의 beat 를 설계하라. 절정으로 수렴하되 기존 설정과 모순 금지. " + hook +
                " 직전 화 말미의 미결 위기·중단된 상황을 이번 화 도입에서 '즉시 이어받아' 회수하라 — 리셋·동일 클라이맥스 재연·비트 반복 금지, 공간 또는 상황을 반드시 한 단계 전진. "
-               "세계 고유 설정(경제·무기·기술 체계)을 사건의 구체 디테일로 쓰라. title 은 회차 제목만(시리즈명·화수 붙이지 마라). JSON만.")
+               "세계 고유 설정(경제·무기·기술 체계)을 사건의 구체 디테일로 쓰라. "
+               # G4: chapter_function/hook_type/time_advance/place 는 '강제'가 아니라 '네 계획을 그대로 라벨링'(서술 메타데이터).
+               # 이 라벨로 회차 내용을 바꾸라는 게 아니라, 설계한 회차가 어떤 기능·끝맺음·시간·장소인지 자기 기술하라는 것(작가 가시화·분석용).
+               "끝으로 설계한 이 회차를 자기 기술하라(내용을 바꾸지 말고 있는 그대로 라벨만) — "
+               "chapter_function(독자에게 주는 것: payoff/setup/escalation/relation/respite 중), "
+               "hook_type(회차말 끊는 방식 자유 라벨), time_advance(직전 화 대비 시간 경과), place(주요 장소). "
+               "title 은 회차 제목만(시리즈명·화수 붙이지 마라). JSON만.")
         # plant_notes 는 시스템 '참고' 정보 — 작가 지시(authority)와 분리된 슬롯(시스템 개입의 지시 위장 금지, 모드 계약 §1)
         notes_block = f"\n[미회수 복선 — 참고용]{plant_notes}" if plant_notes else ""
         end = world.spine.ending if world.spine and world.spine.ending else None
@@ -221,8 +281,10 @@ class ArcPlanner:
                f"[아크 목표]{arc.goal}\n[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
                f"[필수 사건]{episode.required_events}\n[등장해야 할 인물 id]{episode.required_cast}\n"
                f"[인물 id]{char_ids}\n[최근 줄거리]\n" + "\n".join(recent) +
-               f"\n[작가 지시]{json.dumps(directives, ensure_ascii=False)}{notes_block}\n[회차]{chapter} (에피소드 내 finale={is_finale})\n"
-               '{"title":"","summary":"","key_events":["",""],"entities":["인물 id"]}')
+               f"\n[작가 지시]{json.dumps(directives, ensure_ascii=False)}{notes_block}\n"
+               f"[회차]{chapter} (에피소드 내 finale={is_finale})\n"
+               '{"title":"","summary":"","key_events":["",""],"entities":["인물 id"],'
+               '"chapter_function":"","hook_type":"","time_advance":"","place":""}')
         try:
             d = self.provider.chat_json([{"role": "system", "content": sys},
                                          {"role": "user", "content": usr}], temperature=0.5)
@@ -230,7 +292,11 @@ class ArcPlanner:
                    (episode.required_cast or char_ids[:2])
             beat = Beat(chapter=chapter, title=d.get("title", f"{chapter}화"), summary=d.get("summary", ""),
                         key_events=d.get("key_events", []) or [], entities=ents,
-                        arc_id=arc.arc_id, episode_id=episode.episode_id, is_episode_finale=is_finale)
+                        arc_id=arc.arc_id, episode_id=episode.episode_id, is_episode_finale=is_finale,
+                        chapter_function=(d.get("chapter_function") or "").strip(),
+                        hook_type=(d.get("hook_type") or "").strip(),
+                        time_advance=(d.get("time_advance") or "").strip(),
+                        place=(d.get("place") or "").strip())
         except Exception:
             beat = Beat(chapter=chapter, title=f"{chapter}화", summary=episode.climax or episode.premise,
                         key_events=episode.required_events[:2], entities=(episode.required_cast or char_ids[:2]),

@@ -109,6 +109,11 @@ class Beat(BaseModel):
     arc_id: Optional[str] = None              # 이 회차가 속한 아크/에피소드(spine 모드)
     episode_id: Optional[str] = None
     is_episode_finale: bool = False           # 에피소드 절정/마무리 회차 표식
+    # G4: 회차의 '기능' 차원(설계 단계에 명시 — 사건 요약만으로는 보상/페이싱이 안 보임). 자유 라벨, 강제 아님.
+    chapter_function: str = ""                # payoff(지불)/setup(약속)/escalation(격상)/relation(관계)/respite(완급) …
+    hook_type: str = ""                       # 회차말 훅 유형: question/action/reveal/emotion/new_threat/decision …
+    time_advance: str = ""                    # 직전 화 대비 시간 경과(예: '몇 분'/'다음날'/'사흘 후'/'없음')
+    place: str = ""                           # 주요 장소(장소 체류 단조 감지 재료)
 
 
 class WikiSeed(BaseModel):
@@ -162,6 +167,7 @@ class WorldConfig(BaseModel):
     wiki_seeds: list[WikiSeed] = Field(default_factory=list)
     spine: Optional[NarrativeSpine] = None    # 엔딩-주도 아크/에피소드 구조(None=평면 beats 모드)
     allow_state_reversal: bool = False        # True=회귀/부활/리젠 허용(비가역 상태 이탈을 모순으로 막지 않음)
-    plant_reminder: Literal["off", "gentle", "active"] = "gentle"   # 미회수 복선 리마인더 강도(작가 제어, ③).
-    # off=주입 안 함 / gentle=참고 정보만(회수 비강제 — 슬로우번 존중, 기본) / active=finale 에서 회수 독려
+    plant_reminder: Literal["off", "gentle", "active"] = "off"   # 미회수 복선 리마인더 강도(작가 제어, ③).
+    # 기본 off=시스템이 떡밥을 생성에 주입 안 함(비강제 — 떡밥 가시화는 G1 원장 텔레메트리가 담당, 작가가 빨간펜으로 조향).
+    # 작가가 명시 opt-in 시: gentle=참고 정보만(회수 비강제) / active=finale 에서 회수 독려
     style: StyleSpec = Field(default_factory=StyleSpec)

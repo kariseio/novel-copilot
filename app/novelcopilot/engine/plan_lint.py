@@ -11,7 +11,11 @@ from ..domain.types import Violation, SignalGrade
 
 
 def lint_beat(beat: dict, ontology, ch_no: int) -> list[Violation]:
-    """비트 1개의 결정론 lint — 위반은 재계획 1회의 입력이 된다(조용한 드롭 금지)."""
+    """비트 1개의 결정론 lint — 캐논 정합(엔티티 명부·생애주기)만. 위반은 재계획 1회의 입력이 된다(조용한 드롭 금지).
+
+    재미·페이싱(훅 유형·시간 경과·장소)은 여기서 다루지 않는다 — 그건 '안 어긋남'(정합)이 아니라 '작법'이라
+    시스템이 교정 지시로 강제하지 않고, 측정값을 작가에게 가시화만 한다(작가가 빨간펜으로 조향). 비대칭 보존.
+    """
     viols: list[Violation] = []
     valid = set(ontology.entities.keys())
     for eid in beat.get("entities") or []:
