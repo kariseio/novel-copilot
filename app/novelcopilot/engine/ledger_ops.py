@@ -64,3 +64,47 @@ def ledger_telemetry(ledger: PromiseLedger, current_chapter: int) -> dict:
     oldest_age = max((current_chapter - p.opened_chapter for p in op), default=0)
     return {"open": len(op), "paid": sum(1 for p in ledger.promises if p.status == "paid"),
             "oldest_open_age": oldest_age, "since_payoff": chapters_since_payoff(ledger, current_chapter)}
+
+
+# ---------- P2: 본문 상환 검출(측정 — 생성 주입 아님) ----------
+def detect_payoffs(provider, text: str, open_promises: list[Promise], chapter: int) -> list[str]:
+    """G1-P2: 이번 회차 본문에서 '실제로 지불된' 약속을 검출(측정만). 반환=지불된 promise id 목록.
+
+    증거 스팬 강제 — LLM 이 evidence(본문 인용)를 달고, 코드가 그 구절이 본문에 실재하는지 검증해 환각 폐기.
+    설계 라벨 일치(P1)가 아니라 '본문이 실제로 지불했는가'를 보므로 since_payoff 카운터가 실데이터가 된다.
+    narrative_inferred(기계추출) — 원장은 비구속 회계라 회차 확정/검증을 막지 않는다(비대칭 보존).
+    """
+    if not open_promises or not (text or "").strip():
+        return []
+    import json
+    items = [{"id": p.id, "약속": p.text[:120]} for p in open_promises[:20]]
+    try:
+        r = provider.chat_json(
+            [{"role": "system", "content":
+              "웹소설 편집자. 아래 '독자에게 한 약속'들이 이번 회차 본문에서 '실제로 지불(회수·공개·달성·해소)됐는지' 판정하라. "
+              "추측·예고는 제외 — 본문에서 명백히 일어난 것만. 각 지불 항목에 evidence(본문에서 그대로 복사한 구절)를 달아라. "
+              '없으면 빈 배열. JSON: {"paid":[{"id":"","evidence":"본문 인용"}]}'},
+             {"role": "user", "content": f"[약속]{json.dumps(items, ensure_ascii=False)}\n[이번 회차 본문]\n{text[:9000]}"}],
+            temperature=0.0, max_tokens=1200)
+        valid = {p.id for p in open_promises}
+        out: list[str] = []
+        for it in (r.get("paid") or []):
+            pid, ev = it.get("id"), (it.get("evidence") or "").strip()
+            if pid in valid and len(ev) >= 6 and ev[:50] in text and pid not in out:   # 증거 실재 검증(환각 폐기)
+                out.append(pid)
+        return out
+    except Exception:
+        return []
+
+
+def mark_paid(ledger: PromiseLedger, paid_ids: list[str], chapter: int) -> int:
+    """검출된 지불을 원장에 반영 — last_payoff_chapter 전진(결정론 카운터 실데이터화). 반환=실제 지불 처리 수."""
+    n = 0
+    for pid in paid_ids:
+        p = ledger.by_id(pid)
+        if p is not None and p.status == "open":
+            p.status, p.paid_chapter = "paid", chapter
+            n += 1
+    if n:
+        ledger.last_payoff_chapter = max(ledger.last_payoff_chapter, chapter)
+    return n

@@ -35,7 +35,8 @@ class Settings(BaseSettings):
     max_drafts: int = 200                    # 드래프트 하드캡(TTL 내 폭주 방어)
     continuity_polish: bool = True           # 회차 내부(수치·소지품) 연속성 교정 패스(+1콜/화)
     plant_backlog_threshold: int = 3         # 미회수 복선 적체 경보 임계(advisory)
-    plant_inject_cap: int = 5                # 비트 설계에 참고로 노출할 미회수 복선 최대 수
+    plant_inject_cap: int = 5                # 비트 설계에 참고로 노출할 미회수 복선 최대 수(plant_reminder opt-in 시)
+    reader_desk: bool = True                 # G2: 블라인드 독자 행동 예측(advisory, +1콜/화). 비용 절감 시 off
 
     data_dir: str = ""                       # 비우면 패키지 옆 data/
 

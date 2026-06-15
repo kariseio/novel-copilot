@@ -187,10 +187,18 @@ class ArcPlanner:
     # ---- 2) lazy 에피소드 생성(아크에 에피소드가 없을 때) ----
     def _gen_episodes(self, world: WorldConfig, arc: Arc, recent: list[str],
                       remaining: int | None = None) -> None:
-        chars = [{"id": e.id, "name": e.name} for e in world.entities if e.etype == "character"]
+        # G6: 인물을 id+이름만이 아니라 프로필(배경·성격·욕망·관계)까지 보고 분해 — 인물에서 사건이 나오게
+        chars = [{"id": e.id, "name": e.name, "profile": ((e.profile or "")[:150])}
+                 for e in world.entities if e.etype == "character"]
         end = world.spine.ending if world.spine and world.spine.ending else None
         ending = end.ending if end else ""
         cq = end.central_question if end else ""
+        # G6: 지나온 에피소드 롤업 — lazy 아크가 '직전 3~4줄'만 보던 기아 해소(전체 흐름 위에서 다음 아크 설계)
+        done_rollups = ([f"[{a.title}] {ep.summary}"
+                         for a in sorted(world.spine.arcs, key=lambda x: x.order)
+                         for ep in a.episodes if ep.done and ep.summary]
+                        if world.spine else [])
+        rollup_block = ("[지나온 에피소드 요약]\n" + "\n".join(done_rollups[-6:]) + "\n") if done_rollups else ""
         sys = ("아크를 에피소드(3~4개)로 분해하라. 각 에피소드는 절정(climax)을 먼저 정하고 수렴하게. 엔딩을 향해 전진. "
                "이 아크에 필요한 신규 인물(조연·적대) 0~4명은 new_cast 로 '등장 전에 설계'하라 — "
                "지금까지의 이야기 상태에서 태어나야 한다. profile=배경·성격·욕망·기존 인물과의 관계(말투 지정 금지). JSON만.")
@@ -199,6 +207,7 @@ class ArcPlanner:
         usr = (budget_line +
                f"[작품 전제]{(world.premise or '')[:300]}\n[중심 질문]{cq}\n"
                f"[엔딩]{ending}\n[아크]{arc.title} / 목표:{arc.goal} / 갈등:{arc.central_conflict} / 전환:{arc.turning_point}\n"
+               f"{rollup_block}"
                f"[인물]{json.dumps(chars, ensure_ascii=False)}\n[최근 줄거리]\n" + "\n".join(recent) +
                '\n{"episodes":[{"title":"","premise":"","climax":"","required_events":[],"required_cast":[],'
                '"plants":[],"payoffs":[],"target_chapters":4}],'
@@ -259,7 +268,7 @@ class ArcPlanner:
     # ---- 4) 에피소드 → 회차 beat 파생(절정으로 수렴, finale면 절단신공) ----
     def beat_for_episode(self, world: WorldConfig, arc: Arc, episode: Episode, chapter: int,
                          is_finale: bool, recent: list[str], directives: list[str],
-                         plant_notes: str = "") -> Beat:
+                         plant_notes: str = "", cast_context: str = "") -> Beat:
         char_ids = [e.id for e in world.entities if e.etype == "character"]
         hook = ("이번 회차가 에피소드 절정(finale): 아래 climax 를 이번 회차에서 터뜨려라(끝맺음 방식은 작품 문체 정책을 따름)."
                 if is_finale else "에피소드 절정으로 한 걸음 전진. 아직 절정을 다 터뜨리지 말 것.")
@@ -277,10 +286,13 @@ class ArcPlanner:
         end = world.spine.ending if world.spine and world.spine.ending else None
         spine_block = (f"[작품 전제]{(world.premise or '')[:240]}\n[중심 질문]{end.central_question}\n"
                        if end else "")   # 회차 비트도 작품 척추(전제·중심질문)를 보게 — 핵심 장치 유실 방지
+        # G6: 인물을 id 문자열이 아니라 '이름·설정·현재 상태·관계'로 보게(컨텍스트 기아 해소 — 욕망 있는 인물에서 사건이 나오게)
+        cast_block = (f"[등장 인물 — 이름·설정(배경·성격·욕망·관계)·현재 상태]\n{cast_context}\n[유효 인물 id]{char_ids}\n"
+                      if cast_context else f"[인물 id]{char_ids}\n")
         usr = (spine_block +
                f"[아크 목표]{arc.goal}\n[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
                f"[필수 사건]{episode.required_events}\n[등장해야 할 인물 id]{episode.required_cast}\n"
-               f"[인물 id]{char_ids}\n[최근 줄거리]\n" + "\n".join(recent) +
+               f"{cast_block}[최근 줄거리]\n" + "\n".join(recent) +
                f"\n[작가 지시]{json.dumps(directives, ensure_ascii=False)}{notes_block}\n"
                f"[회차]{chapter} (에피소드 내 finale={is_finale})\n"
                '{"title":"","summary":"","key_events":["",""],"entities":["인물 id"],'

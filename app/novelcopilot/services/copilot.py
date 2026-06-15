@@ -80,6 +80,49 @@ def _arc_anchors(spine, arc, ep) -> list[RetrievedItem]:
     return items
 
 
+def _cast_context(ontology, world, entity_ids, chapter: int) -> str:
+    """G6: 설계 콜에 인물 '스토리 컨텍스트' 주입 — 이름+프로필(배경·성격·욕망·관계)+현재 상태/속성+관계(결정론 조회).
+    설계자가 인물을 'id 문자열'로만 받아 '욕망 없는 반사판'으로 퇴화하던 컨텍스트 기아를 해소(정보 제공, 강제 아님).
+    이름·생사·소속은 온톨로지에서 시점 조회 → 죽은 인물·바뀐 소속을 모른 채 설계하던 결함 차단."""
+    espec = {e.id: e for e in world.entities}
+    ids = list(dict.fromkeys([i for i in entity_ids if i]))
+    rel_by: dict[str, list[str]] = {}
+    try:
+        for f in ontology.canon_relations(ids, chapter):
+            rel_by.setdefault(f.entity, []).append(f"{f.attr_label}={f.value}")
+    except Exception:
+        pass
+    lines = []
+    for eid in ids:
+        ent = ontology.entities.get(eid)
+        spec = espec.get(eid)
+        name = ontology.name(eid) if ent else (spec.name if spec else None)
+        if not name:
+            continue
+        seg = f"- {name}"
+        prof = ((spec.profile if spec else "") or "").strip()
+        if prof:
+            seg += f": {prof[:220]}"
+        meta = []
+        if ent is not None:
+            st = ontology.state_as_of(eid, "status", chapter)
+            if st and st != "alive":
+                meta.append(f"현재상태={st}")
+            for a in list(ent.attrs)[:4]:
+                if a == "status":
+                    continue
+                v = ontology.state_as_of(eid, a, chapter)
+                if v:
+                    meta.append(f"{a}={v}")
+        rels = rel_by.get(name) or []
+        if rels:
+            meta.append(", ".join(rels[:4]))   # rel 라벨이 이미 '관계:..' 자기기술 형태 → 접두어 생략
+        if meta:
+            seg += " [" + " / ".join(meta) + "]"
+        lines.append(seg)
+    return "\n".join(lines)
+
+
 def _rollup_episode(provider, episode, chapters) -> str:
     """완료 에피소드의 회차 요약들을 1~2문장 에피소드 요약으로 압축(계층 story_so_far 재료)."""
     parts = [f"{c.chapter}화: {c.summary or c.text[:150]}" for c in chapters]
@@ -561,8 +604,13 @@ class CopilotService:
                                        "억지 회수 금지(슬로우번은 정당한 기법)")
                         if policy == "active" and is_finale:
                             plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
+                    # G6: 설계 콜에 인물 스토리 컨텍스트(이름·프로필·현재 상태·관계) 주입 — 에피소드 캐스트 + 주연 일부
+                    char_ids_all = [e.id for e in state.world.entities if e.etype == "character"]
+                    cast_ids = list(dict.fromkeys((ep.required_cast or []) + char_ids_all))[:6]
+                    cast_context = _cast_context(sess.bundle.ontology, state.world, cast_ids, next_ch)
                     beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
-                                                    summaries, [d.text for d in active], plant_notes=plant_notes)
+                                                    summaries, [d.text for d in active],
+                                                    plant_notes=plant_notes, cast_context=cast_context)
                     # ---- 계획 하네스: 비트도 본문처럼 생성→결정론 lint(캐논 정합만)→교정 1회 ----
                     from ..engine.plan_lint import lint_beat, beat_repeat_score
                     from ..domain.types import Violation as _V, SignalGrade as _SG
@@ -581,7 +629,7 @@ class CopilotService:
                         beat = planner.beat_for_episode(   # 위반 명시 재계획 1회(M4식 — 무한 루프 금지)
                             state.world, arc, ep, next_ch, is_finale, summaries,
                             [d.text for d in active] + [f"(계획 결함 교정 필수) {fix_note}"],
-                            plant_notes=plant_notes)
+                            plant_notes=plant_notes, cast_context=cast_context)
                         remaining = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
                         if remaining:   # 잔존 → 가시화 + 보수 폴백(무효/제거 인물만 제외하고 진행 — 정지 금지)
                             sess.bus.emit("plan_lint", "non_convergence", chapter=next_ch,
@@ -678,6 +726,25 @@ class CopilotService:
                                 provenance="ai_worldgen", status="ai_unreviewed"))
                     state.current_chapter = next_ch
                     self._esc.pop((pid, next_ch), None)       # 성공 → 연속 escalation 카운터 리셋
+                    # G1-P2: 본문 상환 검출(측정 — 생성 주입 아님). 약속이 이번 화에서 실제 지불됐는지 → 원장 갱신(since_payoff 실데이터화)
+                    if spine and state.promise_ledger.open_promises():
+                        from ..engine.ledger_ops import detect_payoffs, mark_paid
+                        _tp = sess.provider.usage.chat_tokens
+                        paid_ids = detect_payoffs(sess.provider, record.text,
+                                                  state.promise_ledger.open_promises(), next_ch)
+                        record.usage_by_stage["payoff_detect"] = sess.provider.usage.chat_tokens - _tp
+                        if mark_paid(state.promise_ledger, paid_ids, next_ch):
+                            sess.bus.emit("ledger", "payoff_detected", chapter=next_ch,
+                                          count=len(paid_ids), ids=paid_ids[:5])
+                    # G2: 블라인드 장르 독자 행동 예측(advisory — 비차단·비강제, 작가 가시화). 비트/설계 미공개로 본문만 읽음.
+                    if getattr(self.settings, "reader_desk", True):
+                        from ..engine.reader_desk import reader_prediction
+                        _tr = sess.provider.usage.chat_tokens
+                        pred = reader_prediction(sess.provider, record.text, story_so_far, state.world.genre)
+                        record.usage_by_stage["reader_desk"] = sess.provider.usage.chat_tokens - _tr
+                        if pred:
+                            record.reader_feedback = pred           # 작가가 나중에 검토(원장처럼 가시화)
+                            sess.bus.emit("reader_desk", "prediction", chapter=next_ch, **pred)
                     # R4: 에피소드 커서 전진 + finale 시 롤업 요약·결정론 드리프트(advisory)
                     if spine and ep:
                         record.arc_id, record.episode_id = ep.arc_id, ep.episode_id
