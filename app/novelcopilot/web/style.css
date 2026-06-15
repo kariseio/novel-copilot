@@ -396,3 +396,25 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .retro-rev b{font-size:.85rem;color:var(--accent)}
 .retro-rev .small{margin:.2em 0;line-height:1.55}
 .ok-msg{color:var(--ok);font-size:.88rem;padding:.5em 0}
+
+/* ===== 생성 컨텍스트 디버그('어떤 정보로 만들었나') ===== */
+.gen-debug{margin-top:2em;border-top:1px dashed var(--line-strong);padding-top:1em;font-family:var(--font-sans)}
+.gen-debug summary{cursor:pointer;color:var(--muted);font-size:.82rem;font-weight:600;user-select:none;list-style:none}
+.gen-debug summary:hover{color:var(--accent)}
+.gen-debug summary::-webkit-details-marker{display:none}
+.gen-debug summary::before{content:"▸ ";color:var(--muted)}
+.gen-debug[open] summary::before{content:"▾ "}
+.gd-sec{margin-top:.9em;padding:.7em .85em;background:var(--surface-2);border-radius:var(--r-ctrl);border:1px solid var(--line)}
+.gd-sec h5{margin:0 0 .5em;font-size:.8rem;color:var(--ink);font-weight:700}
+.gd-row{font-size:.8rem;line-height:1.6;margin-bottom:.5em;color:var(--ink-soft)}
+.gd-row>b{color:var(--ink);display:inline-block;min-width:7.5em;font-size:.76rem}
+.gd-tag{display:inline-block;background:var(--surface);border:1px solid var(--line);border-radius:6px;
+  padding:.08em .5em;margin:.1em .25em .1em 0;font-size:.74rem}
+.gd-tag.canon{background:var(--accent-soft);border-color:transparent;color:var(--accent)}
+.gd-line{font-size:.76rem;line-height:1.55;padding:.12em 0;border-bottom:1px solid var(--line);color:var(--ink-soft)}
+.gd-line:last-child{border-bottom:none}
+.gd-src{display:inline-block;background:var(--surface);border:1px solid var(--line-strong);border-radius:5px;
+  padding:0 .4em;margin-right:.4em;font-size:.68rem;color:var(--muted)}
+.gd-pre{white-space:pre-wrap;font-size:.74rem;line-height:1.5;margin:.3em 0 0;padding:.5em .6em;
+  background:var(--surface);border:1px solid var(--line);border-radius:7px;max-height:13em;overflow:auto;
+  color:var(--ink-soft);font-family:var(--font-sans)}

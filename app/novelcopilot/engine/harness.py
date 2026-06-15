@@ -342,6 +342,18 @@ class ChapterGenerator:
                              voice_cards=voice_cards)
         self.bus.emit("assemble_memory", "done", chapter=ch_no,
                       ground_truth=len(board.ground_truth), retrieved=len(narrative))
+        # 디버그: 집필에 실제로 들어간 입력 슬롯을 캡처(트림) — '어떤 정보로 썼는지' 가시화
+        draft_ctx = {
+            "persona": (self.style.system_persona or "")[:240],
+            "ground_truth": [f"{f.entity}: {f.attr_label}={f.value}" for f in board.ground_truth],
+            "anchors": [{"source": a.source, "ref": a.ref, "text": (a.text or "")[:240]} for a in narrative],
+            "story_so_far": (story_so_far or "")[:2500],
+            "directives": [d.text for d in directives],
+            "voice_roster": (voice_cards or "")[:1600],
+            "prev_chapter_chars": len(prev_chapter_text or ""),
+            "beat": {k: beat.get(k) for k in ("title", "summary", "key_events", "entities",
+                                              "chapter_function", "hook_type", "time_advance", "place")},
+        }
 
         # ---- 비트 단위 생성 · 코드 조립(재설계: 장면 개념·분량 지시 폐기) ----
         # 장면 분해(scenes_per_chapter)는 구 토큰 한계 시절 3콜 분할의 유물 — 장면 수는 설계 입력이 아니라 결과다.
@@ -473,4 +485,5 @@ class ChapterGenerator:
             wiki_pages_touched=pages, initial_violations=initial_caught or [], recovery_hints=recovery_hints,
             chapter_function=beat.get("chapter_function", ""), hook_type=beat.get("hook_type", ""),
             time_advance=beat.get("time_advance", ""), place=beat.get("place", ""),   # G4: 기능 차원 영속(훅 이력)
+            gen_context={"draft": draft_ctx},   # 디버그: 집필 입력(계획 입력은 copilot 가 'plan' 키로 합침)
             final_violations=final.violations, rounds=rounds, usage_by_stage=stage_usage)

@@ -695,6 +695,18 @@ class CopilotService:
                     story_so_far=story_so_far, anchors=anchors, closing=closing,
                     recent_tails=recent_tails, restraint=restraint)
 
+                # 디버그: 계획(설계) 입력을 회차 컨텍스트에 합침 — '어떤 정보로 설계·집필했는지' 추적
+                if spine and spine.arcs and isinstance(record.gen_context, dict):
+                    _gc = getattr(state.world, "genre_contract", None)
+                    record.gen_context["plan"] = {
+                        "arc": (arc.title if arc else ""), "episode": (ep.title if ep else ""),
+                        "is_finale": is_finale, "recent": summaries,
+                        "cast_context": (cast_context or "")[:1400],
+                        "plant_notes": (plant_notes or "")[:400],
+                        "restraint": list(restraint or [])[:10],
+                        "genre_contract": (_gc.model_dump() if _gc else None),
+                    }
+
                 # 동적 온톨로지 업데이트(엔진 고도화) — FINALIZED 회차에만
                 if record.status == ChapterStatus.FINALIZED:
                     _t0 = sess.provider.usage.chat_tokens

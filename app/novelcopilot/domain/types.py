@@ -110,6 +110,7 @@ class ChapterRecord(BaseModel):
     place: str = ""
     drift_signals: list[str] = Field(default_factory=list)   # 결정론 드리프트 advisory
     reader_feedback: dict = Field(default_factory=dict)       # G2: 블라인드 독자 행동 예측(advisory — 작가 가시화, 비구속)
+    gen_context: dict = Field(default_factory=dict)           # 디버그: 이 회차를 '어떤 정보로' 생성했는가(계획 비트 + 집필 입력 슬롯, 트림)
     recovery_hints: list[dict] = Field(default_factory=list)  # ESCALATED 시 작가용 자연어 진단+회복 레버(engine.recovery)
     initial_violations: list[Violation] = Field(default_factory=list)
     final_violations: list[Violation] = Field(default_factory=list)

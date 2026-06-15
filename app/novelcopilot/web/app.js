@@ -517,6 +517,29 @@ function renderChapters(){
 }
 function chapterPage(i){ STATE.chapterPage = i; renderChapters(); }   // 페이지 넘김(라우팅 아님 — 뷰 내 탐색)
 function selectChapter(n){ go(`#/p/${STATE.project.id}/ch/${n}`); }   // 회차 선택은 라우팅(뒤로/딥링크)
+// 생성 컨텍스트 디버그 — '어떤 정보로 이 회차를 만들었나'(계획 비트 + 집필 입력 슬롯)
+const SRC_LABEL={rag_chunk:"이전 회차 검색",wiki_page:"인물 노트",arc_anchor:"서사 방향",bible:"설정집",cast_debut:"신규 인물 소개",roster:"고유명사 명부"};
+function genDebug(c){
+  const g=c.gen_context||{}; if(!g.plan&&!g.draft) return "";
+  const p=g.plan||{}, d=g.draft||{}, b=d.beat||{};
+  const list=(arr,fn)=>(arr&&arr.length)?arr.map(fn).join(""):'<span class="muted tiny">없음</span>';
+  const beatBlk=`<div class="gd-row"><b>회차 기능</b> ${esc(b.chapter_function||'–')} · 훅 ${esc(b.hook_type||'–')} · 시간 ${esc(b.time_advance||'–')} · 장소 ${esc(b.place||'–')}</div>
+    <div class="gd-row"><b>핵심 사건</b> ${list(b.key_events,e=>`<span class="gd-tag">${esc(e)}</span>`)}</div>`;
+  const planBlk=(p.arc||p.cast_context)?`<div class="gd-sec"><h5>설계 입력 ${p.arc?`— ${esc(p.arc)} / ${esc(p.episode||'')}${p.is_finale?' · 절정 회차':''}`:''}</h5>
+    ${p.cast_context?`<div class="gd-row"><b>등장 인물 컨텍스트</b><pre class="gd-pre">${esc(p.cast_context)}</pre></div>`:''}
+    ${(p.genre_contract&&p.genre_contract.pleasure_engine)?`<div class="gd-row"><b>장르 정체성</b> ${esc(p.genre_contract.pleasure_engine)}</div>`:''}
+    ${p.plant_notes?`<div class="gd-row"><b>복선 리마인더</b> ${esc(p.plant_notes)}</div>`:''}
+    ${(p.restraint&&p.restraint.length)?`<div class="gd-row"><b>표현 절제</b> ${p.restraint.map(esc).join(", ")}</div>`:''}
+    ${(p.recent&&p.recent.length)?`<div class="gd-row"><b>최근 줄거리</b>${p.recent.map(r=>`<div class="gd-line">${esc(r)}</div>`).join("")}</div>`:''}</div>`:"";
+  const draftBlk=`<div class="gd-sec"><h5>집필 입력</h5>${beatBlk}
+    <div class="gd-row"><b>확정 설정(박기)</b> ${list(d.ground_truth,f=>`<span class="gd-tag canon">${esc(f)}</span>`)}</div>
+    <div class="gd-row"><b>참조 자료</b>${list(d.anchors,a=>`<div class="gd-line"><span class="gd-src">${esc(SRC_LABEL[a.source]||a.source)}</span> ${esc(a.text)}</div>`)}</div>
+    ${(d.directives&&d.directives.length)?`<div class="gd-row"><b>작가 지시</b>${d.directives.map(x=>`<div class="gd-line">${esc(x)}</div>`).join("")}</div>`:''}
+    ${d.story_so_far?`<div class="gd-row"><b>누적 줄거리</b><pre class="gd-pre">${esc(d.story_so_far)}</pre></div>`:''}
+    ${d.voice_roster?`<div class="gd-row"><b>보이스·명부</b><pre class="gd-pre">${esc(d.voice_roster)}</pre></div>`:''}
+    <div class="gd-row muted tiny">집필 화법: ${esc((d.persona||'').slice(0,120))} · 직전 회차 ${d.prev_chapter_chars||0}자 주입</div></div>`;
+  return `<details class="gen-debug"><summary>🔍 이 회차를 만든 정보 (디버그)</summary>${planBlk}${draftBlk}</details>`;
+}
 function renderReader(){
   const p = STATE.project, body = $("#chapter-body");
   const c = (p.chapters||[]).find(x=>x.chapter===STATE.activeChapter);
@@ -554,7 +577,8 @@ function renderReader(){
     `<div class="reader-meta">${chars.toLocaleString()}자${c.wiki_pages_touched?` · 인물 노트 ${c.wiki_pages_touched}건 갱신`:""}</div>`+
     rec+readerBlock+
     (oc?`<div style="margin-bottom:1.4em">${oc}</div>`:"")+
-    `<div>${esc(c.text).replace(/\n/g,"<br>")}</div>`;
+    `<div>${esc(c.text).replace(/\n/g,"<br>")}</div>`+
+    genDebug(c);
 }
 
 // ---------- 뷰어(몰입형 읽기) — 웹소설 플랫폼처럼 이전·다음 화 ----------
