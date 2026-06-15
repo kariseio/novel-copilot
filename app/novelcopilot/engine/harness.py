@@ -11,9 +11,11 @@ from __future__ import annotations
 import json
 import re
 
-_META_LINE = re.compile(r"^\s*[\[【(#\-=*]{0,3}\s*(END|끝|다음\s*(화|회차|:)|계속|장면\s*(종료|전환)|scene|chapter|메모|note|todo|작가\s*주)"
+# G9: 'to be continued' 추가. 줄머리 경로엔 바깥 '회/편'을 안 넣는다(회의/편의점 등 오탐 위험);
+# '(다음 회에서 계속)' 류는 아래 괄호-단독행 경로(전체가 괄호=거의 확실히 메타)에서 잡는다(sanitize 동일 범주, 작법 검출 아님).
+_META_LINE = re.compile(r"^\s*[\[【(#\-=*]{0,3}\s*(END|끝|다음\s*(화|회차|:)|계속|to\s*be\s*continued|장면\s*(종료|전환)|scene|chapter|메모|note|todo|작가\s*주)"
                         r".{0,80}$", re.IGNORECASE)
-_BRACKET_ONLY = re.compile(r"^\s*[\[【].{0,100}[\]】]\s*$")
+_BRACKET_ONLY = re.compile(r"^\s*[\[【(].{0,100}[\]】)]\s*$")   # (괄호)/[대괄호] 단독행 — '(다음 회, …)' 본문 박힘 제거
 
 
 def sanitize_meta(text: str) -> str:
@@ -22,7 +24,7 @@ def sanitize_meta(text: str) -> str:
     for ln in text.splitlines():
         s = ln.strip()
         if s and (_META_LINE.match(s) or (_BRACKET_ONLY.match(s)
-                  and re.search(r"END|다음\s*(화|회차)|계속됩니다|회차|scene break|chapter", s, re.IGNORECASE))):
+                  and re.search(r"END|다음\s*(화|회|회차)|계속(됩니다|\)|\s*$)|회차|to\s*be\s*continued|scene break|chapter", s, re.IGNORECASE))):
             continue
         if s.startswith(("(※", "※", "(* ")) or re.match(r"^\s*[\((]\s*※", s):   # 퇴고 지시문((※ …수정함) 류) 누출 제거
             continue
@@ -125,16 +127,19 @@ class ChapterGenerator:
              {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr}],
             temperature=0.85, max_tokens=mt)
 
-    def _continue(self, board, sofar: str, closing=False, recent_tails=None) -> str:
+    def _continue(self, board, sofar: str, closing=False, recent_tails=None, key_events=None) -> str:
         """진행 이어쓰기 — 출고 분량은 지시가 아니라 '이야기 전진'으로 채운다(하한 지시=물 타기 차단).
         전문 말미를 보고 절단점에서 잇는 순차 연속(화 경계 인계와 동일 메커니즘 — 병렬 블록 접합 아님)."""
         hook = self._CLOSING if closing else self._HOOKS.get(self.style.ending_hook, self._HOOKS["cliffhanger"])
         if hook and not closing and recent_tails:
             tails = "\n".join(f"- …{t[-70:]}" for t in recent_tails[-3:] if t)
             hook += "\n(최근 회차들의 끝:\n" + tails + "\n— 같은 유형의 끝맺음 반복 금지.)"
+        # G9: 이 회차에 계획된 사건 목록을 참고로(아직 안 일어난 쪽으로 자연히 전진 — 회차 종결 마커 넘어 계속 쓰는 사고 방지)
+        plan_ctx = (f"\n(이 회차의 계획 사건: {key_events} — 아직 다뤄지지 않은 것이 있으면 그쪽으로 전진. "
+                    "회차를 닫는 마무리 문장(예: '다음 회에 계속')을 쓰지 마라.)" if key_events else "")
         spec = SceneSpec(index=1, goal=(
             "위 '지금까지 쓴 본문'의 마지막 문장에서 '즉시' 이어서, 이야기를 다음 국면으로 한 단계 전진시켜 계속 써라. "
-            "이미 일어난 사건·대화의 재연·요약 금지, 새 인물 창조 금지. 새 절단점에 이르면 멈춰라."), key_events=[])
+            "이미 일어난 사건·대화의 재연·요약 금지, 새 인물 창조 금지. 새 절단점에 이르면 멈춰라." + plan_ctx), key_events=[])
         # 이어쓰기 프롬프트에는 직전 회차 전문·누적 줄거리를 빼고 '지금 쓴 본문 말미'만 준다 —
         # 둘이 함께 들어가면 모델이 요약된 과거를 '재서술'하는 압력(재설계 리뷰 P0-2). 캐논(ground_truth)·보이스는 유지.
         cont_board = board.model_copy(update={"prev_chapter": "", "story_so_far": ""})
@@ -318,6 +323,11 @@ class ChapterGenerator:
         if restraint:   # 전권 과용 표현 절제(작품-전역 원장 → 회차 생성 입력으로, 예방측)
             voice_cards += ("\n[표현 절제 — 이 작품에서 이미 과용된 표현. 이번 화에서는 거의 쓰지 마라]\n"
                             + ", ".join(restraint[:8]))
+        # G7: 등록된 고유명사 명부를 '참고'로 주입(가시화) — 같은 대상에 새 이름을 발명하지 않게(금지 아님, 정보 제공)
+        roster_names = sorted({e.name for e in ontology.entities.values() if e.name})
+        if roster_names:
+            voice_cards += ("\n[이미 등록된 고유명사(참고 — 같은 대상이면 이 표기를 그대로 쓰라)]\n"
+                            + ", ".join(roster_names[:60]))
 
         narrative = list(anchors or [])   # 엔딩/아크 앵커(narrative, ground_truth 아님) 상단
         if ch_no > 1:
@@ -350,10 +360,14 @@ class ChapterGenerator:
         while len(text) < norm and ext < 2:
             ext += 1
             self.bus.emit("draft_chapter", "extend", chapter=ch_no, chars=len(text), round=ext)
-            more = sanitize_meta(self._continue(board, text, closing=closing, recent_tails=recent_tails))
+            # G9: 이어쓰기에 '이 회차의 계획 사건'을 컨텍스트로(아직 못 다룬 쪽으로 전진하게 — 정보 제공, 분량 지시 아님)
+            more = sanitize_meta(self._continue(board, text, closing=closing, recent_tails=recent_tails,
+                                                key_events=beat.get("key_events") or []))
             if len(more.strip()) < 200:      # 무의미 연장 → 중단(짧은 회차로 출고가 낫다)
                 break
             text = text.rstrip() + "\n\n" + more.strip()
+        if len(text) < norm:   # G9: 규범 미달 출고 가시화(silent 금지) — 작가·G3 회고 입력(차단 아님)
+            self.bus.emit("draft_chapter", "under_norm", chapter=ch_no, chars=len(text), norm=norm)
         tail_seg = "\n".join(text.splitlines()[-15:])
         if (fragmentation_score(text) < 22 or fragmentation_score(tail_seg) < 14
                 or short_line_ratio(text) > 0.15):

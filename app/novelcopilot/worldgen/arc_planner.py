@@ -277,9 +277,10 @@ class ArcPlanner:
                "세계 고유 설정(경제·무기·기술 체계)을 사건의 구체 디테일로 쓰라. "
                # G4: chapter_function/hook_type/time_advance/place 는 '강제'가 아니라 '네 계획을 그대로 라벨링'(서술 메타데이터).
                # 이 라벨로 회차 내용을 바꾸라는 게 아니라, 설계한 회차가 어떤 기능·끝맺음·시간·장소인지 자기 기술하라는 것(작가 가시화·분석용).
-               "끝으로 설계한 이 회차를 자기 기술하라(내용을 바꾸지 말고 있는 그대로 라벨만) — "
-               "chapter_function(독자에게 주는 것: payoff/setup/escalation/relation/respite 중), "
-               "hook_type(회차말 끊는 방식 자유 라벨), time_advance(직전 화 대비 시간 경과), place(주요 장소). "
+               "끝으로 설계한 이 회차를 자기 기술하라(내용을 바꾸지 말고 있는 그대로 짧은 라벨만 — 분석용 메타데이터라 한 단어로) — "
+               "chapter_function(독자에게 주는 것: payoff/setup/escalation/relation/respite 중 하나), "
+               "hook_type(회차말 끊는 방식 한 단어: action/reveal/emotion/decision/threat/question/twist/cliffhanger 중 가장 가까운 것), "
+               "time_advance(직전 화 대비 시간 경과 짧게: 예 '없음'/'몇 분'/'다음날'/'사흘 후'), place(주요 장소 짧게). "
                "title 은 회차 제목만(시리즈명·화수 붙이지 마라). JSON만.")
         # plant_notes 는 시스템 '참고' 정보 — 작가 지시(authority)와 분리된 슬롯(시스템 개입의 지시 위장 금지, 모드 계약 §1)
         notes_block = f"\n[미회수 복선 — 참고용]{plant_notes}" if plant_notes else ""

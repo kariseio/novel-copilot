@@ -745,6 +745,16 @@ class CopilotService:
                         if pred:
                             record.reader_feedback = pred           # 작가가 나중에 검토(원장처럼 가시화)
                             sess.bus.emit("reader_desk", "prediction", chapter=next_ch, **pred)
+                    # G7: 신규 고유명사 커밋 가시화(인플레 추세 — 작가 신호, 차단 아님)
+                    new_ents = [c for c in changes if getattr(c, "op", "") == "new_entity"]
+                    if new_ents:
+                        sess.bus.emit("naming", "new_commits", chapter=next_ch, count=len(new_ents),
+                                      names=[c.entity for c in new_ents][:8])
+                    # G3-텔레메트리: 롤링 윈도 페이싱 지표(측정·가시화만 — 작가가 추세 보고 빨간펜, 강제 없음)
+                    if spine:
+                        from ..engine.pacing import pacing_window
+                        sess.bus.emit("pacing", "window", chapter=next_ch,
+                                      **pacing_window(prior + [record], state.promise_ledger, next_ch))
                     # R4: 에피소드 커서 전진 + finale 시 롤업 요약·결정론 드리프트(advisory)
                     if spine and ep:
                         record.arc_id, record.episode_id = ep.arc_id, ep.episode_id
