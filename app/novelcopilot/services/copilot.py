@@ -872,6 +872,77 @@ class CopilotService:
                      for a in sorted(spine.arcs, key=lambda x: x.order)],
         }
 
+    # ---- G3: 연재 회고·스파인 개정(거버넌스 — 제안은 시스템, 적용은 작가 승인) ----
+    def arc_retrospective(self, pid: str) -> dict | None:
+        """연재 회고 제안 — 페이싱 지표+완결 아크로 진단하고 '남은 아크/엔딩' 개정안을 제안(미적용·읽기 전용)."""
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        spine = state.world.spine
+        if not spine or not spine.arcs:
+            return {"has_spine": False, "diagnosis": "", "revisions": []}
+        from ..engine.pacing import pacing_window
+        from ..engine.retrospective import generate_retrospective
+        sess = self.sessions.get_or_create(state)
+        cur = state.current_chapter
+        done_arcs = [{"arc_id": a.arc_id, "title": a.title, "goal": a.goal, "summary": a.summary}
+                     for a in sorted(spine.arcs, key=lambda x: x.order) if a.done]
+        upcoming = [{"arc_id": a.arc_id, "title": a.title, "goal": a.goal,
+                     "central_conflict": a.central_conflict, "turning_point": a.turning_point}
+                    for a in sorted(spine.arcs, key=lambda x: x.order) if not a.done]
+        pacing = pacing_window(state.chapters, state.promise_ledger, cur + 1, window=8)
+        ledger_open = [p.text for p in state.promise_ledger.open_promises()][:10]
+        reader_trend = [c.reader_feedback for c in state.chapters[-5:] if getattr(c, "reader_feedback", None)]
+        prop = generate_retrospective(
+            sess.provider, genre=state.world.genre,
+            ending=(spine.ending.ending if spine.ending else ""),
+            done_arcs=done_arcs, upcoming_arcs=upcoming, pacing=pacing,
+            ledger_open=ledger_open, reader_trend=reader_trend)
+        prop["has_spine"] = True
+        prop["pacing"] = pacing
+        return prop
+
+    def revise_spine(self, pid: str, revisions: list[dict]) -> dict | None:
+        """작가 승인된 개정만 반영 — 미집필(미완) 아크 카드/엔딩만(과거·집필분 보호). 트랜잭션 안전.
+        narrative 슬롯(서사 의도)이라 결정론 게이트/캐논 무접촉. 다음 lazy 에피소드 생성이 개정된 목표를 본다."""
+        from ..engine.retrospective import ARC_FIELDS, ENDING_FIELDS
+        from ..domain.narrative import EndingSpec
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)               # 권위 재읽기(lost update 방지)
+            if not state:
+                return None
+            spine = state.world.spine
+            if not spine:
+                raise ValueError("스파인이 없습니다")
+            applied, rejected = [], []
+            for rv in (revisions or []):
+                target, field, nv = (rv.get("target") or ""), (rv.get("field") or ""), (rv.get("new_value") or "").strip()
+                if not nv:
+                    rejected.append({**rv, "why": "빈 값"}); continue
+                if target == "ending" and field in ENDING_FIELDS:
+                    if spine.ending is None:
+                        spine.ending = EndingSpec()
+                    setattr(spine.ending, field, nv)
+                    applied.append({"target": "ending", "field": field})
+                elif target.startswith("arc:") and field in ARC_FIELDS:
+                    arc = spine.arc(target[4:])
+                    if arc is None:
+                        rejected.append({**rv, "why": "아크 없음"})
+                    elif arc.done:
+                        rejected.append({**rv, "why": "이미 집필된 아크는 개정 불가(미래만)"})
+                    else:
+                        setattr(arc, field, nv)
+                        applied.append({"target": target, "field": field})
+                else:
+                    rejected.append({**rv, "why": "허용되지 않은 대상/필드"})
+            if applied:
+                self.repo.save(state)
+            return {"applied": applied, "rejected": rejected}
+
     # ---- R2 설정집 ----
     def _ensure_migrated(self, state) -> bool:
         """기존 프로젝트 1회 부트스트랩(이미 캐논인 world_rules 를 설정집에 표시). 변경 시 True."""

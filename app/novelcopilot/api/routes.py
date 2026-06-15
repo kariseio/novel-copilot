@@ -271,6 +271,27 @@ def get_spine(pid: str, request: Request):
     return snap
 
 
+@router.get("/projects/{pid}/retrospective")
+def get_retrospective(pid: str, request: Request):
+    """G3: 연재 회고 제안(읽기 전용) — 페이싱 진단 + 남은 아크/엔딩 개정안. 적용은 작가 승인(아래 POST)."""
+    res = _svc(request).arc_retrospective(pid)
+    if res is None:
+        raise HTTPException(404, "project not found")
+    return res
+
+
+@router.post("/projects/{pid}/spine/revise")
+def revise_spine(pid: str, body: dict, request: Request):
+    """G3: 작가 승인한 개정만 반영 — 미집필 아크 카드/엔딩만. {revisions:[{target,field,new_value}]}"""
+    try:
+        res = _svc(request).revise_spine(pid, body.get("revisions") or [])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res is None:
+        raise HTTPException(404, "project not found")
+    return res
+
+
 @router.get("/projects/{pid}/wiki")
 def get_wiki(pid: str, request: Request):
     snap = _svc(request).wiki_snapshot(pid)
