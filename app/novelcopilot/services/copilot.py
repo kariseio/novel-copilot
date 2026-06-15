@@ -108,11 +108,11 @@ def _cast_context(ontology, world, entity_ids, chapter: int) -> str:
             st = ontology.state_as_of(eid, "status", chapter)
             if st and st != "alive":
                 meta.append(f"현재상태={st}")
-            for a in list(ent.attrs)[:4]:
+            for a in list(ent.attrs)[:8]:   # I-4: [:4]→[:8] 핵심 추적축(rank 등) 비결정적 누락 방지
                 if a == "status":
                     continue
                 v = ontology.state_as_of(eid, a, chapter)
-                if v:
+                if v is not None:           # I-4: 'if v:' 는 캐논값 0(F급=0 등)을 묵음 탈락 → is not None(ground_truth str(v) 정책 일치)
                     meta.append(f"{a}={v}")
         rels = rel_by.get(name) or []
         if rels:
@@ -137,30 +137,30 @@ def _rollup_episode(provider, episode, chapters) -> str:
 
 
 def _build_story_so_far_hier(state, next_ch: int, budget: int) -> tuple[str, int]:
-    """계층 누적 줄거리(spine 모드) — 완료 에피소드는 1줄 롤업으로 압축, 현재 에피소드는 회차 상세.
-    오래된 맥락을 silent drop 하지 않고 '압축'으로 보존 → 회차 무한 증가에도 토큰 선형 억제."""
+    """계층 누적 줄거리(spine 모드) — 예산을 '최근 회차 상세'로 채우고(최신 우선), 예산 밖 먼 에피소드만 1줄 롤업으로 압축.
+    (I-1 교정) 예전 버전은 현재 에피소드 회차에만 상세를 썼다 → 에피소드 경계 직후엔 현재 회차가 0이라 롤업 1줄로 붕괴(예산 12k인데 1문단).
+    이제 경계 무관 직전 완료 에피소드 상세까지 끌어와 예산을 채운다 → '경계 기아' 해소. 먼 과거는 롤업으로 압축(토큰 선형)."""
     spine = state.world.spine
     cur_ep = state.narrative_progress.current_episode_id
-    # 완료 에피소드 롤업(1줄·소수) — 전량 보존(엔딩 backward 인과의 시작점이 예산에서 사라지지 않게)
+    prior = sorted([c for c in state.chapters if c.chapter < next_ch and c.status == ChapterStatus.FINALIZED],
+                   key=lambda c: c.chapter)
+    # 1) 최근 회차 상세로 예산 채움(최신 우선) — 직전 완료 에피소드까지 끌어와 경계 직후에도 예산 활용
+    kept, covered, used = [], set(), 0
+    for c in reversed(prior):
+        line = f"{c.chapter}화: {getattr(c, 'detail_synopsis', '') or c.summary or c.text[:120]}"
+        if kept and used + len(line) + 1 > budget:
+            break
+        kept.append(c); covered.add(c.episode_id); used += len(line) + 1
+    detail = [f"{c.chapter}화: {getattr(c, 'detail_synopsis', '') or c.summary or c.text[:120]}"
+              for c in sorted(kept, key=lambda c: c.chapter)]
+    # 2) 상세에 안 든(예산 밖) 완료 에피소드는 1줄 롤업으로 — 엔딩 backward 인과의 먼 시작점 보존(부분 포함 에피소드는 롤업 생략=중복 방지)
     rollups = [f"[{arc.title}·{ep.title}] {ep.summary}"
                for arc in sorted(spine.arcs, key=lambda a: a.order)
-               for ep in arc.episodes if ep.done and ep.summary and ep.episode_id != cur_ep]
-    # 현재(미완) 에피소드 회차 상세 — 예산은 여기에만 적용(최신 우선)
-    cur_chs = sorted([c for c in state.chapters if c.chapter < next_ch
-                      and c.status == ChapterStatus.FINALIZED and c.episode_id == cur_ep],
-                     key=lambda c: c.chapter)
-    cur_lines = [f"{c.chapter}화: {getattr(c, 'detail_synopsis', '') or c.summary or c.text[:120]}" for c in cur_chs]
-    if not rollups and not cur_lines:
+               for ep in arc.episodes
+               if ep.done and ep.summary and ep.episode_id != cur_ep and ep.episode_id not in covered]
+    if not rollups and not detail:
         return "", 0
-    used = sum(len(x) + 1 for x in rollups)
-    kept, dropped = [], 0
-    for line in reversed(cur_lines):
-        if kept and used + len(line) + 1 > budget:
-            dropped = len(cur_lines) - len(kept)
-            break
-        kept.append(line)
-        used += len(line) + 1
-    return "\n".join(rollups + list(reversed(kept))), dropped
+    return "\n".join(rollups + detail), len(prior) - len(kept)   # dropped = 상세에서 빠져 롤업/생략된 회차 수
 
 
 def _slug(name: str, existing: set[str]) -> str:
@@ -604,10 +604,19 @@ class CopilotService:
                                        "억지 회수 금지(슬로우번은 정당한 기법)")
                         if policy == "active" and is_finale:
                             plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
-                    # G6: 설계 콜에 인물 스토리 컨텍스트(이름·프로필·현재 상태·관계) 주입 — 에피소드 캐스트 + 주연 일부
-                    char_ids_all = [e.id for e in state.world.entities if e.etype == "character"]
-                    cast_ids = list(dict.fromkeys((ep.required_cast or []) + char_ids_all))[:6]
-                    cast_context = _cast_context(sess.bundle.ontology, state.world, cast_ids, next_ch)
+                    # G6: 설계 콜에 인물 스토리 컨텍스트(이름·프로필·현재 상태·관계) 주입.
+                    # I-2 교정: 우선순위 = 에피소드 필수 캐스트 > 직전 회차에 실제 등장한 actor(자동추출 NPC 포함) > 주연.
+                    # 미등장 시드 인물이 슬롯을 먹고 정작 갈등 끄는 NPC(연결자·그림자)가 빠지던 문제 해소. actor 전체(잠정 포함)에서 선별.
+                    ont = sess.bundle.ontology
+                    recent_present = []
+                    if prior:
+                        try:
+                            recent_present = ont.scan_present_ids(prior[-1].text or "")
+                        except Exception:
+                            recent_present = []
+                    actor_ids = [e.id for e in state.world.entities if ont.is_actor(e.etype)]
+                    cast_ids = list(dict.fromkeys((ep.required_cast or []) + recent_present + actor_ids))[:8]
+                    cast_context = _cast_context(ont, state.world, cast_ids, next_ch)
                     beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
                                                     summaries, [d.text for d in active],
                                                     plant_notes=plant_notes, cast_context=cast_context)
@@ -664,6 +673,11 @@ class CopilotService:
                 sess.bus.reset()
                 if dropped:   # 오래된 맥락이 예산에서 잘림 — 조용한 정지 금지(가시화)
                     sess.bus.emit("assemble_memory", "story_truncated", chapter=next_ch, dropped=dropped)
+                # I-1: 누적 줄거리 예산 사용률 가시화 — 경계 직후 silent 미달(예산 큰데 콘텐츠 1줄)을 작가가 보게
+                _ssf_budget = self.settings.story_so_far_chars
+                if spine and spine.arcs and len(story_so_far) < _ssf_budget * 0.4:
+                    sess.bus.emit("assemble_memory", "story_underfilled", chapter=next_ch,
+                                  used=len(story_so_far), budget=_ssf_budget)
                 if bible_dropped:   # 설정집 다이제스트 예산 컷 가시화(silent drop 금지)
                     sess.bus.emit("assemble_memory", "bible_truncated", chapter=next_ch, dropped=bible_dropped)
                 if spine and spine.arcs:
@@ -931,6 +945,28 @@ class CopilotService:
         prop["has_spine"] = True
         prop["pacing"] = pacing
         return prop
+
+    def backfill_genre_contract(self, pid: str) -> dict | None:
+        """M-2: G5 이전 작품에 장르 계약이 없으면 추론해 채운다(작가 요청 시 1회). narrative 컨텍스트 — 캐논 아님."""
+        state = self.repo.get(pid)
+        if not state:
+            return None
+        if getattr(state.world, "genre_contract", None):
+            return {"already": True, "genre_contract": state.world.genre_contract.model_dump()}
+        from ..worldgen.genre_contract import infer_genre_contract
+        gc = infer_genre_contract(self.wg_provider, state.world)
+        if gc is None:
+            raise ValueError("장르 계약 추론에 실패했습니다(다시 시도)")
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)               # 권위 재읽기(lost update 방지)
+            if not state:
+                return None
+            if getattr(state.world, "genre_contract", None):
+                return {"already": True, "genre_contract": state.world.genre_contract.model_dump()}
+            state.world.genre_contract = gc
+            self.repo.save(state)
+            return {"created": True, "genre_contract": gc.model_dump()}
 
     def revise_spine(self, pid: str, revisions: list[dict]) -> dict | None:
         """작가 승인된 개정만 반영 — 미집필(미완) 아크 카드/엔딩만(과거·집필분 보호). 트랜잭션 안전.

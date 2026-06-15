@@ -39,7 +39,7 @@ class OntologyFact(BaseModel):
 
 class RetrievedItem(BaseModel):
     """narrative — RAG/Wiki '찾기'. 하단·cap·trust_weight. ground_truth 승격 불가."""
-    source: Literal["rag_chunk", "wiki_page", "arc_anchor", "bible", "cast_debut"]
+    source: Literal["rag_chunk", "wiki_page", "arc_anchor", "bible", "cast_debut", "worldrule"]
     ref: str
     text: str
     trust_weight: float = 1.0

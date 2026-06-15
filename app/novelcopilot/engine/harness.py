@@ -53,7 +53,7 @@ def short_line_ratio(text: str) -> float:
 
 from ..config import Settings
 from ..domain.types import (ContextBoard, SceneSpec, ChapterRecord, ChapterStatus,
-                            RoundTrace, AuthorDirective, SignalGrade)
+                            RoundTrace, AuthorDirective, SignalGrade, RetrievedItem)
 from ..domain.world import StyleSpec
 from ..llm.base import LLMProvider
 from .checker import Checker
@@ -324,15 +324,25 @@ class ChapterGenerator:
         if restraint:   # 전권 과용 표현 절제(작품-전역 원장 → 회차 생성 입력으로, 예방측)
             voice_cards += ("\n[표현 절제 — 이 작품에서 이미 과용된 표현. 이번 화에서는 거의 쓰지 마라]\n"
                             + ", ".join(restraint[:8]))
-        # G7: 등록된 고유명사 명부를 '참고'로 주입(가시화) — 같은 대상에 새 이름을 발명하지 않게(금지 아님, 정보 제공)
-        roster_names = sorted({e.name for e in ontology.entities.values() if e.name})
-        if roster_names:
+        # G7+C-1: 고유명사 명부를 '확정/미확정'으로 분층(참고). 확정은 '같은 표기 쓰라', 잠정 떡밥은 '새 이름 발명만 피하되 고정·확정 금지'.
+        confirmed_names = sorted({e.name for e in ontology.entities.values() if e.name and not getattr(e, "provisional", False)})
+        prov_names = sorted({e.name for e in ontology.entities.values() if e.name and getattr(e, "provisional", False)})
+        if confirmed_names:
             voice_cards += ("\n[이미 등록된 고유명사(참고 — 같은 대상이면 이 표기를 그대로 쓰라)]\n"
-                            + ", ".join(roster_names[:60]))
+                            + ", ".join(confirmed_names[:60]))
+        if prov_names:
+            voice_cards += ("\n[미확정 명사(아직 정체불명 떡밥 — 새 이름 발명만 피하고, 확정 인명처럼 고정·반복 호명하지 마라)]\n"
+                            + ", ".join(prov_names[:30]))
 
         narrative = list(anchors or [])   # 엔딩/아크 앵커(narrative, ground_truth 아님) 상단
+        # M-1: 세계 규칙 텍스트 주입(사장돼 있던 ontology.rules) — 헤더는 '세계규칙 위반 금지'라 약속하나 본문이 한 번도 못 보던 결함 해소(advisory).
+        world_rules = list(getattr(ontology, "rules", None) or [])
+        if world_rules:
+            narrative.insert(0, RetrievedItem(source="worldrule", ref="rules",
+                text="[세계 규칙 — 이 작품의 불변 규칙. 어기지 마라]\n" + "\n".join(f"- {r}" for r in world_rules[:12])))
         if ch_no > 1:
-            narrative += rag.search(beat.get("summary", ""), ch_no - 1, k=self.settings.rag_k)
+            # N-1: RAG 후보에서 '직전 회차' 제외(as_of=ch_no-2) — prev_chapter 전문이 직전을 전담하므로 검색 슬롯은 먼 회차 복선 회수에 쓴다.
+            narrative += rag.search(beat.get("summary", ""), max(0, ch_no - 2), k=self.settings.rag_k)
             narrative += wiki.retrieve(beat.get("summary", ""), ch_no - 1, k=self.settings.wiki_k)
         ground_truth = (ontology.canon_facts(involved, ch_no)
                         + ontology.canon_relations(involved, ch_no))   # 확정 관계도 '박기'(ground_truth)
@@ -342,15 +352,24 @@ class ChapterGenerator:
                              voice_cards=voice_cards)
         self.bus.emit("assemble_memory", "done", chapter=ch_no,
                       ground_truth=len(board.ground_truth), retrieved=len(narrative))
-        # 디버그: 집필에 실제로 들어간 입력 슬롯을 캡처(트림) — '어떤 정보로 썼는지' 가시화
+        # 디버그(D-1~9): 집필에 실제로 들어간 입력 슬롯을 폭넓게 캡처 — system 헤더(문체/세계규칙)·끝맺음 정책·이어쓰기·교정까지.
+        pv = prev_chapter_text or ""
         draft_ctx = {
             "persona": (self.style.system_persona or "")[:240],
+            "style_rules": list(self.style.rules),                       # D-1: 매 draft 의 system 헤더 문체 규칙(상수)
+            "world_rules": world_rules,                                  # D-6/M-1: 실제 주입되는 세계 규칙
+            "ending_hook_mode": self.style.ending_hook,                  # D-3: 끝맺음 정책
+            "recent_tails": [(t or "")[-80:] for t in (recent_tails or [])],
             "ground_truth": [f"{f.entity}: {f.attr_label}={f.value}" for f in board.ground_truth],
             "anchors": [{"source": a.source, "ref": a.ref, "text": (a.text or "")[:240]} for a in narrative],
             "story_so_far": (story_so_far or "")[:2500],
+            "story_so_far_chars": len(story_so_far or ""),               # D-7: 실제 길이(트림 전)
             "directives": [d.text for d in directives],
             "voice_roster": (voice_cards or "")[:1600],
-            "prev_chapter_chars": len(prev_chapter_text or ""),
+            "prev_chapter_chars": len(pv),
+            "prev_chapter_excerpt": (pv[:200] + (" …(중략)… " + pv[-200:] if len(pv) > 420 else "")),  # D-7: 머리/꼬리 발췌
+            "continuations": 0,                                          # D-4: 이어쓰기 콜 수(아래서 갱신)
+            "corrections": [],                                           # D-8: 교정 단계 발화 목록(아래서 갱신)
             "beat": {k: beat.get(k) for k in ("title", "summary", "key_events", "entities",
                                               "chapter_function", "hook_type", "time_advance", "place")},
         }
@@ -369,6 +388,7 @@ class ChapterGenerator:
         text = sanitize_meta(self._draft(board, spec, "", last=True, closing=closing,
                                          recent_tails=recent_tails, chapter_mode=True))
         norm = int(self.style.target_chars_per_chapter * 0.85)   # 출고 규범(코드 판정 — 모델은 분량을 모른다)
+        draft_ctx["length_norm"] = norm                          # D-2: 출고 규범(문체규칙의 '5천자' 지시와 대조 가능)
         ext = 0
         while len(text) < norm and ext < 2:
             ext += 1
@@ -379,6 +399,7 @@ class ChapterGenerator:
             if len(more.strip()) < 200:      # 무의미 연장 → 중단(짧은 회차로 출고가 낫다)
                 break
             text = text.rstrip() + "\n\n" + more.strip()
+        draft_ctx["continuations"] = ext   # D-4: 이어쓰기 콜 수(이 회차 후반부가 '다른 컨텍스트'로 쓰였는지 가시화)
         if len(text) < norm:   # G9: 규범 미달 출고 가시화(silent 금지) — 작가·G3 회고 입력(차단 아님)
             self.bus.emit("draft_chapter", "under_norm", chapter=ch_no, chars=len(text), norm=norm)
         tail_seg = "\n".join(text.splitlines()[-15:])
@@ -386,6 +407,7 @@ class ChapterGenerator:
                 or short_line_ratio(text) > 0.15):
             # 토막 행갈이 붕괴(전체 또는 말미 국소) → 조판 복구
             self.bus.emit("draft_chapter", "reformat", chapter=ch_no)
+            draft_ctx["corrections"].append("reformat")   # D-8
             text = sanitize_meta(self._reformat(text))
         _track("draft", _t)
         best_text, best_hard = text, None     # M5: hard 위반 최소 텍스트 보존
@@ -419,6 +441,7 @@ class ChapterGenerator:
                           fixing=[v.kind for v in text_hard])
             _t = self.provider.usage.chat_tokens
             text = sanitize_meta(self._rewrite(text, text_hard, board, max_tokens=ch_budget))
+            draft_ctx["corrections"].append(f"rewrite#{r}({','.join(v.kind for v in text_hard[:3])})")   # D-8
             _track("rewrite", _t)
 
         chapter_text = best_text     # M5: 최선본 채택
@@ -430,6 +453,7 @@ class ChapterGenerator:
         if offenders:
             _t = self.provider.usage.chat_tokens
             chapter_text = self._fix_tics(chapter_text, offenders)
+            draft_ctx["corrections"].append(f"fix_tics({','.join(p for p,_ in offenders[:3])})")   # D-8
             _track("quality", _t)
             residual = word_tics(chapter_text, roster, cap=4)
             if residual:   # 교정 후 재검(닫힌 루프) — 잔존은 무음 통과 금지
@@ -439,16 +463,19 @@ class ChapterGenerator:
             if hook_repeat_semantic(self.provider, tail_now, recent_tails) > 0.82:   # 의미 유사(템플릿 재탕)
                 _t = self.provider.usage.chat_tokens
                 chapter_text = self._regen_tail(chapter_text, recent_tails)
+                draft_ctx["corrections"].append("regen_tail(훅 재탕)")   # D-8: 말미가 교체됐음(독자평가 통과해도 말미는 다른 컨텍스트)
                 _track("quality", _t)
         if getattr(self.settings, "continuity_polish", True):   # 출고 검수(수치·인명·절단·메타·틱·시제) — 패치 후 게이트 재검
             _t = self.provider.usage.chat_tokens
             names = [ontology.entities[i].name for i in involved if i in ontology.entities]
             chapter_text = sanitize_meta(self._continuity_polish(chapter_text, names=names))
+            draft_ctx["corrections"].append("continuity_polish")   # D-8
             _track("polish", _t)
         from .quality_gates import tense_leak_ratio
         if tense_leak_ratio(chapter_text) > 0.05:   # 시제 누출(현재형 종결 혼입) — 폴리시 ⑥의 결정론 백스톱
             _t = self.provider.usage.chat_tokens
             chapter_text = self._fix_tense(chapter_text)
+            draft_ctx["corrections"].append("fix_tense")   # D-8
             _track("quality", _t)
         _t = self.provider.usage.chat_tokens
         final = self.checker.check_text(chapter_text, ontology, ch_no, involved)

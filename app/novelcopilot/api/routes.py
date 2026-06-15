@@ -280,6 +280,18 @@ def get_retrospective(pid: str, request: Request):
     return res
 
 
+@router.post("/projects/{pid}/genre-contract/backfill")
+def backfill_genre_contract(pid: str, request: Request):
+    """M-2: G5 이전 작품의 장르 계약을 추론해 채운다(작가 요청). narrative 컨텍스트 — 캐논 아님."""
+    try:
+        res = _svc(request).backfill_genre_contract(pid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res is None:
+        raise HTTPException(404, "project not found")
+    return res
+
+
 @router.post("/projects/{pid}/spine/revise")
 def revise_spine(pid: str, body: dict, request: Request):
     """G3: 작가 승인한 개정만 반영 — 미집필 아크 카드/엔딩만. {revisions:[{target,field,new_value}]}"""

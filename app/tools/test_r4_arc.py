@@ -77,10 +77,14 @@ def test_hier_summary() -> bool:
     st.chapters = [ChapterRecord(chapter=1, status=ChapterStatus.FINALIZED, summary="s1", episode_id="arc1_ep1"),
                    ChapterRecord(chapter=2, status=ChapterStatus.FINALIZED, summary="s2", episode_id="arc1_ep1"),
                    ChapterRecord(chapter=3, status=ChapterStatus.FINALIZED, summary="s3", episode_id="arc1_ep2")]
-    txt, dropped = _build_story_so_far_hier(st, 4, 6000)
-    # 완료 에피소드(ep1)는 1줄 롤업으로 압축, 현재 에피소드(ep2) 회차는 상세
+    # I-1 교정 후: 예산 안에서 최신 회차를 상세로 채우고, 예산 밖 먼 에피소드만 롤업으로 압축.
+    # 작은 예산(12) → 최신 ch3만 상세, ep1(ch1·ch2)은 예산 밖이라 롤업 1줄로 압축.
+    txt, dropped = _build_story_so_far_hier(st, 4, 12)
     ok = ("EP1롤업" in txt and "3화: s3" in txt and "1화: s1" not in txt and "2화: s2" not in txt)
-    print(f"[{'OK' if ok else 'FAIL'}] 계층 요약: 완료EP 롤업 압축 + 현재EP 회차상세 (dropped={dropped})")
+    # 큰 예산이면 ep1 회차도 상세로 채워 예산 활용(경계 기아 해소) — 롤업 대신 상세
+    txt2, _ = _build_story_so_far_hier(st, 4, 6000)
+    ok &= ("1화: s1" in txt2 and "2화: s2" in txt2 and "3화: s3" in txt2)
+    print(f"[{'OK' if ok else 'FAIL'}] 계층 요약: 작은예산=먼EP 롤업압축 / 큰예산=최신 상세로 충전 (dropped={dropped})")
     return ok
 
 

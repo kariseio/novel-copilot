@@ -150,7 +150,10 @@ async function loadSpine(){
     const gcBlock = (gc&&(gc.pleasure_engine||gc.premise_asset))?`<div class="bible-sec"><h4>장르 정체성 <span class="muted small">— 이 작품이 지키는 재미의 축</span></h4>
       ${gc.pleasure_engine?`<p class="small"><b>독자 쾌감:</b> ${esc(gc.pleasure_engine)}</p>`:""}
       ${gc.reader_expectations&&gc.reader_expectations.length?`<p class="small"><b>독자 기대:</b> ${gc.reader_expectations.map(esc).join(" · ")}</p>`:""}
-      ${gc.premise_asset?`<p class="small"><b>핵심 전제:</b> ${esc(gc.premise_asset)}</p>`:""}</div>`:"";
+      ${gc.premise_asset?`<p class="small"><b>핵심 전제:</b> ${esc(gc.premise_asset)}</p>`:""}</div>`
+      :`<div class="bible-sec"><h4>장르 정체성 <span class="muted small">— 미설정</span></h4>
+      <p class="muted small">이 작품은 장르 계약 도입 전 생성됐어요 — 쾌감 엔진·핵심 전제·독자 기대가 설계에 주입되지 않는 상태입니다.</p>
+      <button id="gc-btn" onclick="backfillGenreContract()">장르 정체성 생성</button><span id="gc-msg" class="muted small"></span></div>`;
     // G1 약속 원장 — 독자에게 연 약속과 회수(잔고만 보여줌, 회수는 작가)
     const pl=sp.promise_ledger||{};
     const sinceTxt=(pl.since_payoff==null)?"아직 회수 없음":`마지막 회수 후 ${pl.since_payoff}화`;
@@ -185,6 +188,15 @@ async function loadSpine(){
     }).join("");
     el.innerHTML=gcBlock+ledgerBlock+retroBlock+ending+`<div class="bible-sec"><h4>단락과 에피소드 <span class="muted small">(현재 단락 ${sp.chapters_in_episode}화째)</span></h4>${arcs}</div>`;
   }catch(e){ el.innerHTML=`<span class="muted">로드 실패: ${esc(e.message)}</span>`; }
+}
+async function backfillGenreContract(){
+  const btn=$("#gc-btn"), msg=$("#gc-msg"); if(!btn) return;
+  btn.disabled=true; msg.textContent=" 추론 중…";
+  try{
+    await api.post(`/api/projects/${STATE.project.id}/genre-contract/backfill`,{});
+    msg.textContent=" 완료";
+    setTimeout(loadSpine,800);
+  }catch(e){ msg.textContent=" 실패: "+e.message; btn.disabled=false; }
 }
 async function loadRetrospective(){
   const body=$("#retro-body"), btn=$("#retro-btn");
@@ -549,11 +561,15 @@ function genContextHtml(c){
     ${(p.recent&&p.recent.length)?`<div class="gd-row"><b>최근 줄거리</b>${p.recent.map(r=>`<div class="gd-line">${esc(r)}</div>`).join("")}</div>`:''}</div>`:"";
   const draftBlk=`<div class="gd-sec"><h5>집필 입력</h5>${beatBlk}
     <div class="gd-row"><b>확정 설정(박기)</b> ${list(d.ground_truth,f=>`<span class="gd-tag canon">${esc(f)}</span>`)}</div>
+    ${(d.world_rules&&d.world_rules.length)?`<div class="gd-row"><b>세계 규칙</b>${d.world_rules.map(r=>`<div class="gd-line">⚖️ ${esc(r)}</div>`).join("")}</div>`:''}
     <div class="gd-row"><b>참조 자료</b>${list(d.anchors,a=>`<div class="gd-line"><span class="gd-src">${esc(SRC_LABEL[a.source]||a.source)}</span> ${esc(a.text)}</div>`)}</div>
     ${(d.directives&&d.directives.length)?`<div class="gd-row"><b>작가 지시</b>${d.directives.map(x=>`<div class="gd-line">${esc(x)}</div>`).join("")}</div>`:''}
-    ${d.story_so_far?`<div class="gd-row"><b>누적 줄거리</b><pre class="gd-pre">${esc(d.story_so_far)}</pre></div>`:''}
+    ${d.story_so_far?`<div class="gd-row"><b>누적 줄거리</b> <span class="muted tiny">(실제 ${d.story_so_far_chars||'?'}자, 예산까지 사용)</span><pre class="gd-pre">${esc(d.story_so_far)}</pre></div>`:''}
     ${d.voice_roster?`<div class="gd-row"><b>보이스·명부</b><pre class="gd-pre">${esc(d.voice_roster)}</pre></div>`:''}
-    <div class="gd-row muted tiny">집필 화법: ${esc((d.persona||'').slice(0,120))} · 직전 회차 ${d.prev_chapter_chars||0}자 주입</div></div>`;
+    ${(d.style_rules&&d.style_rules.length)?`<div class="gd-row"><b>문체 규칙</b> <span class="muted tiny">(매 집필 헤더 주입)</span>${d.style_rules.map(r=>`<div class="gd-line">${esc(r)}</div>`).join("")}</div>`:''}
+    ${d.prev_chapter_excerpt?`<div class="gd-row"><b>직전 회차 발췌</b> <span class="muted tiny">(${d.prev_chapter_chars||0}자 전문 주입)</span><div class="gd-line">${esc(d.prev_chapter_excerpt)}</div></div>`:''}
+    <div class="gd-row muted tiny">끝맺음: ${esc(d.ending_hook_mode||'?')} · 출고규범 ${d.length_norm||'?'}자 · 이어쓰기 ${d.continuations||0}회 · 교정 ${(d.corrections&&d.corrections.length)?esc(d.corrections.join(", ")):'없음'}</div>
+    <div class="gd-row muted tiny">집필 화법: ${esc((d.persona||'').slice(0,120))}</div></div>`;
   return `<div class="gen-debug">${planBlk}${draftBlk}</div>`;
 }
 function renderGenInspect(){
@@ -595,9 +611,12 @@ function renderReader(){
   const readerBlock=(rf&&(rf.why||rf.got))?`<div class="reader-react ${rf.pay_next?'pos':'neg'}">
     <b>독자 반응</b> — ${rf.pay_next?'다음 화 결제 의향 있음':'이탈 위험'}${rf.got?` · 얻은 것: ${esc(rf.got)}`:''}
     ${rf.why?`<div class="muted small">${esc(rf.why)}</div>`:''}</div>`:"";
+  // C-5: FINALIZED 회차의 비구속 위반(세계규칙 등)도 작가에게 advisory 로 가시화 — 검출만 되고 사장되던 신호
+  const fv=(c.status==="FINALIZED"&&(c.final_violations||[]).length)?c.final_violations:[];
+  const violBlock=fv.length?`<div class="reader-react neg"><b>점검</b> — 비구속 위반 ${fv.length}건(차단 안 됨, 참고): ${esc([...new Set(fv.map(v=>v.kind))].join(", "))}</div>`:"";
   body.innerHTML = `<h4>${c.chapter}화 · ${esc(c.title)} ${badge}</h4>`+
     `<div class="reader-meta">${chars.toLocaleString()}자${c.wiki_pages_touched?` · 인물 노트 ${c.wiki_pages_touched}건 갱신`:""}</div>`+
-    rec+readerBlock+
+    rec+readerBlock+violBlock+
     (oc?`<div style="margin-bottom:1.4em">${oc}</div>`:"")+
     `<div>${esc(c.text).replace(/\n/g,"<br>")}</div>`;
   if(!$("#inspect-gen").classList.contains("hidden")) renderGenInspect();   // 활성 회차 바뀌면 '생성 정보' 패널 동기화
@@ -719,6 +738,7 @@ function friendly(ev){
     case "reformat": return ["문단 정리", ""];
     case "reformat_rejected": return ["문단 정리 보류", ""];
     case "story_truncated": case "bible_truncated": return ["오래된 맥락 정리", ev.dropped?`${ev.dropped}건 압축`:""];
+    case "story_underfilled": return ["누적 줄거리 적음", `${ev.used}/${ev.budget}자만 사용(경계 직후)`];
     case "violations": return ["구성 점검", kinds];
     case "non_convergence": return ["교정 한계", kinds];
     case "ssot_contradiction": return ["설정 충돌 검토", kinds];
