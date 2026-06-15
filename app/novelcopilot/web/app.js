@@ -131,6 +131,15 @@ async function sendWorldgen(){
   finally{ btn.disabled=false; ta.disabled=false; ta.focus(); log.scrollTop=log.scrollHeight; }
 }
 let RETRO=null;
+function backlogSeries(promises, upto){   // 회차별 미회수 약속 잔고(개설<=c, 미지불 or 지불>c)
+  const s=[]; for(let c=1;c<=upto;c++) s.push((promises||[]).filter(p=>p.o<=c&&(p.p==null||p.p>c)).length); return s;
+}
+function sparkline(series){
+  if(!series||series.length<2) return "";
+  const w=180,h=38,max=Math.max(1,...series);
+  const pts=series.map((v,i)=>`${(i/(series.length-1)*w).toFixed(1)},${(h-v/max*(h-4)-2).toFixed(1)}`).join(" ");
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
+}
 async function loadSpine(){
   const el=$("#tab-arc");
   try{
@@ -146,9 +155,13 @@ async function loadSpine(){
     const pl=sp.promise_ledger||{};
     const sinceTxt=(pl.since_payoff==null)?"아직 회수 없음":`마지막 회수 후 ${pl.since_payoff}화`;
     const opens=(sp.open_promises||[]).map(p=>`<li>${esc(p.text)} <span class="muted tiny">(${p.opened_chapter}화부터 · ${p.age}화째)</span></li>`).join("");
+    const upto=((STATE.project&&STATE.project.current_chapter)||0)+1;
+    const series=backlogSeries(sp.promises_all,upto);
+    const trend=(series.length>=2)?`<div class="ledger-trend"><span class="muted tiny">미회수 잔고 추이 (1~${upto}화)</span>${sparkline(series)}</div>`:"";
     const ledgerBlock=`<div class="bible-sec"><h4>약속 원장 <span class="muted small">— 독자에게 연 약속과 회수</span></h4>
       <div class="ledger-stats"><span class="pill">미회수 ${pl.open||0}</span><span class="pill">회수 ${pl.paid||0}</span>
       <span class="pill ${(pl.since_payoff!=null&&pl.since_payoff>=5)?'amber':''}">${sinceTxt}</span></div>
+      ${trend}
       ${opens?`<ul class="ledger-list small">${opens}</ul>`:'<p class="muted small">추적 중인 약속이 없습니다.</p>'}
       <p class="muted tiny">시스템은 잔고만 보여줍니다 — 회수 시점은 작가가 정합니다(슬로우번도 정당한 기법).</p></div>`;
     // G3 연재 회고 — on-demand
@@ -691,7 +704,7 @@ const EV_BAD = new Set(["escalation","non_convergence","failed","parse_failure",
 const EV_WARN = new Set(["story_truncated","bible_truncated","violations","tics_residual","reformat_rejected",
   "signal","episode_stuck","plant_backlog","uncast_character","ssot_contradiction","under_norm","spine_incomplete"]);
 const EV_OK = new Set(["done","new_entity","relation","registered","debut","bible_done","spine_done","world_done",
-  "payoff_detected"]);
+  "payoff_detected","reconciled","retrospective_available"]);
 // (node,event) → 사람이 읽는 한 줄. 미등재는 node 한글명만(코드/영어 노출 0). 두 번째 인자=상세(있을 때만).
 function friendly(ev){
   const node = nodeLabel(ev.node), e = ev.event;
@@ -728,6 +741,8 @@ function friendly(ev){
     case "new_commits": return ["새 고유명사", `${ev.count}개${ev.names&&ev.names.length?` · ${ev.names.slice(0,4).join(", ")}`:""}`];
     case "promise_state": return ["약속 원장", `미회수 ${ev.open}${ev.since_payoff!=null?` · 회수 후 ${ev.since_payoff}화`:""}`];
     case "payoff_detected": return ["약속 회수", `${ev.count}개`];
+    case "reconciled": return ["약속 정산", `지불 ${ev.paid}개 · 새 약속 ${ev.opened}개`];
+    case "retrospective_available": return ["아크 완결", `'${ev.arc||""}' — 이야기 구조 탭에서 회고를 받아보세요`];
     case "window": return ["연재 페이싱", `훅 단조 ${ev.hook_monotony} · 새 명사 ${ev.new_names}개`];
     case "prediction": return ["독자 반응", `${ev.pay_next?"다음 화 결제 의향":"이탈 위험"}${ev.got?` · 얻은 것: ${ev.got}`:""}`];
     case "spine_incomplete": return ["설계 보완 필요", ""];
@@ -770,7 +785,10 @@ async function onComplete(data){
   const readerBlock=(rf&&(rf.why||rf.got))?`<div class="reader-react ${rf.pay_next?'pos':'neg'}">
     <b>독자 반응</b> — ${rf.pay_next?'다음 화 결제 의향 있음':'이탈 위험'}${rf.got?` · 얻은 것: ${esc(rf.got)}`:''}
     ${rf.why?`<div class="muted small">${esc(rf.why)}</div>`:''}</div>`:"";
-  $("#gen-result").innerHTML = `${r.chapter}화 ${badge} · AI 사용량 +${data.usage_delta.chat_calls}회${fail}${drift}${readerBlock}`;
+  // G3: 아크 완결 시 회고 권유(nudge — 작가가 받을지 결정)
+  const retroNudge=(data.events||[]).some(e=>e.event==="retrospective_available")
+    ? `<div class="retro-nudge">📋 아크가 끝났어요 — <a onclick="switchTab('arc');setTimeout(loadRetrospective,300)">이야기 구조 탭에서 회고 받기</a></div>`:"";
+  $("#gen-result").innerHTML = `${r.chapter}화 ${badge} · AI 사용량 +${data.usage_delta.chat_calls}회${fail}${drift}${retroNudge}${readerBlock}`;
   // 상태 갱신
   STATE.project = await api.get(`/api/projects/${STATE.project.id}`);
   STATE.activeChapter = r.chapter;

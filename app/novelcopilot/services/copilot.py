@@ -738,16 +738,19 @@ class CopilotService:
                                 provenance="ai_worldgen", status="ai_unreviewed"))
                     state.current_chapter = next_ch
                     self._esc.pop((pid, next_ch), None)       # 성공 → 연속 escalation 카운터 리셋
-                    # G1-P2: 본문 상환 검출(측정 — 생성 주입 아님). 약속이 이번 화에서 실제 지불됐는지 → 원장 갱신(since_payoff 실데이터화)
-                    if spine and state.promise_ledger.open_promises():
-                        from ..engine.ledger_ops import detect_payoffs, mark_paid
+                    # G1-P2+P3: 본문 한 번 읽고 (지불된 기존 약속 + 새로 연 약속) 정산(측정 — 생성 주입 아님, 추가 콜 0).
+                    # 원장을 설계 라벨이 아니라 '본문이 실제로 한 약속'으로 채운다 → since_payoff·잔고가 실데이터.
+                    if spine:
+                        from ..engine.ledger_ops import reconcile_ledger_from_prose, mark_paid, add_opened_promises
                         _tp = sess.provider.usage.chat_tokens
-                        paid_ids = detect_payoffs(sess.provider, record.text,
-                                                  state.promise_ledger.open_promises(), next_ch)
-                        record.usage_by_stage["payoff_detect"] = sess.provider.usage.chat_tokens - _tp
-                        if mark_paid(state.promise_ledger, paid_ids, next_ch):
-                            sess.bus.emit("ledger", "payoff_detected", chapter=next_ch,
-                                          count=len(paid_ids), ids=paid_ids[:5])
+                        recon = reconcile_ledger_from_prose(sess.provider, record.text,
+                                                            state.promise_ledger.open_promises(), next_ch)
+                        record.usage_by_stage["ledger_reconcile"] = sess.provider.usage.chat_tokens - _tp
+                        n_paid = mark_paid(state.promise_ledger, recon["paid"], next_ch)
+                        n_open = add_opened_promises(state.promise_ledger, recon["opened"], next_ch)
+                        if n_paid or n_open:
+                            sess.bus.emit("ledger", "reconciled", chapter=next_ch,
+                                          paid=n_paid, opened=n_open)
                     # G2: 블라인드 장르 독자 행동 예측(advisory — 비차단·비강제, 작가 가시화). 비트/설계 미공개로 본문만 읽음.
                     if getattr(self.settings, "reader_desk", True):
                         from ..engine.reader_desk import reader_prediction
@@ -781,6 +784,11 @@ class CopilotService:
                                 ep, [c.text for c in ep_chs], sess.bundle.ontology)
                             for dsig in record.drift_signals:
                                 sess.bus.emit("drift", "signal", chapter=next_ch, detail=dsig)
+                            # G3: 아크 완결 → 회고 권유(작가 가시화 nudge, 강제 아님). 회고는 작가가 받고 개정 승인.
+                            arc_obj = spine.arc(ep.arc_id)
+                            if arc_obj and arc_obj.episodes and all(e.done for e in arc_obj.episodes):
+                                sess.bus.emit("narrative", "retrospective_available",
+                                              chapter=next_ch, arc=arc_obj.title)
                 elif spine and spine_snap is not None:
                     # ESCALATED: 커서/spine 변이 롤백(재시도 결정성·orphan 에피소드/조기 arc.done 영속 방지)
                     state.narrative_progress = prog_snap
@@ -880,8 +888,10 @@ class CopilotService:
             "chapters_in_episode": prog.chapters_in_episode,
             "promise_ledger": ledger_telemetry(state.promise_ledger, cur1),   # G1: 재미 회계 가시화(요약)
             "open_promises": [{"text": p.text, "opened_chapter": p.opened_chapter,
-                               "age": cur1 - p.opened_chapter}
+                               "age": cur1 - p.opened_chapter, "kind": p.kind}
                               for p in _outstanding(state.promise_ledger, cur1)][:12],
+            "promises_all": [{"o": p.opened_chapter, "p": p.paid_chapter}
+                             for p in state.promise_ledger.promises],   # 잔고 추세 차트용(개설/지불 회차)
             "genre_contract": (state.world.genre_contract.model_dump()
                                if getattr(state.world, "genre_contract", None) else None),   # G5 가시화
             "arcs": [{"arc_id": a.arc_id, "title": a.title, "goal": a.goal, "done": a.done,

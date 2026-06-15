@@ -418,3 +418,10 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .gd-pre{white-space:pre-wrap;font-size:.74rem;line-height:1.5;margin:.3em 0 0;padding:.5em .6em;
   background:var(--surface);border:1px solid var(--line);border-radius:7px;max-height:13em;overflow:auto;
   color:var(--ink-soft);font-family:var(--font-sans)}
+
+/* 후속: 아크 완결 nudge · 잔고 추세 스파크라인 */
+.retro-nudge{margin:.6em 0;padding:.5em .75em;border-radius:var(--r-ctrl);background:var(--accent-soft);
+  font-size:.84rem;color:var(--ink-soft)}
+.retro-nudge a{color:var(--accent);font-weight:600;cursor:pointer;text-decoration:underline}
+.ledger-trend{display:flex;align-items:center;gap:.6em;margin:.5em 0 .2em}
+.spark{width:180px;height:34px;flex:none}
