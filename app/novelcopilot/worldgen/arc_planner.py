@@ -15,6 +15,23 @@ from ..domain.narrative import NarrativeSpine, Arc, Episode, EndingSpec, Narrati
 from ..llm.base import LLMProvider
 
 
+def _contract_block(world: WorldConfig) -> str:
+    """G5: 장르 계약을 '서술 정보'로 렌더(강제 아님) — 설계가 같은 쾌감 엔진·전제 자산을 보게(드리프트·전제소모 차단)."""
+    gc = getattr(world, "genre_contract", None)
+    if not gc:
+        return ""
+    parts = []
+    if gc.pleasure_engine:
+        parts.append(f"독자 쾌감: {gc.pleasure_engine}")
+    if gc.reader_expectations:
+        parts.append("독자 기대: " + ", ".join(gc.reader_expectations[:5]))
+    if gc.vocabulary_tone:
+        parts.append(f"어휘·톤: {gc.vocabulary_tone}")
+    if gc.premise_asset:
+        parts.append(f"핵심 동력 전제(장기 자산): {gc.premise_asset}")
+    return ("[이 작품의 장르 정체성 — 참고]\n" + "\n".join(parts) + "\n") if parts else ""
+
+
 class ArcPlanner:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
@@ -70,7 +87,7 @@ class ArcPlanner:
             if cw: bp.append("인물 동기: " + cw)
             if bp: brief_block = "[작가가 대화로 정한 핵심 설계]\n" + "\n".join(bp) + "\n"
         usr = (f"[작품] {world.title} / {world.genre} / {world.tone}\n전제: {world.premise}\n시놉시스: {world.synopsis}\n"
-               f"[세계 규칙]\n{rules}\n{brief_block}"
+               f"[세계 규칙]\n{rules}\n{brief_block}{_contract_block(world)}"
                f"[인물]{json.dumps(chars, ensure_ascii=False)}\n[목표 회차수]{target_chapters}\n"
                f"아크 {n_arcs}개(각 goal/central_conflict/turning_point). **첫 아크만** 에피소드 3~4개로 분해하고 "
                f"나머지 아크는 episodes 를 빈 배열로 둬라(진행하며 생성). 각 에피소드: title/premise/climax/"
@@ -290,7 +307,7 @@ class ArcPlanner:
         # G6: 인물을 id 문자열이 아니라 '이름·설정·현재 상태·관계'로 보게(컨텍스트 기아 해소 — 욕망 있는 인물에서 사건이 나오게)
         cast_block = (f"[등장 인물 — 이름·설정(배경·성격·욕망·관계)·현재 상태]\n{cast_context}\n[유효 인물 id]{char_ids}\n"
                       if cast_context else f"[인물 id]{char_ids}\n")
-        usr = (spine_block +
+        usr = (spine_block + _contract_block(world) +
                f"[아크 목표]{arc.goal}\n[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
                f"[필수 사건]{episode.required_events}\n[등장해야 할 인물 id]{episode.required_cast}\n"
                f"{cast_block}[최근 줄거리]\n" + "\n".join(recent) +

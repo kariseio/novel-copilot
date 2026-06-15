@@ -116,6 +116,16 @@ class Beat(BaseModel):
     place: str = ""                           # 주요 장소(장소 체류 단조 감지 재료)
 
 
+class GenreContract(BaseModel):
+    """장르 계약 (G5) — '이 장르/작품의 정체성'을 모든 레이어가 공유하는 서술 컨텍스트(강제 아님, 정보 제공).
+    로판이 SF 용어로 표류하거나 무협이 '십 년 잠입' 전제를 1화에 태우던 결함의 소스 차단 —
+    설계·집필·독자평가가 같은 '쾌감 엔진·전제 자산'을 보게 한다. narrative(서사 의도), 캐논 아님."""
+    pleasure_engine: str = ""          # 이 장르 독자가 결제하는 핵심 쾌감(예: 회귀헌터=정보우위→공개 격상)
+    reader_expectations: list[str] = Field(default_factory=list)   # 독자가 기대하는 것 톱 N
+    vocabulary_tone: str = ""          # 장르 어휘·톤 가이드(로판≠SF 용어)
+    premise_asset: str = ""            # 이 작품의 핵심 동력 전제(장기 자산 — 어떤 역할인지 서술)
+
+
 class WikiSeed(BaseModel):
     page_id: str
     page_type: Literal["character", "faction", "place", "plot_thread", "timeline"] = "plot_thread"
@@ -166,6 +176,7 @@ class WorldConfig(BaseModel):
     beats: list[Beat] = Field(default_factory=list)
     wiki_seeds: list[WikiSeed] = Field(default_factory=list)
     spine: Optional[NarrativeSpine] = None    # 엔딩-주도 아크/에피소드 구조(None=평면 beats 모드)
+    genre_contract: Optional[GenreContract] = None   # G5: 장르 정체성 공유 컨텍스트(None=미생성, 하위호환)
     allow_state_reversal: bool = False        # True=회귀/부활/리젠 허용(비가역 상태 이탈을 모순으로 막지 않음)
     plant_reminder: Literal["off", "gentle", "active"] = "off"   # 미회수 복선 리마인더 강도(작가 제어, ③).
     # 기본 off=시스템이 떡밥을 생성에 주입 안 함(비강제 — 떡밥 가시화는 G1 원장 텔레메트리가 담당, 작가가 빨간펜으로 조향).

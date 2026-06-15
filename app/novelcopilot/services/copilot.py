@@ -740,7 +740,9 @@ class CopilotService:
                     if getattr(self.settings, "reader_desk", True):
                         from ..engine.reader_desk import reader_prediction
                         _tr = sess.provider.usage.chat_tokens
-                        pred = reader_prediction(sess.provider, record.text, story_so_far, state.world.genre)
+                        _gc = getattr(state.world, "genre_contract", None)
+                        pred = reader_prediction(sess.provider, record.text, story_so_far, state.world.genre,
+                                                 expectations=(_gc.reader_expectations if _gc else None))
                         record.usage_by_stage["reader_desk"] = sess.provider.usage.chat_tokens - _tr
                         if pred:
                             record.reader_feedback = pred           # 작가가 나중에 검토(원장처럼 가시화)

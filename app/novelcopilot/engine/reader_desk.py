@@ -9,14 +9,18 @@
 from __future__ import annotations
 
 
-def reader_prediction(provider, chapter_text: str, story_so_far: str, genre: str) -> dict | None:
-    """이 회차를 막 읽은 장르 독자의 '행동 예측'. 점수 아님 — got/pay_next/why. 실패 시 None(비차단)."""
+def reader_prediction(provider, chapter_text: str, story_so_far: str, genre: str,
+                      expectations: list | None = None) -> dict | None:
+    """이 회차를 막 읽은 장르 독자의 '행동 예측'. 점수 아님 — got/pay_next/why. 실패 시 None(비차단).
+    expectations: 장르 계약의 독자 기대(G5) — 독자가 무엇을 기대하는 장르인지 알고 판단(advisory, 강제 아님)."""
     if not (chapter_text or "").strip():
         return None
+    exp = ("\n이 장르 독자가 보통 기대하는 것: " + ", ".join(str(e) for e in expectations[:5])
+           if expectations else "")
     try:
         r = provider.chat_json(
             [{"role": "system", "content":
-              f"너는 {genre or '웹소설'} 유료 연재를 매일 보는 독자다. 방금 이 회차를 읽었다. "
+              f"너는 {genre or '웹소설'} 유료 연재를 매일 보는 독자다. 방금 이 회차를 읽었다.{exp} "
               "점수를 매기지 말고, 솔직한 '독자 반응'만 답하라(편집자 시점 금지, 독자 시점). JSON: "
               '{"got":"이 회차에서 주인공이 실제로 얻은 것 한 줄(없으면 \'없음\')",'
               '"pay_next":true,"why":"다음 화를 결제할지/안 할지와 그 이유 한 줄"}'},

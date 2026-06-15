@@ -43,6 +43,12 @@ _SCHEMA_HINT = """{
     {"chapter":1,"title":"제목","summary":"요약","key_events":["사건1","사건2"],"entities":["hero"]}
   ],
   "wiki_seeds": [],                     // 선택: 회수할 복선 plot_thread(payoff_deadline)
+  "genre_contract": {                   // 이 장르/작품의 '정체성'(설계·집필·독자평가가 공유할 서술 컨텍스트)
+    "pleasure_engine": "이 장르 독자가 결제하는 핵심 쾌감(예: 회귀=정보우위로 미래를 바꾸는 통쾌함 / 로판=관계 역학·신분 역전)",
+    "reader_expectations": ["독자가 기대하는 것 3~5개"],
+    "vocabulary_tone": "이 장르다운 어휘·톤(로판이 SF 용어로 새지 않게)",
+    "premise_asset": "이 작품의 핵심 동력 전제와 그 역할(예: '십 년 잠입'은 단번에 소모할 게 아니라 길게 가는 장기 자산)"
+  },
   "style": {                            // 선택: 장르에 맞는 집필 스타일(미제공 시 웹소설 기본)
     "system_persona": "너는 인기 한국 <장르> 웹소설 작가다. ...(이 작품 장르의 정체성으로)",
     "ending_hook": "cliffhanger|soft|none — 잔잔한 장르는 soft 고려",
@@ -76,6 +82,8 @@ class WorldGenerator:
             "7) wiki_seeds(선택): 회수할 복선 plot_thread.\n"
             "8) style(선택): 이 장르에 맞는 집필 persona·끝맺음 정책(ending_hook)·문체 규칙. "
             "잔잔한 장르(로맨스/문예)는 soft, 연재 긴장형은 cliffhanger.\n"
+            "9) genre_contract: 이 장르/작품의 '정체성'(쾌감 엔진·독자 기대·어휘 톤·핵심 동력 전제). "
+            "설계·집필·독자평가가 같은 정체성을 공유하게 하는 서술 정보다(강제 규칙 아님).\n"
             "회귀·부활·리젠·타임루프 세계면 allow_state_reversal:true. 설정은 시드에 맞게 신선하게. JSON 객체만 출력."
         )
 
