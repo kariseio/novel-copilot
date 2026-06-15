@@ -859,13 +859,19 @@ class CopilotService:
         if not spine:
             return {"has_spine": False}
         prog = state.narrative_progress
-        from ..engine.ledger_ops import ledger_telemetry
+        from ..engine.ledger_ops import ledger_telemetry, outstanding as _outstanding
+        cur1 = state.current_chapter + 1
         return {
             "has_spine": True, "completed": prog.completed,
             "ending": spine.ending.model_dump() if spine.ending else None,
             "current_arc_id": prog.current_arc_id, "current_episode_id": prog.current_episode_id,
             "chapters_in_episode": prog.chapters_in_episode,
-            "promise_ledger": ledger_telemetry(state.promise_ledger, state.current_chapter + 1),   # G1: 재미 회계 가시화
+            "promise_ledger": ledger_telemetry(state.promise_ledger, cur1),   # G1: 재미 회계 가시화(요약)
+            "open_promises": [{"text": p.text, "opened_chapter": p.opened_chapter,
+                               "age": cur1 - p.opened_chapter}
+                              for p in _outstanding(state.promise_ledger, cur1)][:12],
+            "genre_contract": (state.world.genre_contract.model_dump()
+                               if getattr(state.world, "genre_contract", None) else None),   # G5 가시화
             "arcs": [{"arc_id": a.arc_id, "title": a.title, "goal": a.goal, "done": a.done,
                       "episodes": [{"episode_id": e.episode_id, "title": e.title, "climax": e.climax,
                                     "target_chapters": e.target_chapters, "done": e.done,

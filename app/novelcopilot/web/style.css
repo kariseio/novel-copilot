@@ -372,3 +372,27 @@ label input,label textarea{color:var(--ink);font-weight:400}
   .viewer-hint{display:none}}
 
 @media(max-width:1100px){.proj-grid{grid-template-columns:1fr}.home-grid{grid-template-columns:1fr}}
+
+/* ===== 연재 관리 대시보드(약속 원장·회고·독자 반응) — G1/G2/G3/G5 작가 가시화 ===== */
+.tiny{font-size:.72rem}
+.pill.amber{color:var(--warn);background:var(--warn-soft);border-color:transparent}
+.ledger-stats{display:flex;gap:.45em;flex-wrap:wrap;margin-bottom:.6em}
+.ledger-list{margin:.3em 0 .5em;padding-left:1.1em;color:var(--ink-soft);line-height:1.7}
+.ledger-list li{margin-bottom:.2em}
+.reader-react{margin:.7em 0;padding:.6em .8em;border-radius:var(--r-ctrl);border:1px solid var(--line);
+  background:var(--surface-2);font-size:.86rem;line-height:1.6}
+.reader-react.pos{background:var(--ok-soft);border-color:transparent}
+.reader-react.pos b{color:var(--ok)}
+.reader-react.neg{background:var(--warn-soft);border-color:transparent}
+.reader-react.neg b{color:var(--warn)}
+.retro-pacing{margin:.5em 0 .4em}
+.retro-diag{font-size:.88rem;line-height:1.7;color:var(--ink-soft);padding:.6em .8em;
+  background:var(--accent-soft);border-radius:var(--r-ctrl);margin-bottom:.7em}
+.retro-revs{display:flex;flex-direction:column;gap:.5em}
+.retro-rev{display:flex;gap:.55em;align-items:flex-start;padding:.6em .7em;border:1px solid var(--line);
+  border-radius:var(--r-ctrl);background:var(--surface);cursor:pointer;transition:border-color .15s}
+.retro-rev:hover{border-color:var(--line-strong)}
+.retro-rev input{margin-top:.25em;flex:none}
+.retro-rev b{font-size:.85rem;color:var(--accent)}
+.retro-rev .small{margin:.2em 0;line-height:1.55}
+.ok-msg{color:var(--ok);font-size:.88rem;padding:.5em 0}

@@ -130,11 +130,31 @@ async function sendWorldgen(){
   }catch(e){ ai.innerHTML=`❌ ${esc(e.message)}`; }
   finally{ btn.disabled=false; ta.disabled=false; ta.focus(); log.scrollTop=log.scrollHeight; }
 }
+let RETRO=null;
 async function loadSpine(){
   const el=$("#tab-arc");
   try{
     const sp=await api.get(`/api/projects/${STATE.project.id}/spine`);
     if(!sp.has_spine){ el.innerHTML='<p class="muted">아직 이야기 구조가 없습니다. 새 작품은 자동으로 설계됩니다.</p>'; return; }
+    // G5 장르 정체성 — 작품이 지키는 재미의 축(설계가 공유)
+    const gc=sp.genre_contract;
+    const gcBlock = (gc&&(gc.pleasure_engine||gc.premise_asset))?`<div class="bible-sec"><h4>장르 정체성 <span class="muted small">— 이 작품이 지키는 재미의 축</span></h4>
+      ${gc.pleasure_engine?`<p class="small"><b>독자 쾌감:</b> ${esc(gc.pleasure_engine)}</p>`:""}
+      ${gc.reader_expectations&&gc.reader_expectations.length?`<p class="small"><b>독자 기대:</b> ${gc.reader_expectations.map(esc).join(" · ")}</p>`:""}
+      ${gc.premise_asset?`<p class="small"><b>핵심 전제:</b> ${esc(gc.premise_asset)}</p>`:""}</div>`:"";
+    // G1 약속 원장 — 독자에게 연 약속과 회수(잔고만 보여줌, 회수는 작가)
+    const pl=sp.promise_ledger||{};
+    const sinceTxt=(pl.since_payoff==null)?"아직 회수 없음":`마지막 회수 후 ${pl.since_payoff}화`;
+    const opens=(sp.open_promises||[]).map(p=>`<li>${esc(p.text)} <span class="muted tiny">(${p.opened_chapter}화부터 · ${p.age}화째)</span></li>`).join("");
+    const ledgerBlock=`<div class="bible-sec"><h4>약속 원장 <span class="muted small">— 독자에게 연 약속과 회수</span></h4>
+      <div class="ledger-stats"><span class="pill">미회수 ${pl.open||0}</span><span class="pill">회수 ${pl.paid||0}</span>
+      <span class="pill ${(pl.since_payoff!=null&&pl.since_payoff>=5)?'amber':''}">${sinceTxt}</span></div>
+      ${opens?`<ul class="ledger-list small">${opens}</ul>`:'<p class="muted small">추적 중인 약속이 없습니다.</p>'}
+      <p class="muted tiny">시스템은 잔고만 보여줍니다 — 회수 시점은 작가가 정합니다(슬로우번도 정당한 기법).</p></div>`;
+    // G3 연재 회고 — on-demand
+    const retroBlock=`<div class="bible-sec"><h4>연재 회고 <span class="muted small">— 페이싱·방향 점검과 개정 제안</span></h4>
+      <button id="retro-btn" onclick="loadRetrospective()">회고 받기</button>
+      <div id="retro-body"></div></div>`;
     const ending=sp.ending?`<div class="bible-sec"><h4>결말 — 이 방향으로 수렴합니다</h4>
       <p><b>중심 질문:</b> ${esc(sp.ending.central_question)}<br><b>결말:</b> ${esc(sp.ending.ending)}
       ${sp.ending.thematic_payoff?`<br><b>주제:</b> ${esc(sp.ending.thematic_payoff)}`:""}</p></div>`:"";
@@ -150,8 +170,36 @@ async function loadSpine(){
       return `<div class="arc ${a.done?'done':''}"><div class="arc-h">${esc(a.title||a.arc_id)}
         <span class="muted small">— ${esc(a.goal)}</span></div>${eps}</div>`;
     }).join("");
-    el.innerHTML=ending+`<div class="bible-sec"><h4>단락과 에피소드 <span class="muted small">(현재 단락 ${sp.chapters_in_episode}화째)</span></h4>${arcs}</div>`;
+    el.innerHTML=gcBlock+ledgerBlock+retroBlock+ending+`<div class="bible-sec"><h4>단락과 에피소드 <span class="muted small">(현재 단락 ${sp.chapters_in_episode}화째)</span></h4>${arcs}</div>`;
   }catch(e){ el.innerHTML=`<span class="muted">로드 실패: ${esc(e.message)}</span>`; }
+}
+async function loadRetrospective(){
+  const body=$("#retro-body"), btn=$("#retro-btn");
+  btn.disabled=true; body.innerHTML='<span class="spin"></span> 전개를 돌아보는 중… <span class="muted small">잠시 걸려요</span>';
+  try{
+    const r=await api.get(`/api/projects/${STATE.project.id}/retrospective`); RETRO=r;
+    const pw=r.pacing||{};
+    const pacing=`<div class="retro-pacing muted small">최근 ${pw.window||0}화 · 훅 단조 ${pw.hook_monotony??'–'} · 장소 ${pw.places_distinct??'–'}종 · 새 고유명사 ${pw.new_names??'–'}개${pw.since_payoff!=null?` · 회수 후 ${pw.since_payoff}화`:''}</div>`;
+    if(!r.diagnosis&&(!r.revisions||!r.revisions.length)){ body.innerHTML=pacing+'<p class="muted small">지금은 특별히 손볼 곳이 없다는 진단입니다.</p>'; btn.disabled=false; return; }
+    const revs=(r.revisions||[]).map((rv,i)=>`<label class="retro-rev"><input type="checkbox" data-i="${i}" checked />
+      <span><b>${esc(rv.target)}</b> · ${esc(rv.field)}<div class="small">${esc(rv.new_value)}</div>
+      <div class="muted tiny">이유: ${esc(rv.reason||'')}</div></span></label>`).join("");
+    body.innerHTML=pacing+`<div class="retro-diag">${esc(r.diagnosis||'')}</div>
+      ${revs?`<div class="retro-revs"><div class="muted small">아래 개정안은 <b>아직 안 쓴 단락·결말</b>에만 적용됩니다(쓴 회차는 보호). 원하는 것만 고르세요.</div>${revs}
+      <button class="primary" onclick="applyRevisions()">선택한 개정 적용</button></div>`:''}`;
+  }catch(e){ body.innerHTML=`<span class="muted">실패: ${esc(e.message)}</span>`; }
+  finally{ btn.disabled=false; }
+}
+async function applyRevisions(){
+  if(!RETRO) return;
+  const picks=[...document.querySelectorAll('.retro-rev input:checked')].map(c=>RETRO.revisions[+c.dataset.i]).filter(Boolean);
+  if(!picks.length){ alert("적용할 개정을 선택하세요."); return; }
+  try{
+    const r=await api.post(`/api/projects/${STATE.project.id}/spine/revise`,{revisions:picks});
+    $("#retro-body").innerHTML=`<p class="ok-msg">개정 ${r.applied.length}건 반영${r.rejected.length?` · ${r.rejected.length}건 제외`:''} — 다음 단락 설계부터 적용됩니다.</p>`;
+    STATE.project=await api.get(`/api/projects/${STATE.project.id}`);
+    setTimeout(loadSpine,1400);
+  }catch(e){ alert("적용 실패: "+e.message); }
 }
 function switchInspect(t){
   document.querySelectorAll('.col-inspect .tab').forEach(b=>b.classList.toggle('active',b.dataset.itab===t));
@@ -498,9 +546,13 @@ function renderReader(){
         + `<ul class="rec-fix">${(h.fix||[]).map(f=>`<li>${esc(f)}</li>`).join("")}</ul></div>`).join("")
       + `<div class="rec-foot"><button onclick="generateNext()">이대로 다시 생성</button> <span class="muted small">설정을 고친 뒤 다시 생성하면 반영됩니다</span></div></div>`
     : "";
+  const rf=c.reader_feedback;   // G2 독자 반응(advisory)
+  const readerBlock=(rf&&(rf.why||rf.got))?`<div class="reader-react ${rf.pay_next?'pos':'neg'}">
+    <b>독자 반응</b> — ${rf.pay_next?'다음 화 결제 의향 있음':'이탈 위험'}${rf.got?` · 얻은 것: ${esc(rf.got)}`:''}
+    ${rf.why?`<div class="muted small">${esc(rf.why)}</div>`:''}</div>`:"";
   body.innerHTML = `<h4>${c.chapter}화 · ${esc(c.title)} ${badge}</h4>`+
     `<div class="reader-meta">${chars.toLocaleString()}자${c.wiki_pages_touched?` · 인물 노트 ${c.wiki_pages_touched}건 갱신`:""}</div>`+
-    rec+
+    rec+readerBlock+
     (oc?`<div style="margin-bottom:1.4em">${oc}</div>`:"")+
     `<div>${esc(c.text).replace(/\n/g,"<br>")}</div>`;
 }
@@ -604,8 +656,9 @@ function generateNext(){
 // 상태색: 실패/검토=red, 경고=amber, 완료성=green. (이벤트 코드 자체는 화면에 안 나오고 색 분류에만 사용)
 const EV_BAD = new Set(["escalation","non_convergence","failed","parse_failure","wiki_failure","tense_fix_failed"]);
 const EV_WARN = new Set(["story_truncated","bible_truncated","violations","tics_residual","reformat_rejected",
-  "signal","episode_stuck","plant_backlog","uncast_character","ssot_contradiction"]);
-const EV_OK = new Set(["done","new_entity","relation","registered","debut","bible_done","spine_done","world_done"]);
+  "signal","episode_stuck","plant_backlog","uncast_character","ssot_contradiction","under_norm","spine_incomplete"]);
+const EV_OK = new Set(["done","new_entity","relation","registered","debut","bible_done","spine_done","world_done",
+  "payoff_detected"]);
 // (node,event) → 사람이 읽는 한 줄. 미등재는 node 한글명만(코드/영어 노출 0). 두 번째 인자=상세(있을 때만).
 function friendly(ev){
   const node = nodeLabel(ev.node), e = ev.event;
@@ -637,6 +690,14 @@ function friendly(ev){
     case "escalation": return ["검토 필요", kinds];
     case "wiki_failure": return ["노트 정리 일부 실패", ""];
     case "signal": case "episode_stuck": case "plant_backlog": return ["전개 점검", ""];
+    // 작가 가시화 신호(측정·advisory — 강제 아님)
+    case "under_norm": return ["분량 미달", `${ev.chars}자 (권장 ${ev.norm})`];
+    case "new_commits": return ["새 고유명사", `${ev.count}개${ev.names&&ev.names.length?` · ${ev.names.slice(0,4).join(", ")}`:""}`];
+    case "promise_state": return ["약속 원장", `미회수 ${ev.open}${ev.since_payoff!=null?` · 회수 후 ${ev.since_payoff}화`:""}`];
+    case "payoff_detected": return ["약속 회수", `${ev.count}개`];
+    case "window": return ["연재 페이싱", `훅 단조 ${ev.hook_monotony} · 새 명사 ${ev.new_names}개`];
+    case "prediction": return ["독자 반응", `${ev.pay_next?"다음 화 결제 의향":"이탈 위험"}${ev.got?` · 얻은 것: ${ev.got}`:""}`];
+    case "spine_incomplete": return ["설계 보완 필요", ""];
     case "parse_failure": case "dup_skip": case "prop_skip": return [node, ""];
     // worldgen 단계(작품 생성용 — 회차 로그에는 안 옴, 안전상 포함)
     case "world_done": case "spine_done": case "bible_done": case "bible": return [node, ""];
@@ -671,7 +732,12 @@ async function onComplete(data){
   const badge = r.status==="FINALIZED"?'<span class="badge fin">완성</span>':'<span class="badge esc">검토 필요</span>';
   const fail = data.failures&&data.failures.length?` · 주의 ${data.failures.length}건`:"";
   const drift = r.drift_signals&&r.drift_signals.length?` · 전개 점검 ${r.drift_signals.length}건`:"";
-  $("#gen-result").innerHTML = `${r.chapter}화 ${badge} · AI 사용량 +${data.usage_delta.chat_calls}회${fail}${drift}`;
+  // G2 독자 반응(advisory — 작가 가시화)
+  const rf=r.reader_feedback;
+  const readerBlock=(rf&&(rf.why||rf.got))?`<div class="reader-react ${rf.pay_next?'pos':'neg'}">
+    <b>독자 반응</b> — ${rf.pay_next?'다음 화 결제 의향 있음':'이탈 위험'}${rf.got?` · 얻은 것: ${esc(rf.got)}`:''}
+    ${rf.why?`<div class="muted small">${esc(rf.why)}</div>`:''}</div>`:"";
+  $("#gen-result").innerHTML = `${r.chapter}화 ${badge} · AI 사용량 +${data.usage_delta.chat_calls}회${fail}${drift}${readerBlock}`;
   // 상태 갱신
   STATE.project = await api.get(`/api/projects/${STATE.project.id}`);
   STATE.activeChapter = r.chapter;
