@@ -1,6 +1,8 @@
 "use strict";
 // ===== AI 웹소설 코파일럿 프론트엔드 (vanilla, 빌드 불필요) =====
 const $ = (s) => document.querySelector(s);
+// 인라인 role=button 링크의 키보드 조작(Enter/Space) 속성 — 템플릿에 ${ACT} 로 끼워 넣음
+const ACT = 'role="button" tabindex="0" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.click()}"';
 
 // 진행 로그 — 내부 단계명(코드) → 화면 표현(사용자). 용어 사전: web/DESIGN.md §5
 // 원칙: 화이트리스트. 매핑 안 된 코드는 일반 한글로 폴백 — 영어/내부용어(harness·SSOT·kind코드)가 절대 새지 않게.
@@ -59,12 +61,15 @@ async function router(){
         try{ await openProject(pid); }
         catch(e){ alert("작품을 열 수 없습니다: " + (e.message||"")); location.replace("#/"); return; }
       }
-      const ch = (parts[2] === "ch" && parts[3]) ? parseInt(parts[3], 10) : null;
       _onlyView("view-project");
-      if(ch && (STATE.project.chapters||[]).some(c=>c.chapter===ch)){
-        STATE.activeChapter = ch; STATE.chapterPage = chPageOf(ch);
-        switchTab("reader"); renderChapters(); renderReader();
+      if(parts[2] === "ch" && parts[3]){   // #/p/{id}/ch/{n} → 집필 작업대 + 해당 회차 활성
+        const ch = parseInt(parts[3], 10);
+        if((STATE.project.chapters||[]).some(c=>c.chapter===ch)){ STATE.activeChapter = ch; STATE.chapterPage = chPageOf(ch); }
+        showSection("write");
+        return;
       }
+      if(PROJ_SECTIONS.includes(parts[2])) showSection(parts[2]);
+      else location.replace(`#/p/${pid}/overview`);   // 섹션 미지정/미지 경로 → 개요로
       return;
     }
     if(parts[0] === "read" && parts[1]){
@@ -83,14 +88,81 @@ window.addEventListener("hashchange", ()=>{ if(_suppress){ _suppress = false; re
 
 // ---------- 네비게이션(해시로 위임) ----------
 function goHome(){ go("#/"); }
-function switchTab(t){
-  document.querySelectorAll('.col-reader .tab').forEach(b=>b.classList.toggle('active',b.dataset.tab===t));
-  ["reader","bible","graph","arc","worldgen"].forEach(x=>$("#tab-"+x).classList.toggle("hidden",x!==t));
-  if(t==="graph") loadGraph();
-  else if(CY){ try{CY.destroy();}catch(e){} CY=null; SELECTED=[]; SELECTED_EDGE=null; }  // 떠날 때 정리(누수 방지)
-  if(t==="arc") loadSpine();
-  if(t==="bible") loadBible();
-  if(t==="worldgen") loadWorldgen();
+// ---------- 작품 내부 섹션 네비게이션(좌측 사이드바 + 해시 라우트) ----------
+const PROJ_SECTIONS = ["overview","write","bible","cast","world","serial"];
+function goSection(sec){ if(STATE.project) go(`#/p/${STATE.project.id}/${sec}`); }   // 라우트로 위임 → 뒤로가기·딥링크·새로고침 복원
+function showSection(sec){
+  STATE.section = sec;
+  document.querySelectorAll('.side-link').forEach(a=>{
+    const on = a.dataset.sec===sec; a.classList.toggle('active', on);
+    if(on) a.setAttribute('aria-current','page'); else a.removeAttribute('aria-current');
+  });
+  PROJ_SECTIONS.forEach(s=>{ const el=$("#sec-"+s); if(el) el.classList.toggle("hidden", s!==sec); });
+  if(sec!=="cast" && CY){ try{CY.destroy();}catch(e){} CY=null; SELECTED=[]; SELECTED_EDGE=null; }   // 그래프 떠나면 정리(누수 방지)
+  loadSection(sec);
+}
+function loadSection(sec){   // 섹션 진입 시 항상 최신 로드 — '보이는 패널만 갱신' 게이트 폐기(stale 차단)
+  if(sec==="overview") renderOverview();
+  else if(sec==="write"){ renderChapters(); renderReader(); renderGenInspect(); }
+  else if(sec==="bible") bibleSub(STATE.bibleSub||"bible");
+  else if(sec==="cast") loadGraph();
+  else if(sec==="world") loadWorldgen();
+  else if(sec==="serial"){ loadSpine(); serialSub(STATE.serialSub||"status"); }
+}
+function refreshSection(sec){ if(sec && sec!=="write" && sec!=="world") loadSection(sec); }   // 생성 완료 후 보던 섹션 최신화
+function bibleSub(sub){     // 설정집 페이지 내부 2차 탭: 설정집 / 공식 설정 / 작품 노트
+  STATE.bibleSub = sub;
+  document.querySelectorAll('#sec-bible .tab').forEach(b=>b.classList.toggle('active',b.dataset.sub===sub));
+  $("#tab-bible").classList.toggle("hidden",sub!=="bible");
+  $("#inspect-onto").classList.toggle("hidden",sub!=="onto");
+  $("#inspect-wiki").classList.toggle("hidden",sub!=="wiki");
+  if(sub==="bible") loadBible();
+  else if(sub==="onto") loadOntology();
+  else if(sub==="wiki") loadWiki();
+}
+function serialSub(sub){    // 연재 관리 내부 2차 탭: 연재 현황 / 이야기 구조 (데이터는 loadSpine 가 한 번에 채움)
+  STATE.serialSub = sub;
+  document.querySelectorAll('#sec-serial .tab').forEach(b=>b.classList.toggle('active',b.dataset.sub===sub));
+  $("#serial-status").classList.toggle("hidden",sub!=="status");
+  $("#serial-structure").classList.toggle("hidden",sub!=="structure");
+}
+// 개요(허브) — 돌아온 작가의 재개 동선: 이어 쓰기 + 진행/검토필요/미회수약속/사용량 요약
+async function renderOverview(){
+  const el=$("#sec-overview"); if(!el) return;
+  const p=STATE.project, u=p.usage_total||{};
+  const chs=(p.chapters||[]);
+  const escCnt=chs.filter(c=>c.status==="ESCALATED").length;
+  const last=p.current_chapter||0;
+  el.innerHTML=`
+    <div class="panel ov-hero">
+      <div class="eyebrow">${esc(p.world.genre||"작품")}${p.world.tone?` · ${esc(p.world.tone)}`:""}</div>
+      <h3 class="ov-logline">${esc(p.world.premise||p.world.title||"무제")}</h3>
+      <div class="ov-actions">
+        <button class="primary" onclick="goSection('write')">${last?`${last}화에 이어 쓰기 →`:"1화 쓰기 →"}</button>
+        <button onclick="openViewer()">📖 읽기 모드</button>
+      </div>
+    </div>
+    <div class="ov-cards">
+      <div class="ov-card"><div class="ov-k">${last}<span class="ov-sub"> / ${p.total_beats}화</span></div><div class="ov-l">진행</div></div>
+      <div class="ov-card ${escCnt?'warnish ov-clickable':''}" ${escCnt?ACT:''} ${escCnt?'onclick="gotoFirstEscalated()"':''}><div class="ov-k">${escCnt}</div><div class="ov-l">검토 필요 회차${escCnt?' →':''}</div></div>
+      <div class="ov-card" id="ov-promise"><div class="ov-k">–</div><div class="ov-l">미회수 약속</div></div>
+      <div class="ov-card"><div class="ov-k">${(u.chat_calls||0).toLocaleString()}</div><div class="ov-l">AI 사용(회)</div></div>
+    </div>
+    <div class="panel ov-links">바로가기 —
+      <a ${ACT} onclick="goSection('bible')">설정집</a> ·
+      <a ${ACT} onclick="goSection('cast')">인물 관계</a> ·
+      <a ${ACT} onclick="goSection('world')">세계관 만들기</a> ·
+      <a ${ACT} onclick="goSection('serial')">연재 관리</a></div>`;
+  try{   // 미회수 약속 잔고(연재 관리로의 발견 경로)
+    const sp=await api.get(`/api/projects/${p.id}/spine`);
+    const open=(sp.promise_ledger||{}).open||0;
+    const card=$("#ov-promise"); if(card){ card.querySelector(".ov-k").textContent=open; if(open>0) card.classList.add("warnish"); }
+  }catch(e){}
+}
+function openRetro(){ STATE.pendingRetro=true; goSection('serial'); }   // 아크완결 nudge → 연재 관리 + 회고 자동 실행
+function gotoFirstEscalated(){   // 개요 '검토 필요' 카드 → 가장 빠른 ESCALATED 회차로 점프
+  const c=((STATE.project&&STATE.project.chapters)||[]).filter(x=>x.status==="ESCALATED").sort((a,b)=>a.chapter-b.chapter)[0];
+  if(c) go(`#/p/${STATE.project.id}/ch/${c.chapter}`);
 }
 
 // ---------- 협업형 월드빌딩 대화 (R3) ----------
@@ -124,9 +196,7 @@ async function sendWorldgen(){
     const q=(r.questions||[]).map(x=>`<div class="wg-q">❓ ${esc(x)}</div>`).join("");
     ai.innerHTML = `${esc(r.reply||"")}${(chips||blk)?`<div class="wg-applied">${chips}${blk}</div>`:""}${q}`;
     ta.value="";
-    loadOntology();   // 실시간 반영
-    if(!$("#tab-graph").classList.contains("hidden")) loadGraph();
-    if(!$("#tab-bible").classList.contains("hidden")) loadBible();
+    // 추가된 인물·설정은 해당 섹션(인물 관계·설정집) 진입 시 자동 로드됨(라우트 진입 로드)
   }catch(e){ ai.innerHTML=`❌ ${esc(e.message)}`; }
   finally{ btn.disabled=false; ta.disabled=false; ta.focus(); log.scrollTop=log.scrollHeight; }
 }
@@ -141,10 +211,11 @@ function sparkline(series){
   return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
 }
 async function loadSpine(){
-  const el=$("#tab-arc");
+  const statusEl=$("#serial-status"), structEl=$("#serial-structure");
+  if(!statusEl||!structEl) return;
   try{
     const sp=await api.get(`/api/projects/${STATE.project.id}/spine`);
-    if(!sp.has_spine){ el.innerHTML='<p class="muted">아직 이야기 구조가 없습니다. 새 작품은 자동으로 설계됩니다.</p>'; return; }
+    if(!sp.has_spine){ statusEl.innerHTML='<p class="muted">아직 이야기 구조가 없습니다. 새 작품은 자동으로 설계됩니다.</p>'; structEl.innerHTML=''; return; }
     // G5 장르 정체성 — 작품이 지키는 재미의 축(설계가 공유)
     const gc=sp.genre_contract;
     const gcBlock = (gc&&(gc.pleasure_engine||gc.premise_asset))?`<div class="bible-sec"><h4>장르 정체성 <span class="muted small">— 이 작품이 지키는 재미의 축</span></h4>
@@ -167,6 +238,10 @@ async function loadSpine(){
       ${trend}
       ${opens?`<ul class="ledger-list small">${opens}</ul>`:'<p class="muted small">추적 중인 약속이 없습니다.</p>'}
       <p class="muted tiny">시스템은 잔고만 보여줍니다 — 회수 시점은 작가가 정합니다(슬로우번도 정당한 기법).</p></div>`;
+    // G2 독자 반응 — 최근 회차 신호 집약(리더·생성결과에 흩어진 신호를 한곳에)
+    const reacts=(STATE.project.chapters||[]).filter(c=>c.reader_feedback&&(c.reader_feedback.why||c.reader_feedback.got))
+      .slice(-8).reverse().map(c=>{const rf=c.reader_feedback;return `<div class="reader-react ${rf.pay_next?'pos':'neg'}"><b>${c.chapter}화</b> — ${rf.pay_next?'결제 의향 있음':'이탈 위험'}${rf.got?` · 얻은 것: ${esc(rf.got)}`:''}${rf.why?`<div class="muted small">${esc(rf.why)}</div>`:''}</div>`;}).join("");
+    const reactBlock=`<div class="bible-sec"><h4>독자 반응 <span class="muted small">— 최근 회차 신호</span></h4>${reacts||'<p class="muted small">아직 독자 반응 신호가 없습니다.</p>'}</div>`;
     // G3 연재 회고 — on-demand
     const retroBlock=`<div class="bible-sec"><h4>연재 회고 <span class="muted small">— 페이싱·방향 점검과 개정 제안</span></h4>
       <button id="retro-btn" onclick="loadRetrospective()">회고 받기</button>
@@ -186,8 +261,10 @@ async function loadSpine(){
       return `<div class="arc ${a.done?'done':''}"><div class="arc-h">${esc(a.title||a.arc_id)}
         <span class="muted small">— ${esc(a.goal)}</span></div>${eps}</div>`;
     }).join("");
-    el.innerHTML=gcBlock+ledgerBlock+retroBlock+ending+`<div class="bible-sec"><h4>단락과 에피소드 <span class="muted small">(현재 단락 ${sp.chapters_in_episode}화째)</span></h4>${arcs}</div>`;
-  }catch(e){ el.innerHTML=`<span class="muted">로드 실패: ${esc(e.message)}</span>`; }
+    statusEl.innerHTML=ledgerBlock+reactBlock+retroBlock;   // 연재 현황
+    structEl.innerHTML=gcBlock+ending+`<div class="bible-sec"><h4>단락과 에피소드 <span class="muted small">(현재 단락 ${sp.chapters_in_episode}화째)</span></h4>${arcs}</div>`;   // 이야기 구조
+    if(STATE.pendingRetro){ STATE.pendingRetro=false; serialSub('status'); loadRetrospective(); }   // 아크완결 nudge 경유 진입
+  }catch(e){ statusEl.innerHTML=`<span class="muted">로드 실패: ${esc(e.message)}</span>`; }
 }
 async function backfillGenreContract(){
   const btn=$("#gc-btn"), msg=$("#gc-msg"); if(!btn) return;
@@ -200,6 +277,7 @@ async function backfillGenreContract(){
 }
 async function loadRetrospective(){
   const body=$("#retro-body"), btn=$("#retro-btn");
+  if(!body||!btn) return;   // 연재 현황 미렌더 상태 방어
   btn.disabled=true; body.innerHTML='<span class="spin"></span> 전개를 돌아보는 중… <span class="muted small">잠시 걸려요</span>';
   try{
     const r=await api.get(`/api/projects/${STATE.project.id}/retrospective`); RETRO=r;
@@ -226,27 +304,46 @@ async function applyRevisions(){
     setTimeout(loadSpine,1400);
   }catch(e){ alert("적용 실패: "+e.message); }
 }
-function switchInspect(t){
-  document.querySelectorAll('.col-inspect .tab').forEach(b=>b.classList.toggle('active',b.dataset.itab===t));
-  $("#inspect-onto").classList.toggle("hidden",t!=="onto");
-  $("#inspect-wiki").classList.toggle("hidden",t!=="wiki");
-  $("#inspect-gen").classList.toggle("hidden",t!=="gen");
-  if(t==="wiki") loadWiki();
-  if(t==="gen") renderGenInspect();
-}
+// (구 switchInspect 제거 — 공식설정/작품노트는 설정집 sub-tab(bibleSub), 생성정보는 집필 섹션 details 로 이동)
 
 // ---------- 홈 ----------
+function genreTone(g){   // 장르 문자열 → 안정적 색(라이브러리 책등 식별 신호)
+  const palette=['#2F6F8F','#8A6D3B','#3F7050','#B05A7A','#5A6ABF','#9A5AB0','#566070','#3A6EA5'];
+  let h=0; const s=g||'무제'; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0;
+  return palette[h%palette.length];
+}
+function bookCard(p, promoted){
+  const pct=p.total_chapters?Math.min(100,Math.round((p.current_chapter||0)/p.total_chapters*100)):0;
+  const init=esc(((p.title||'무').trim().charAt(0))||'무');
+  const cont=(p.current_chapter>0)?`${p.current_chapter}화 이어 쓰기 →`:'첫 회차 쓰기 →';
+  return `<div class="bookcard${promoted?' promoted':''}">
+    <a class="bc-link" href="#/p/${p.id}/write">
+      ${promoted?'<div class="bc-eyebrow eyebrow">이어서 쓰기</div>':''}
+      <div class="bc-row">
+        <div class="bc-spine" style="background:${genreTone(p.genre)}">${init}</div>
+        <div class="bc-main">
+          <div class="bc-title">${esc(p.title||'무제')}</div>
+          <div class="bc-meta">${esc(p.genre||'장르 미정')}${p.created_at?` · ${esc(String(p.created_at).slice(0,10))}`:''}</div>
+          <div class="bc-progress"><div class="bp-bar"><div class="bp-fill" style="width:${pct}%"></div></div><span class="bp-label">${p.current_chapter||0}/${p.total_chapters}화</span></div>
+          <div class="bc-cont">${cont}</div>
+        </div>
+      </div>
+    </a>
+    <button class="bc-del" title="작품 삭제" onclick="delProject('${p.id}')">삭제</button>
+  </div>`;
+}
+function openWork(pid){ go(`#/p/${pid}/write`); }   // 라이브러리 클릭 → 바로 집필 작업대(재개)
 async function loadProjects(){
-  const el = $("#project-list");
+  const el = $("#project-list"), cnt = $("#lib-count");
   try{
     const list = await api.get("/api/projects");
-    if(!list.length){ el.innerHTML = '<p class="muted">아직 작품이 없습니다. 왼쪽에서 첫 작품을 시작해 보세요.</p>'; return; }
-    el.innerHTML = list.map(p=>`
-      <div class="pcard" onclick="go('#/p/${p.id}')">
-        <div><div class="pc-title">${esc(p.title||"무제")}</div>
-        <div class="pc-meta">${esc(p.genre||"")} · ${p.current_chapter}/${p.total_chapters}화 · ${esc(p.created_at||"")}</div></div>
-        <button class="del" onclick="event.stopPropagation();delProject('${p.id}')">삭제</button>
-      </div>`).join("");
+    if(cnt) cnt.textContent = list.length ? `${list.length}편` : "";
+    if(!list.length){ el.innerHTML = '<p class="muted">아직 작품이 없습니다. 오른쪽 ‘새 작품 시작’에서 첫 작품을 빚어보세요. →</p>'; return; }
+    list.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));   // 최근 생성 먼저
+    let promoted=list[0];
+    try{ const last=localStorage.getItem('novelcopilot:last');
+      if(last){ const i=list.findIndex(p=>p.id===last); if(i>0){ promoted=list.splice(i,1)[0]; list.unshift(promoted); } else if(i===0) promoted=list[0]; } }catch(e){}
+    el.innerHTML = list.map(p=>bookCard(p, p===promoted)).join("");
   }catch(e){ el.innerHTML = `<p class="muted">목록을 불러오지 못했습니다: ${esc(e.message)}</p>`; }
 }
 async function delProject(pid){ if(!confirm("이 작품을 삭제할까요? 되돌릴 수 없습니다.")) return; await api.del(`/api/projects/${pid}`); loadProjects(); }
@@ -445,13 +542,16 @@ function finalizeGo(){
 }
 
 // ---------- 프로젝트 열기(로드+렌더 — 뷰 표시는 라우터가) ----------
-async function openProject(pid){
+async function openProject(pid){   // 데이터 로드 전용 — 뷰 초기화·섹션 로드는 라우터(showSection)가 담당
+  if(_genES){ try{_genES.close();}catch(e){} _genES=null; STATE.generating=false; genStop(); }   // 진행 중이던 이전 작품 생성 정리
   STATE.project = await api.get(`/api/projects/${pid}`);
+  try{ localStorage.setItem('novelcopilot:last', pid); }catch(e){}   // 홈 '이어서 쓰기' 복귀 동선
   STATE.activeChapter = STATE.project.current_chapter || null;
   STATE.chapterPage = null;          // null → renderChapters 가 최신(마지막) 페이지로
-  renderHeader(); renderChapters(); renderReader();
-  loadOntology(); switchTab('reader'); switchInspect('onto');
-  $("#harness-log").innerHTML = ""; $("#gen-result").innerHTML = "";
+  STATE.section = undefined; STATE.bibleSub = "bible"; STATE.serialSub = "status";
+  renderHeader();
+  $("#harness-log").innerHTML = ""; $("#gen-result").innerHTML = "";   // 이전 작품 잔여 로그 제거(요소는 항상 DOM 상주)
+  { const d=$("#directive"); if(d) d.value=""; const k=$("#dir-keep"); if(k) k.checked=false; }   // 작품별 작가지시 격리 — 다음 작품 누수 차단
 }
 function renderHeader(){
   const p = STATE.project, u = p.usage_total||{};
@@ -468,6 +568,7 @@ async function loadBible(){
   const el = $("#tab-bible");
   try{
     const b = await api.get(`/api/projects/${STATE.project.id}/bible`);
+    STATE.bibleMeta = {labels:b.category_labels||{}, template:b.template||[]};   // addBible 한국어 분류 셀렉트용
     const byCat = {};
     b.entries.forEach(e=>{ (byCat[e.category]=byCat[e.category]||[]).push(e); });
     const cats = [...b.template, ...Object.keys(byCat).filter(c=>!b.template.includes(c))];
@@ -506,16 +607,39 @@ async function saveBible(id, el){
     await api.put(`/api/projects/${STATE.project.id}/bible/${id}`, {prose});
     el.dataset.orig = prose;
     el.style.borderColor = "var(--ok)"; setTimeout(()=>{ el.style.borderColor=""; }, 800);   // 저장됨 피드백
-  }catch(e){ el.style.borderColor = "var(--bad)"; $("#gen-result").innerHTML = `설정을 저장하지 못했습니다: ${esc(e.message)}`; }
+  }catch(e){ el.style.borderColor = "var(--bad)"; toast("설정을 저장하지 못했습니다: "+e.message, "bad"); }   // gen-result 가 숨은 섹션이라 toast 로
 }
+// 서버 라벨이 없을 때만 쓰는 폴백(영문 카테고리 키를 화면에 노출하지 않기 위함 — DESIGN.md §5)
+const BIBLE_CAT_FALLBACK = {
+  character:"인물", faction_politics:"세력·정치", geography:"지리", power_system:"힘의 체계",
+  magic_system:"마법 체계", ability_system:"능력 체계", chronology:"연표", artifact:"유물·도구",
+  culture_religion:"문화·종교", taboo_worldrule:"금기·세계규칙", glossary:"용어", race:"종족", bestiary:"생물지" };
 async function addBible(){
-  const title = prompt("설정 항목 제목:"); if(!title) return;
-  const category = (prompt("카테고리 키 (magic_system/ability_system/bestiary/race/geography/"
-    + "faction_politics/chronology/artifact/character/culture_religion/power_system/taboo_worldrule/glossary):",
-    "glossary")||"glossary").trim();
-  const prose = prompt("내용(산문):","")||"";
-  try{ await api.post(`/api/projects/${STATE.project.id}/bible`,{category,title,prose}); loadBible(); }
-  catch(e){ alert("추가 실패: "+e.message); }
+  const meta = STATE.bibleMeta || {labels:{}, template:[]};
+  const keys = (meta.template && meta.template.length) ? meta.template : Object.keys(BIBLE_CAT_FALLBACK);
+  const label = k => (meta.labels && meta.labels[k]) || BIBLE_CAT_FALLBACK[k] || "기타 설정";   // 영문 내부키 노출 방지(§5)
+  const opts = keys.map(k=>`<option value="${esc(k)}"${k==='glossary'?' selected':''}>${esc(label(k))}</option>`).join("");
+  const m = openModal(`<h3>설정 항목 추가</h3>
+    <label>제목<input id="ab-title" placeholder="예: 백야 결사단" autocomplete="off"></label>
+    <label>분류<select id="ab-cat">${opts}</select></label>
+    <label>내용<textarea id="ab-prose" rows="4" placeholder="이 설정이 무엇인지 한두 문장으로…"></textarea></label>
+    <div id="ab-err" class="modal-err" role="alert"></div>
+    <div class="modal-actions">
+      <button type="button" data-close>취소</button>
+      <button type="button" class="primary" id="ab-submit">추가</button>
+    </div>`);
+  const submit = async () => {
+    const title = $("#ab-title").value.trim();
+    if(!title){ $("#ab-err").textContent="제목을 입력하세요."; $("#ab-title").focus(); return; }
+    const category = $("#ab-cat").value, prose = $("#ab-prose").value;
+    const btn = $("#ab-submit"); btn.disabled = true; btn.textContent = "추가 중…";
+    try{ await api.post(`/api/projects/${STATE.project.id}/bible`,{category,title,prose}); loadBible(); closeModal(m); }
+    catch(e){ btn.disabled=false; btn.textContent="추가"; $("#ab-err").textContent="추가하지 못했습니다: "+e.message; }
+  };
+  $("#ab-submit").onclick = submit;
+  $("#ab-title").addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); $("#ab-prose").focus(); }});
+  $("#ab-prose").addEventListener("keydown", e=>{ if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){ e.preventDefault(); submit(); }});
+  setTimeout(()=>$("#ab-title").focus(), 30);
 }
 
 // ---------- 회차/리더 ----------
@@ -573,7 +697,7 @@ function genContextHtml(c){
   return `<div class="gen-debug">${planBlk}${draftBlk}</div>`;
 }
 function renderGenInspect(){
-  const el=$("#inspect-gen");
+  const el=$("#inspect-gen"); if(!el) return;
   const c=((STATE.project&&STATE.project.chapters)||[]).find(x=>x.chapter===STATE.activeChapter);
   if(!c){ el.innerHTML='<div class="inspect-head">회차를 고르면, 그 회차를 <b>어떤 정보로 만들었는지</b>(설계·집필 입력)가 여기 표시됩니다.</div>'; return; }
   el.innerHTML=`<div class="inspect-head">${c.chapter}화를 만든 정보 — 설계·집필에 들어간 입력 슬롯</div>`+genContextHtml(c);
@@ -592,7 +716,7 @@ function renderReader(){
       </div>`;
     } else {
       body.classList.add("muted");
-      body.textContent = "왼쪽에서 회차를 고르거나, 가운데에서 다음 회차를 써보세요.";
+      body.textContent = "회차를 고르거나, 다음 회차를 써보세요.";
     }
     return;
   }
@@ -614,12 +738,19 @@ function renderReader(){
   // C-5: FINALIZED 회차의 비구속 위반(세계규칙 등)도 작가에게 advisory 로 가시화 — 검출만 되고 사장되던 신호
   const fv=(c.status==="FINALIZED"&&(c.final_violations||[]).length)?c.final_violations:[];
   const violBlock=fv.length?`<div class="reader-react neg"><b>점검</b> — 비구속 위반 ${fv.length}건(차단 안 됨, 참고): ${esc([...new Set(fv.map(v=>v.kind))].join(", "))}</div>`:"";
-  body.innerHTML = `<h4>${c.chapter}화 · ${esc(c.title)} ${badge}</h4>`+
-    `<div class="reader-meta">${chars.toLocaleString()}자${c.wiki_pages_touched?` · 인물 노트 ${c.wiki_pages_touched}건 갱신`:""}</div>`+
+  // 퇴고 진입(F6) — FINALIZED·ESCALATED 둘 다. 본문 사후 다듬기(사실 불변).
+  const reviseBtn = (c.status==="FINALIZED"||c.status==="ESCALATED")
+    ? ` <button class="revise-btn" onclick="openReviseModal(${c.chapter})">퇴고</button>` : "";
+  // 되돌리기 링크 — 채택된(미-reverted) 퇴고가 1건 이상 있을 때만(F4)
+  const hasUndo = (c.revisions||[]).some(r=>!r.reverted);
+  const undoLink = hasUndo
+    ? `<span class="revise-undo-link" ${ACT} onclick="undoRevise(${c.chapter})">마지막 퇴고 되돌리기</span>` : "";
+  body.innerHTML = `<h3 class="ch-title">${c.chapter}화 · ${esc(c.title)} ${badge}${reviseBtn}</h3>`+
+    `<div class="reader-meta">${chars.toLocaleString()}자${c.wiki_pages_touched?` · 인물 노트 ${c.wiki_pages_touched}건 갱신`:""}${undoLink?` · ${undoLink}`:""}</div>`+
     rec+readerBlock+violBlock+
     (oc?`<div style="margin-bottom:1.4em">${oc}</div>`:"")+
     `<div>${esc(c.text).replace(/\n/g,"<br>")}</div>`;
-  if(!$("#inspect-gen").classList.contains("hidden")) renderGenInspect();   // 활성 회차 바뀌면 '생성 정보' 패널 동기화
+  renderGenInspect();   // 활성 회차 바뀌면 '생성 정보' 패널 동기화(요소 없으면 무시)
 }
 
 // ---------- 뷰어(몰입형 읽기) — 웹소설 플랫폼처럼 이전·다음 화 ----------
@@ -637,7 +768,8 @@ function exportNovel(fmt){   // 작품 전체를 파일로 다운로드(Content-
 function openViewer(n){   // 진입(버튼) → 라우팅
   const list = viewerChapters();
   if(!list.length){ alert("아직 읽을 회차가 없습니다. 먼저 회차를 써보세요."); return; }
-  const target = n || STATE.activeChapter || list[list.length-1].chapter;
+  let saved=0; try{ saved=parseInt(localStorage.getItem('novelcopilot:read:'+STATE.project.id))||0; }catch(e){}
+  const target = n || saved || STATE.activeChapter || list[list.length-1].chapter;   // 읽던 회차 우선
   go(`#/read/${STATE.project.id}/${target}`);
 }
 function renderViewerAt(n){   // 라우터가 호출 — 뷰어 표시 + 해당 화
@@ -653,9 +785,9 @@ function renderViewerAt(n){   // 라우터가 호출 — 뷰어 표시 + 해당 
 function renderViewer(){
   const list = viewerChapters(), c = list[STATE.viewerIdx];
   if(!c) return;
-  const badge = c.status==="FINALIZED"?'<span class="badge fin">완성</span>':'<span class="badge esc">검토 필요</span>';
+  applyReaderScale();
   $("#v-title").textContent = `${c.chapter}화 · ${c.title||""}`;
-  $("#v-badge").innerHTML = badge;
+  $("#v-badge").innerHTML = "";   // 편집 상태(완성/검토필요)는 독자 화면에 숨김 — 몰입 보존(DESIGN.md §4)
   // 문단 단위 렌더 — 빈 줄/줄바꿈으로 분리, 대사("…")는 dlg 로 표시
   $("#v-body").innerHTML = (c.text||"").split(/\n+/).map(s=>s.trim()).filter(Boolean)
     .map(p=>`<p${/^["“]/.test(p)?' class="dlg"':''}>${esc(p)}</p>`).join("");
@@ -663,7 +795,22 @@ function renderViewer(){
   $("#v-prev").disabled = STATE.viewerIdx<=0;
   $("#v-next").disabled = STATE.viewerIdx>=list.length-1;
   $("#v-jump").value = String(STATE.viewerIdx);
+  const nx=list[STATE.viewerIdx+1], pv=$("#v-next-preview");   // 다음 화 미리보기(읽는 손맛) / 최신 화 상태
+  if(pv){ pv.innerHTML = nx
+    ? `<button class="v-next-card" onclick="viewerNav(1)"><span class="vnc-lbl">다음 화</span><span class="vnc-title">${esc(nx.chapter)}화 · ${esc(nx.title||"")}</span><span class="vnc-go">이어 읽기 →</span></button>`
+    : `<div class="v-end-card">여기까지가 최신 화예요. <button onclick="closeViewer()">작업실로 돌아가기</button></div>`; }
+  try{ localStorage.setItem('novelcopilot:read:'+STATE.project.id, String(c.chapter)); }catch(e){}   // 읽던 회차 복원
   $("#view-viewer").scrollTop = 0;
+}
+function applyReaderScale(){
+  let s=1; try{ s=parseFloat(localStorage.getItem('novelcopilot:fontscale'))||1; }catch(e){}
+  $("#view-viewer").style.setProperty('--reader-scale', Math.max(.8,Math.min(1.5,s)));
+}
+function readerFont(d){   // 독자 글자 크기 A−/A+ (0.8~1.5배, localStorage 기억)
+  let s=1; try{ s=parseFloat(localStorage.getItem('novelcopilot:fontscale'))||1; }catch(e){}
+  s=Math.max(.8,Math.min(1.5, Math.round((s+d*0.1)*10)/10));
+  try{ localStorage.setItem('novelcopilot:fontscale', String(s)); }catch(e){}
+  applyReaderScale();
 }
 function _viewerSyncHash(){   // 현재 보는 화를 URL에 반영(재라우팅 없이 — 새로고침/공유 일관)
   const c = viewerChapters()[STATE.viewerIdx];
@@ -689,6 +836,7 @@ document.addEventListener("keydown", e=>{
 // ---------- 회차 생성 (SSE 라이브) ----------
 // 전역 집필 진행 표시 — 어느 탭에 있든 헤더에 'N화 집필 중 · 경과시간'. 멈춤 오해·이탈 방지(UX).
 let _genTimer = null, _genT0 = 0, _genLabel = "집필 준비 중";
+let _genES = null;   // 진행 중 회차 생성 SSE — 작품 전환 시 정리(다른 작품으로의 완료 누수 방지)
 function genStart(){ _genT0 = Date.now(); _genLabel = "집필 준비 중";
   const el = $("#p-genstatus"); if(el) el.classList.remove("hidden");
   if(_genTimer) clearInterval(_genTimer); _genTimer = setInterval(genTick, 1000); genTick(); }
@@ -710,7 +858,7 @@ function generateNext(){
   logEvent({node:"harness",event:"connect"},"");
 
   const url = `/api/projects/${pid}/generate?directive=${encodeURIComponent(directive)}`;
-  const es = new EventSource(url);
+  const es = new EventSource(url); _genES = es;
   let done = false;
   es.addEventListener("start", e=>{ const d=JSON.parse(e.data); _genLabel = `${d.chapter}화 집필 중`; logEvent({node:"plan_chapter",event:`${d.chapter}화 시작`},"",true); });
   es.addEventListener("event", e=> logEvent(JSON.parse(e.data)));
@@ -762,7 +910,7 @@ function friendly(ev){
     case "promise_state": return ["약속 원장", `미회수 ${ev.open}${ev.since_payoff!=null?` · 회수 후 ${ev.since_payoff}화`:""}`];
     case "payoff_detected": return ["약속 회수", `${ev.count}개`];
     case "reconciled": return ["약속 정산", `지불 ${ev.paid}개 · 새 약속 ${ev.opened}개`];
-    case "retrospective_available": return ["아크 완결", `'${ev.arc||""}' — 이야기 구조 탭에서 회고를 받아보세요`];
+    case "retrospective_available": return ["아크 완결", `'${ev.arc||""}' — 연재 관리에서 회고를 받아보세요`];
     case "window": return ["연재 페이싱", `훅 단조 ${ev.hook_monotony} · 새 명사 ${ev.new_names}개`];
     case "prediction": return ["독자 반응", `${ev.pay_next?"다음 화 결제 의향":"이탈 위험"}${ev.got?` · 얻은 것: ${ev.got}`:""}`];
     case "spine_incomplete": return ["설계 보완 필요", ""];
@@ -786,13 +934,14 @@ function logEvent(ev, det, rawEvent){
   const log = $("#harness-log"); log.appendChild(line); log.scrollTop = log.scrollHeight;
 }
 async function onComplete(data){
-  STATE.generating = false; genStop(); $("#directive").value="";
+  STATE.generating = false; genStop(); _genES = null;
+  if(!($("#dir-keep") && $("#dir-keep").checked)) $("#directive").value="";   // '계속 적용' 체크 시 지시 유지(아크 표준 제약)
   if(data.completed){   // 엔딩 도달 → 완결
     $("#gen-btn").disabled = true; $("#gen-btn").textContent = "완결되었습니다";
     $("#gen-result").innerHTML = `작품이 완결되었습니다 · ${data.current_chapter}화`;
     STATE.project = await api.get(`/api/projects/${STATE.project.id}`);
-    renderHeader(); renderChapters();
-    if(!$("#tab-arc").classList.contains("hidden")) loadSpine();
+    STATE.activeChapter = data.current_chapter; STATE.chapterPage = chPageOf(data.current_chapter);
+    renderHeader(); renderChapters(); renderReader(); refreshSection(STATE.section);
     return;
   }
   $("#gen-btn").disabled = false;
@@ -807,20 +956,18 @@ async function onComplete(data){
     ${rf.why?`<div class="muted small">${esc(rf.why)}</div>`:''}</div>`:"";
   // G3: 아크 완결 시 회고 권유(nudge — 작가가 받을지 결정)
   const retroNudge=(data.events||[]).some(e=>e.event==="retrospective_available")
-    ? `<div class="retro-nudge">📋 아크가 끝났어요 — <a onclick="switchTab('arc');setTimeout(loadRetrospective,300)">이야기 구조 탭에서 회고 받기</a></div>`:"";
+    ? `<div class="retro-nudge">📋 아크가 끝났어요 — <a ${ACT} onclick="openRetro()">연재 관리에서 회고 받기</a></div>`:"";
   $("#gen-result").innerHTML = `${r.chapter}화 ${badge} · AI 사용량 +${data.usage_delta.chat_calls}회${fail}${drift}${retroNudge}${readerBlock}`;
   // 상태 갱신
   STATE.project = await api.get(`/api/projects/${STATE.project.id}`);
   STATE.activeChapter = r.chapter;
   STATE.chapterPage = chPageOf(r.chapter);
-  setHashSilent(`#/p/${STATE.project.id}/ch/${r.chapter}`);   // 새 회차를 URL에 반영(재라우팅 없이)
-  renderHeader(); renderChapters(); renderReader(); loadOntology();
-  if(!$("#inspect-wiki").classList.contains("hidden")) loadWiki();
-  if(!$("#tab-graph").classList.contains("hidden")) loadGraph();
-  if(!$("#tab-arc").classList.contains("hidden")) loadSpine();
+  renderHeader(); renderChapters(); renderReader(); renderGenInspect();
+  if(STATE.section==="write"||STATE.section===undefined) setHashSilent(`#/p/${STATE.project.id}/ch/${r.chapter}`);   // 집필 중이면 새 회차를 URL에
+  else refreshSection(STATE.section);   // 다른 섹션을 보고 있었다면 그 섹션도 최신화
 }
 function onFail(data){
-  STATE.generating = false; genStop(); $("#gen-btn").disabled = false;
+  STATE.generating = false; genStop(); _genES = null; $("#gen-btn").disabled = false;
   $("#gen-result").innerHTML = `회차를 쓰지 못했습니다: ${esc(data.message||"")} <button class="primary" onclick="generateNext()">다시 시도</button>`;
   logEvent({node:"harness",event:"실패"}, data.message||"", true);
   renderReader();
@@ -881,22 +1028,25 @@ function renderGraph(g){
     ...g.edges.map(e=>({data:{id:e.id,source:e.src,target:e.dst,label:e.label,color:e.color,
         estyle:e.line_style,arrow:e.directed?'triangle':'none',trust:e.trust_tier}})),
   ];
+  // 라이트테마 색은 CSS 토큰에서 런타임으로 읽는다(하드코딩 금지 — DESIGN.md §2, 종이톤 회귀 차단)
+  const C={ink:cssVar('--ink'),inkSoft:cssVar('--ink-soft'),paper:cssVar('--paper'),
+    accent:cssVar('--accent'),bad:cssVar('--bad'),muted:cssVar('--muted'),lineStrong:cssVar('--line-strong')};
   CY=cytoscape({
     container:$("#cy"), elements:els, wheelSensitivity:0.2,
     style:[
       {selector:'node',style:{'background-color':'data(color)','shape':'data(shape)',
-        'label':'data(label)','color':'#1C1B19','font-size':'11px','font-weight':600,'text-valign':'bottom',
-        'text-halign':'center','text-margin-y':4,'text-outline-color':'#FAF8F3','text-outline-width':2.5,
-        'width':38,'height':38,'border-width':2,'border-color':'#FFFFFF'}},
-      {selector:'node[dead=1]',style:{'border-color':'#B23A38','border-width':3,'opacity':0.55}},
-      {selector:'node[prov=1]',style:{'border-style':'dashed','border-color':'#2F5E8C'}},
-      {selector:'node:selected',style:{'border-color':'#2F5E8C','border-width':5}},
+        'label':'data(label)','color':C.ink,'font-size':'11px','font-weight':600,'text-valign':'bottom',
+        'text-halign':'center','text-margin-y':4,'text-outline-color':C.paper,'text-outline-width':2.5,
+        'width':38,'height':38,'border-width':2,'border-color':C.lineStrong}},
+      {selector:'node[dead=1]',style:{'border-color':C.bad,'border-width':3,'opacity':0.55}},
+      {selector:'node[prov=1]',style:{'border-style':'dashed','border-color':C.accent}},
+      {selector:'node:selected',style:{'border-color':C.accent,'border-width':5}},
       {selector:'edge',style:{'width':2,'line-color':'data(color)','target-arrow-color':'data(color)',
         'target-arrow-shape':'data(arrow)','line-style':'data(estyle)','curve-style':'bezier',
-        'label':'data(label)','font-size':'9px','color':'#3D3A34','text-rotation':'autorotate',
-        'text-background-color':'#FAF8F3','text-background-opacity':0.9,'text-background-padding':2}},
-      {selector:'edge[trust="narrative_inferred"]',style:{'line-style':'dashed','opacity':0.55,
-        'line-color':'#B0AB9E','target-arrow-color':'#B0AB9E','width':1.5}},
+        'label':'data(label)','font-size':'9px','color':C.inkSoft,'text-rotation':'autorotate',
+        'text-background-color':C.paper,'text-background-opacity':0.92,'text-background-padding':2}},
+      {selector:'edge[trust="narrative_inferred"]',style:{'line-style':'dashed','opacity':0.6,
+        'line-color':C.muted,'target-arrow-color':C.muted,'width':1.5}},
     ],
     layout:{name:'cose',animate:false,padding:30,nodeRepulsion:9000,idealEdgeLength:95},
   });
@@ -964,14 +1114,302 @@ async function promptAddEntity(){
 function renderLegend(types){
   $("#graph-legend").innerHTML=(types||[]).map(x=>
     `<span class="lg"><span class="dot" style="background:${esc(x.color)}"></span>${esc(x.label)}</span>`).join("")
-    + ` <span class="lg"><span class="dot" style="background:#B23A38"></span>사망</span>`
-    + ` <span class="lg"><span class="dot" style="background:#2F5E8C"></span>AI·작가 추가</span>`
+    + ` <span class="lg"><span class="dot" style="background:${cssVar('--bad')}"></span>사망</span>`
+    + ` <span class="lg"><span class="dot" style="background:${cssVar('--accent')}"></span>AI·작가 추가</span>`
     + ` <span class="lg">┄ 점선 = 추정 관계(아직 미확정)</span>`;
 }
 
 // ---------- 유틸 ----------
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[m])); }
-async function health(){ try{ const h=await api.get("/api/health"); const el=$("#health");
-  el.textContent="연결됨"; el.title=`${h.provider} · ${h.model}`; }catch(e){ const el=$("#health"); if(el) el.textContent="연결 끊김"; } }
+function cssVar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim()||""; }   // 토큰값 런타임 조회(cytoscape 등 캔버스 색)
+
+// ---------- 경량 모달 (prompt/confirm 대체 — 포커스 이동·Esc·백드롭 닫힘·포커스 복원·Tab 트랩) ----------
+let _modalPrevFocus = null;
+function openModal(innerHTML){
+  _modalPrevFocus = document.activeElement;
+  const ov = document.createElement("div");
+  ov.className = "modal-overlay";
+  ov.innerHTML = `<div class="modal-card" role="dialog" aria-modal="true">${innerHTML}</div>`;
+  const _h = ov.firstElementChild.querySelector("h1,h2,h3,h4");                                // 제목→aria-labelledby(스크린리더)
+  if(_h){ if(!_h.id) _h.id = "modal-title-"+Date.now().toString(36); ov.firstElementChild.setAttribute("aria-labelledby", _h.id); }
+  ov.addEventListener("mousedown", e=>{ if(e.target===ov) closeModal(ov); });                 // 백드롭 클릭
+  ov.addEventListener("click", e=>{ if(e.target.closest("[data-close]")) closeModal(ov); });   // 취소 버튼
+  ov.addEventListener("keydown", e=>{
+    if(e.key==="Escape"){ e.stopPropagation(); closeModal(ov); return; }
+    if(e.key==="Tab"){
+      const f = ov.querySelectorAll('input:not([disabled]),select:not([disabled]),textarea:not([disabled]),button:not([disabled]),[tabindex]:not([tabindex="-1"])');
+      if(!f.length) return;
+      const first=f[0], last=f[f.length-1];
+      if(e.shiftKey && document.activeElement===first){ e.preventDefault(); last.focus(); }
+      else if(!e.shiftKey && document.activeElement===last){ e.preventDefault(); first.focus(); }
+    }
+  });
+  document.body.appendChild(ov);
+  return ov;
+}
+function closeModal(ov){
+  if(!ov || !ov.parentNode) return;
+  ov.remove();
+  if(_modalPrevFocus && _modalPrevFocus.focus){ try{ _modalPrevFocus.focus(); }catch(e){} }   // 트리거로 포커스 복원
+  _modalPrevFocus = null;
+}
+
+// 내보내기 드롭다운: 바깥 클릭·Esc 로 닫기(열어둔 채 떠 있는 문제 해소)
+document.addEventListener("click", e=>{
+  document.querySelectorAll(".export-wrap.open").forEach(w=>{ if(!w.contains(e.target)) w.classList.remove("open"); });
+});
+document.addEventListener("keydown", e=>{
+  if(e.key==="Escape") document.querySelectorAll(".export-wrap.open").forEach(w=>w.classList.remove("open"));
+});
+
+// 일시 알림(toast) — 숨은 섹션에 메시지가 묻히지 않게(role=status/alert). 자동 소멸.
+let _toastT=null;
+function toast(msg, kind){
+  let t=$("#toast"); if(!t){ t=document.createElement("div"); t.id="toast"; t.className="toast"; document.body.appendChild(t); }
+  t.className="toast "+(kind||"")+" show"; t.setAttribute("role", kind==="bad"?"alert":"status"); t.textContent=msg;
+  if(_toastT) clearTimeout(_toastT); _toastT=setTimeout(()=>{ t.classList.remove("show"); }, 3400);
+}
+async function health(){ const el=$("#health"); if(!el) return;   // 정상이면 숨김, 끊겼을 때만 안심 문구
+  try{ const h=await api.get("/api/health"); el.classList.add("hidden"); el.title=`${h.provider} · ${h.model}`; }
+  catch(e){ el.classList.remove("hidden"); el.classList.add("bad"); el.textContent="연결 끊김 · 작업은 보관됩니다"; } }
+
+// ---------- 퇴고(회차 본문 사후 다듬기 — 사실 불변) ----------
+// 작가 지시형 · 구간 단위(선택) · before→after diff · 채택/취소 · 되돌리기.
+// 용어 §5: 'violation/checker/ontology/G-A/G-B' 노출 금지 — 작가 언어만(퇴고·공식 설정·작가 지시).
+const REVISE_CHIPS = ["더 간결하게", "대사 톤 차갑게", "묘사 줄이기", "문장 이어 읽기 좋게"];
+function openReviseModal(chapterNo){
+  const c = ((STATE.project&&STATE.project.chapters)||[]).find(x=>x.chapter===chapterNo);
+  if(!c){ toast("회차를 찾을 수 없습니다", "bad"); return; }
+  const chips = REVISE_CHIPS.map(t=>`<button type="button" class="revise-chip" onclick="reviseChip(this)">${esc(t)}</button>`).join("");
+  const ov = openModal(`
+    <h3>퇴고 — ${chapterNo}화</h3>
+    <p class="muted small" style="margin:.2em 0 .8em">이미 쓴 회차의 본문을 작가 지시로 다듬습니다. 설정·사건·이름·수치는 바뀌지 않아요.</p>
+    <label>작가 지시
+      <textarea id="rv-directive" rows="3" placeholder="예: 이 대목 더 간결하게 / 대사 톤 차갑게"></textarea>
+    </label>
+    <div class="revise-chips">${chips}</div>
+    <label>다듬을 구간 <span class="muted">(선택 — 그 구절을 본문에서 그대로 붙여넣기)</span>
+      <textarea id="rv-span" rows="2" placeholder="원문에서 다듬고 싶은 부분만 붙여넣기 (없으면 전체 다듬기)"></textarea>
+    </label>
+    <div class="revise-toggles">
+      <label><input type="checkbox" id="rv-reformat"> 행 정렬 다듬기</label>
+      <label><input type="checkbox" id="rv-tense"> 시제 교정</label>
+    </div>
+    <div id="rv-err" class="modal-err hidden"></div>
+    <div id="rv-revision-id" class="hidden"></div>
+    <div id="rv-guardrail" class="hidden"></div>
+    <div id="rv-diff-area" class="hidden"></div>
+    <div class="revise-actions">
+      <button class="primary" id="rv-submit" onclick="submitRevise(${chapterNo})">다듬기 →</button>
+      <button id="rv-accept" class="primary hidden" onclick="acceptRevise(${chapterNo})">채택</button>
+      <button data-close>취소</button>
+    </div>
+  `);
+  ov.firstElementChild.classList.add("revise-card");   // 퇴고 모달만 넓게(diff 표시)
+  STATE.reviseModal = ov; STATE.reviseChapter = chapterNo;
+  // openModal 의 Esc·백드롭·data-close 핸들러는 closeModal(ov)만 호출하고 STATE.reviseModal을 비우지 않는다.
+  // 모든 닫힘 경로에서 STATE.reviseModal=null 이 보장되도록 퇴고 전용 cleanup 핸들러를 ov 에 덧등록.
+  // (closeModal 은 멱등 — 이미 제거된 ov 재호출은 무해. cleanup 도 STATE 만 비워 중복 호출 안전.)
+  ov.addEventListener("mousedown", e=>{ if(e.target===ov) cleanupReviseModal(); });            // 백드롭 클릭
+  ov.addEventListener("click", e=>{ if(e.target.closest("[data-close]")) cleanupReviseModal(); }); // 취소 버튼
+  ov.addEventListener("keydown", e=>{ if(e.key==="Escape") cleanupReviseModal(); });             // Esc
+  const ta = ov.querySelector("#rv-directive"); if(ta) ta.focus();
+}
+function cleanupReviseModal(){   // 퇴고 모달 닫기 + STATE.reviseModal 초기화(스테일 참조 방지) — 모든 닫힘 경로 공통
+  if(STATE.reviseModal){ closeModal(STATE.reviseModal); }
+  STATE.reviseModal = null;
+}
+function reviseChip(btn){   // 예시 칩 → 지시 textarea 채움
+  const t = $("#rv-directive"); if(!t) return;
+  t.value = btn.textContent; t.focus();
+}
+function _rvErr(msg){   // 모달 내 오류 표시(없으면 숨김)
+  const el = $("#rv-err"); if(!el) return;
+  if(msg){ el.textContent = msg; el.classList.remove("hidden"); }
+  else { el.textContent = ""; el.classList.add("hidden"); }
+}
+async function submitRevise(chapterNo){
+  const dEl = $("#rv-directive"); const directive = (dEl&&dEl.value||"").trim();
+  if(!directive){ _rvErr("작가 지시를 입력해 주세요."); if(dEl) dEl.focus(); return; }
+  _rvErr("");
+  const passes = [];
+  if($("#rv-reformat")&&$("#rv-reformat").checked) passes.push("reformat");
+  if($("#rv-tense")&&$("#rv-tense").checked) passes.push("fix_tense");
+  const span_text = ($("#rv-span")&&$("#rv-span").value||"").trim();
+  const btn = $("#rv-submit"); const restore = btn?btn.textContent:"다듬기 →";
+  if(btn){ btn.disabled = true; btn.textContent = "다듬는 중…"; }
+  let r;
+  try{
+    r = await api.post(`/api/projects/${STATE.project.id}/chapters/${chapterNo}/revise`,
+                       { directive, span_text, passes });
+  }catch(e){
+    _rvErr(String(e.message||e));
+    // await 중 모달이 닫혔으면(Esc·백드롭) btn 이 DOM 에서 분리됨 — isConnected 가드.
+    if(btn && btn.isConnected){ btn.disabled = false; btn.textContent = restore; }
+    return;
+  }
+  // await 중 사용자가 모달을 닫았으면 #rv-* 요소가 전부 사라짐 — 결과 렌더 스킵(TypeError 방지).
+  if(!btn || !btn.isConnected){ return; }
+  btn.disabled = false; btn.textContent = "다시 다듬기";
+  // 무변경(changed:false) — 후보 없음. 작가에게 '효과 없음' 고지(채택 무의미).
+  if(r.changed === false || !r.revision_id){
+    const idEl = $("#rv-revision-id"); if(idEl) idEl.textContent = "";
+    renderDiff(r.before_text||"", r.after_text||"");
+    const g = $("#rv-guardrail");
+    if(g){
+      g.classList.remove("hidden");
+      g.innerHTML = `<span class="gr-pill warn">바뀐 부분이 없습니다 — 지시를 더 구체적으로 적어 보세요</span>`;
+    }
+    const ab = $("#rv-accept"); if(ab) ab.classList.add("hidden");
+    return;
+  }
+  const idEl = $("#rv-revision-id"); if(idEl) idEl.textContent = r.revision_id;
+  renderDiff(r.before_text, r.after_text);
+  renderGuardrail(r.guardrail);
+}
+// 단어 단위 LCS diff — 의존성 0 순수 JS.
+function _rvTokenize(s){   // 단어/공백/구두점을 토큰으로(공백 보존해 재조립 시 자연스럽게)
+  return String(s==null?"":s).match(/\s+|[^\s]+/g) || [];
+}
+function _lcs(a, b){   // LCS 길이 DP 테이블
+  const n=a.length, m=b.length;
+  const dp = Array.from({length:n+1}, ()=>new Int32Array(m+1));
+  for(let i=n-1;i>=0;i--){
+    for(let j=m-1;j>=0;j--){
+      dp[i][j] = a[i]===b[j] ? dp[i+1][j+1]+1 : Math.max(dp[i+1][j], dp[i][j+1]);
+    }
+  }
+  return dp;
+}
+function diffWords(before, after){   // → [{type:'eq'|'del'|'add', text}]
+  const a=_rvTokenize(before), b=_rvTokenize(after), dp=_lcs(a,b), out=[];
+  let i=0, j=0;
+  while(i<a.length && j<b.length){
+    if(a[i]===b[j]){ out.push({type:"eq", text:a[i]}); i++; j++; }
+    else if(dp[i+1][j] >= dp[i][j+1]){ out.push({type:"del", text:a[i]}); i++; }
+    else { out.push({type:"add", text:b[j]}); j++; }
+  }
+  while(i<a.length){ out.push({type:"del", text:a[i++]}); }
+  while(j<b.length){ out.push({type:"add", text:b[j++]}); }
+  return out;
+}
+// 단어 단위 LCS(diffWords)는 O(n×m) 시간·공간 — 장문 회차(수천 토큰)에서 DP 테이블이 수 MB,
+// 동기 실행이 메인 스레드를 수십 ms 블로킹한다(나란히 보기 토글마다 재실행). 토큰 상한을 둬 초과 시
+// 인라인 diff 를 생략하고 나란히 보기 전용으로 자동 전환(렌더 블로킹 회피).
+const REVISE_DIFF_TOKEN_CAP = 1000;
+function _rvTooLargeForInline(before, after){
+  return _rvTokenize(before).length > REVISE_DIFF_TOKEN_CAP || _rvTokenize(after).length > REVISE_DIFF_TOKEN_CAP;
+}
+function renderDiff(before, after){
+  const el = $("#rv-diff-area"); if(!el) return;
+  STATE.reviseBefore = before; STATE.reviseAfter = after; STATE.reviseSideBySide = false;
+  // 토큰 상한 초과 — LCS DP 블로킹 회피. 인라인 생략하고 나란히 보기로 자동 전환 + 안내.
+  STATE.reviseTooLarge = _rvTooLargeForInline(before, after);
+  if(STATE.reviseTooLarge){ STATE.reviseSideBySide = true; renderSideBySide(true); return; }
+  const parts = diffWords(before, after);
+  const inline = parts.map(p=>{
+    const html = esc(p.text).replace(/\n/g, "<br>");
+    if(p.type==="del") return `<span class="diff-del">${html}</span>`;
+    if(p.type==="add") return `<span class="diff-add">${html}</span>`;
+    return html;
+  }).join("");
+  el.classList.remove("hidden");
+  el.innerHTML = `<div class="diff-bar">
+      <span class="muted small">바뀐 부분: <span class="diff-del">삭제</span> · <span class="diff-add">추가</span></span>
+      <button type="button" class="diff-toggle" onclick="toggleSideBySide()">나란히 보기</button>
+    </div>
+    <div class="diff-inline">${inline}</div>`;
+}
+function renderSideBySide(tooLarge){   // 나란히 보기(원문/다듬은 글) — 인라인 LCS 없이 안전. tooLarge 면 인라인 토글 숨김+안내.
+  const el = $("#rv-diff-area"); if(!el) return;
+  const bf = esc(STATE.reviseBefore||"").replace(/\n/g,"<br>");
+  const af = esc(STATE.reviseAfter||"").replace(/\n/g,"<br>");
+  el.classList.remove("hidden");
+  const bar = tooLarge
+    ? `<span class="muted small">왼쪽: 원문 · 오른쪽: 다듬은 글 <span class="muted">— 분량이 많아 변경 표시 없이 나란히 보여드려요</span></span>`
+    : `<span class="muted small">왼쪽: 원문 · 오른쪽: 다듬은 글</span>
+       <button type="button" class="diff-toggle" onclick="toggleSideBySide()">인라인 보기</button>`;
+  el.innerHTML = `<div class="diff-bar">${bar}</div>
+    <div class="diff-side">
+      <div class="diff-side-before">${bf}</div>
+      <div class="diff-side-after">${af}</div>
+    </div>`;
+}
+function toggleSideBySide(){
+  const el = $("#rv-diff-area"); if(!el) return;
+  if(STATE.reviseTooLarge) return;   // 장문 — 인라인 LCS 블로킹 회피. 나란히 보기 고정(토글 비활성).
+  STATE.reviseSideBySide = !STATE.reviseSideBySide;
+  if(!STATE.reviseSideBySide){ renderDiff(STATE.reviseBefore, STATE.reviseAfter); return; }
+  renderSideBySide(false);
+}
+function renderGuardrail(g){
+  const el = $("#rv-guardrail"); if(!el) return;
+  el.classList.remove("hidden");
+  const ab = $("#rv-accept");
+  g = g || {};
+  let html = "";
+  if(g.passed){
+    // '보증'이 아니라 '검사 결과' — 추출기가 못 잡는 케이스가 남을 수 있으므로 디프 검토를 유도(정직한 카피)
+    html = `<span class="gr-pill ok">✓ 설정 충돌은 발견되지 않았어요</span><div class="gr-hint">자동 점검 결과예요 — 바뀐 부분은 한 번 확인해 주세요</div>`;
+  } else {
+    if(g.G_A_passed === false){
+      const kinds = (g.new_hard||[]).map(h=>kindLabel(h.kind)).filter(Boolean);
+      html += `<div class="gr-row"><span class="gr-pill bad">기존 설정과 충돌하는 표현이 생겼습니다</span>`;
+      if(kinds.length) html += `<div class="gr-list">${esc([...new Set(kinds)].join(", "))}</div>`;
+      html += `</div>`;
+    }
+    if(g.G_B_passed === false){
+      html += `<div class="gr-row"><span class="gr-pill bad">이름·수치가 바뀌었습니다</span>`;
+      const cc = (g.claim_changes||[]).slice(0,8).map(c=>
+        `<div class="gr-change"><b>${esc(c.entity)}</b> · ${esc(c.key)}: <span class="diff-del">${esc(c.before)}</span> → <span class="diff-add">${esc(c.after)}</span></div>`).join("");
+      if(cc) html += `<div class="gr-list">${cc}</div>`;
+      html += `</div>`;
+    }
+    if(g.length_ok === false){
+      html += `<div class="gr-row"><span class="gr-pill bad">분량이 너무 많이 바뀌었습니다</span></div>`;
+    }
+    if(!html) html = `<div class="gr-row"><span class="gr-pill bad">${esc(g.reason||"다듬은 결과를 채택할 수 없습니다")}</span></div>`;
+  }
+  // advisory(신규 표현) — 비차단. 노랑 pill.
+  if((g.new_keys_advisory||[]).length){
+    html += `<div class="gr-row"><span class="gr-pill warn">새 표현 추가됨 (설정 변경 아님)</span></div>`;
+  }
+  el.innerHTML = html;
+  // 채택 버튼: 통과 시에만 활성/표시
+  if(ab){
+    if(g.passed){ ab.classList.remove("hidden"); ab.disabled = false; }
+    else { ab.classList.add("hidden"); ab.disabled = true; }
+  }
+}
+async function acceptRevise(chapterNo){
+  const idEl = $("#rv-revision-id"); const revId = idEl?idEl.textContent.trim():"";
+  if(!revId){ _rvErr("채택할 후보가 없습니다. 먼저 다듬어 주세요."); return; }
+  _rvErr("");
+  const btn = $("#rv-accept"); const restore = btn?btn.textContent:"채택";
+  if(btn){ btn.disabled = true; btn.textContent = "채택 중…"; }
+  try{
+    await api.post(`/api/projects/${STATE.project.id}/chapters/${chapterNo}/revise/accept`,
+                   { revision_id: revId });
+  }catch(e){
+    _rvErr(String(e.message||e));   // 409=가드레일 재검증 실패 등
+    if(btn){ btn.disabled = false; btn.textContent = restore; }
+    return;
+  }
+  STATE.project = await api.get(`/api/projects/${STATE.project.id}`);   // 최신화(본문·이력 갱신)
+  renderChapters(); renderReader();
+  cleanupReviseModal();   // 닫기 + STATE.reviseModal 초기화(스테일 참조 방지)
+  toast("퇴고가 적용됐습니다", "ok");
+}
+async function undoRevise(chapterNo){
+  if(!confirm("마지막 퇴고를 되돌릴까요? 본문이 다듬기 전으로 돌아갑니다.")) return;
+  try{
+    await api.post(`/api/projects/${STATE.project.id}/chapters/${chapterNo}/revise/undo`, {});
+  }catch(e){
+    toast(String(e.message||e), "bad"); return;
+  }
+  STATE.project = await api.get(`/api/projects/${STATE.project.id}`);
+  renderChapters(); renderReader();
+  toast("퇴고를 되돌렸습니다", "ok");
+}
 
 health(); renderStartExamples(); router();   // 라우터가 현재 해시(기본=홈) 렌더 — 새로고침/딥링크 복원

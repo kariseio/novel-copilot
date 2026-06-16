@@ -3,7 +3,10 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>웹소설 코파일럿</title>
+<title>웹소설 코파일럿 — AI 웹소설 집필 도구</title>
+<meta name="description" content="한 줄의 아이디어로 세계관을 짓고, 일관성 검사를 거쳐 회차를 함께 써내려가는 AI 웹소설 집필 코파일럿." />
+<meta property="og:title" content="웹소설 코파일럿" />
+<meta property="og:description" content="AI가 쓰고, 작가가 이끕니다 — 세계관·인물·설정을 설계하고 회차를 한 화씩 완성." />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" />
@@ -25,6 +28,11 @@
   </section>
 
   <div class="home-grid">
+    <section class="panel lib-panel">
+      <h2>내 작품 <span class="muted small" id="lib-count"></span></h2>
+      <div id="project-list" class="book-list">불러오는 중…</div>
+    </section>
+
     <section class="panel start-panel">
       <h2>새 작품 시작</h2>
       <p class="muted small">한 문장이어도 좋아요. AI와 <b>대화하며</b> 세계관을 함께 키워갑니다 — 준비되면 ‘세계 생성’.</p>
@@ -35,11 +43,6 @@
       </form>
       <div class="start-examples" id="start-examples"></div>
       <div id="start-status" class="status"></div>
-    </section>
-
-    <section class="panel">
-      <h2>내 작품</h2>
-      <div id="project-list" class="project-list">불러오는 중…</div>
     </section>
   </div>
 </main>
@@ -132,32 +135,63 @@
     </div>
   </div>
 
-  <div class="proj-grid">
-    <!-- LEFT: chapters / reader -->
-    <section class="panel col-reader">
-      <div class="tabs">
-        <button class="tab active" data-tab="reader" onclick="switchTab('reader')">회차</button>
-        <button class="tab" data-tab="bible" onclick="switchTab('bible')">설정집</button>
-        <button class="tab" data-tab="graph" onclick="switchTab('graph')">인물 관계</button>
-        <button class="tab" data-tab="arc" onclick="switchTab('arc')">이야기 구조</button>
-        <button class="tab" data-tab="worldgen" onclick="switchTab('worldgen')">세계관 만들기</button>
-      </div>
-      <div id="tab-reader">
-        <div id="chapter-nav" class="chapter-nav"></div>
-        <article id="chapter-body" class="chapter-body muted">왼쪽에서 회차를 고르거나, 가운데에서 다음 회차를 써보세요.</article>
-      </div>
-      <div id="tab-bible" class="hidden"></div>
-      <div id="tab-arc" class="hidden"></div>
-      <div id="tab-worldgen" class="hidden">
-        <div class="muted small" style="margin-bottom:.7em">대화하며 세계관을 함께 넓혀갑니다. AI가 제안한 인물·설정은 <b>미확정</b> 상태로 더해지며,
-          관계도에서 직접 잇거나 설정집에서 ‘공식 설정으로 확정’하면 작품의 공식 설정이 됩니다.</div>
-        <div id="wg-log" class="wg-log"></div>
-        <div class="wg-input">
-          <textarea id="wg-msg" rows="2" placeholder="예: 주인공의 라이벌을 만들자. 같은 스승 밑에서 배웠지만 길이 갈렸어."></textarea>
-          <button class="primary" id="wg-send" onclick="sendWorldgen()">보내기</button>
+  <div class="proj-shell">
+    <!-- 작품 사이드바(영속 네비) -->
+    <aside class="proj-sidebar">
+      <nav class="side-nav" aria-label="작품 내비게이션">
+        <a class="side-link" data-sec="overview" role="button" tabindex="0" onclick="goSection('overview')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('overview')}">개요</a>
+        <a class="side-link" data-sec="write" role="button" tabindex="0" onclick="goSection('write')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('write')}">집필 작업대</a>
+        <div class="side-div"></div>
+        <a class="side-link" data-sec="bible" role="button" tabindex="0" onclick="goSection('bible')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('bible')}">설정집</a>
+        <a class="side-link" data-sec="cast" role="button" tabindex="0" onclick="goSection('cast')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('cast')}">인물 관계</a>
+        <a class="side-link" data-sec="world" role="button" tabindex="0" onclick="goSection('world')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('world')}">세계관 만들기</a>
+        <div class="side-div"></div>
+        <a class="side-link" data-sec="serial" role="button" tabindex="0" onclick="goSection('serial')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('serial')}">연재 관리</a>
+      </nav>
+    </aside>
+
+    <div class="proj-main">
+      <!-- 개요(허브) -->
+      <section id="sec-overview" class="proj-sec"></section>
+
+      <!-- 집필 작업대: 회차 리더 + 집필 엔진 -->
+      <section id="sec-write" class="proj-sec hidden">
+        <div class="write-grid">
+          <section class="panel col-reader">
+            <div id="chapter-nav" class="chapter-nav"></div>
+            <article id="chapter-body" class="chapter-body muted">회차를 고르거나, 다음 회차를 써보세요.</article>
+          </section>
+          <section class="panel col-engine">
+            <h3>회차 집필 <span class="muted small">AI 집필 · 일관성 검사</span></h3>
+            <label class="directive-lbl">작가 지시 <span class="muted">(다음 회차부터 반영됩니다)</span>
+              <textarea id="directive" rows="2" placeholder="예: 강도현은 이미 죽었다(직접 등장 금지). 주인공의 트라우마를 부각."></textarea>
+            </label>
+            <label class="dir-keep"><input type="checkbox" id="dir-keep" /> 계속 적용 <span class="muted small">— 체크하면 다음 회차에도 이 지시를 유지(아크 내내 지킬 제약)</span></label>
+            <button id="gen-btn" class="primary" onclick="generateNext()">다음 회차 쓰기</button>
+            <div id="harness-log" class="harness-log"></div>
+            <div id="gen-result" class="gen-result"></div>
+            <details class="geninfo">
+              <summary>🔍 이 회차 생성 정보 — 어떤 정보로 만들었나</summary>
+              <div id="inspect-gen" class="inspect-body"></div>
+            </details>
+          </section>
         </div>
-      </div>
-      <div id="tab-graph" class="hidden">
+      </section>
+
+      <!-- 설정집: 설정집 / 공식 설정 / 작품 노트 -->
+      <section id="sec-bible" class="proj-sec panel hidden">
+        <div class="tabs">
+          <button class="tab active" data-sub="bible" onclick="bibleSub('bible')">설정집</button>
+          <button class="tab" data-sub="onto" onclick="bibleSub('onto')">공식 설정</button>
+          <button class="tab" data-sub="wiki" onclick="bibleSub('wiki')">작품 노트</button>
+        </div>
+        <div id="tab-bible"></div>
+        <div id="inspect-onto" class="inspect-body hidden">…</div>
+        <div id="inspect-wiki" class="inspect-body hidden">…</div>
+      </section>
+
+      <!-- 인물 관계 -->
+      <section id="sec-cast" class="proj-sec panel hidden">
         <div class="graph-toolbar">
           <button onclick="promptAddEntity()">＋ 인물·세력 추가</button>
           <span class="graph-sel" id="graph-sel">두 인물을 클릭해 관계를 이어보세요</span>
@@ -170,31 +204,30 @@
         <div id="cy"></div>
         <div id="graph-status" class="graph-status muted small"></div>
         <div id="graph-legend" class="graph-legend"></div>
-      </div>
-    </section>
+      </section>
 
-    <!-- CENTER: generation -->
-    <section class="panel col-engine">
-      <h3>회차 집필 <span class="muted small">AI 집필 · 일관성 검사</span></h3>
-      <label class="directive-lbl">작가 지시 <span class="muted">(다음 회차부터 반영됩니다)</span>
-        <textarea id="directive" rows="2" placeholder="예: 강도현은 이미 죽었다(직접 등장 금지). 주인공의 트라우마를 부각."></textarea>
-      </label>
-      <button id="gen-btn" class="primary" onclick="generateNext()">다음 회차 쓰기</button>
-      <div id="harness-log" class="harness-log"></div>
-      <div id="gen-result" class="gen-result"></div>
-    </section>
+      <!-- 세계관 만들기 -->
+      <section id="sec-world" class="proj-sec panel hidden">
+        <h3>세계관 만들기 <span class="muted small">AI와 대화하며 인물·설정 넓히기</span></h3>
+        <div class="muted small" style="margin-bottom:.7em">대화하며 세계관을 함께 넓혀갑니다. AI가 제안한 인물·설정은 <b>미확정</b> 상태로 더해지며,
+          관계도에서 직접 잇거나 설정집에서 ‘공식 설정으로 확정’하면 작품의 공식 설정이 됩니다.</div>
+        <div id="wg-log" class="wg-log"></div>
+        <div class="wg-input">
+          <textarea id="wg-msg" rows="2" placeholder="예: 주인공의 라이벌을 만들자. 같은 스승 밑에서 배웠지만 길이 갈렸어."></textarea>
+          <button class="primary" id="wg-send" onclick="sendWorldgen()">보내기</button>
+        </div>
+      </section>
 
-    <!-- RIGHT: inspectors -->
-    <section class="panel col-inspect">
-      <div class="tabs">
-        <button class="tab active" data-itab="onto" onclick="switchInspect('onto')">공식 설정</button>
-        <button class="tab" data-itab="wiki" onclick="switchInspect('wiki')">작품 노트</button>
-        <button class="tab" data-itab="gen" onclick="switchInspect('gen')">🔍 생성 정보</button>
-      </div>
-      <div id="inspect-onto" class="inspect-body">…</div>
-      <div id="inspect-wiki" class="inspect-body hidden">…</div>
-      <div id="inspect-gen" class="inspect-body hidden">…</div>
-    </section>
+      <!-- 연재 관리: 연재 현황 / 이야기 구조 -->
+      <section id="sec-serial" class="proj-sec panel hidden">
+        <div class="tabs">
+          <button class="tab active" data-sub="status" onclick="serialSub('status')">연재 현황</button>
+          <button class="tab" data-sub="structure" onclick="serialSub('structure')">이야기 구조</button>
+        </div>
+        <div id="serial-status"></div>
+        <div id="serial-structure" class="hidden"></div>
+      </section>
+    </div>
   </div>
 </main>
 
@@ -203,12 +236,17 @@
   <div class="viewer-bar">
     <button class="viewer-close" onclick="closeViewer()" title="작업실로 돌아가기">✕ 닫기</button>
     <div class="viewer-work" id="v-work">…</div>
-    <select id="v-jump" class="viewer-jump" onchange="viewerJump(this.value)" title="회차 이동"></select>
+    <div class="viewer-tools">
+      <button onclick="readerFont(-1)" title="글자 작게" aria-label="글자 작게">A−</button>
+      <button onclick="readerFont(1)" title="글자 크게" aria-label="글자 크게">A+</button>
+      <select id="v-jump" class="viewer-jump" onchange="viewerJump(this.value)" title="회차 이동"></select>
+    </div>
   </div>
   <article class="viewer-page">
     <h1 id="v-title" class="viewer-title">…</h1>
     <div id="v-badge" class="viewer-badge"></div>
     <div id="v-body" class="viewer-body"></div>
+    <div id="v-next-preview"></div>
     <nav class="viewer-nav">
       <button id="v-prev" onclick="viewerNav(-1)">← 이전 화</button>
       <span id="v-count" class="viewer-count muted"></span>
