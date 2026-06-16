@@ -13,7 +13,8 @@ from fastapi.responses import StreamingResponse, JSONResponse, Response
 from ..domain.project import ProjectSeed
 from .schemas import (CreateProjectRequest, DirectiveRequest, EntityRequest,
                       RelationRequest, EndRelationRequest, BibleEntryRequest, BibleUpdateRequest,
-                      WorldgenTurnRequest, StylePolicyRequest)
+                      WorldgenTurnRequest, StylePolicyRequest,
+                      ReviseRequest, ReviseAcceptRequest, RevisionSummary)
 
 router = APIRouter(prefix="/api")
 
@@ -321,6 +322,69 @@ def get_chapter(pid: str, n: int, request: Request):
     if not ch:
         raise HTTPException(404, "chapter not found")
     return ch.model_dump()
+
+
+# ---- 퇴고(회차 본문 사후 다듬기 — 사실 불변) ----
+@router.post("/projects/{pid}/chapters/{n}/revise")
+def revise_chapter(pid: str, n: int, req: ReviseRequest, request: Request):
+    """후보 생성 — 작가 지시로 회차 산문을 다듬고 before/after·가드레일 반환(저장 안 함)."""
+    passes = [p for p in (req.passes or []) if p in ("reformat", "fix_tense")]   # D1: 허용 pass 만(우회 차단)
+    try:
+        result = _svc(request).revise_chapter(pid, n, req.directive, req.span_text, passes)
+    except KeyError:
+        raise HTTPException(404, "project or chapter not found")
+    except ValueError as e:
+        if "span_not_found" in str(e):
+            raise HTTPException(400, "구간을 원문에서 찾을 수 없습니다")
+        raise HTTPException(400, str(e))
+    if result is None:   # 423 Locked: 회차 생성 중(lost-update 방지)
+        raise HTTPException(423, "회차 생성 중입니다")
+    return result
+
+
+@router.post("/projects/{pid}/chapters/{n}/revise/accept")
+def accept_revision(pid: str, n: int, req: ReviseAcceptRequest, request: Request):
+    """후보 채택 → 새 버전 저장. 서버 가드레일 재검증 실패 시 409."""
+    try:
+        result = _svc(request).accept_revision(pid, n, req.revision_id, req.after_text,
+                                               req.span_text, req.passes)
+    except KeyError:
+        raise HTTPException(404, "project or chapter not found")
+    except ValueError as e:
+        raise HTTPException(409, str(e))
+    if result is None:   # 423 Locked: 회차 생성 중(lost-update 방지)
+        raise HTTPException(423, "회차 생성 중입니다")
+    return result
+
+
+@router.post("/projects/{pid}/chapters/{n}/revise/undo")
+def undo_revision(pid: str, n: int, request: Request):
+    """마지막 채택 되돌리기 — text/summary/detail_synopsis 복원."""
+    try:
+        result = _svc(request).undo_revision(pid, n)
+    except KeyError:
+        raise HTTPException(404, "project or chapter not found")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return result
+
+
+@router.get("/projects/{pid}/chapters/{n}/revisions")
+def get_revisions(pid: str, n: int, request: Request):
+    """퇴고 이력 조회(읽기 전용)."""
+    state = _svc(request).get_project(pid)
+    if not state:
+        raise HTTPException(404, "project not found")
+    ch = state.chapter(n)
+    if not ch:
+        raise HTTPException(404, "chapter not found")
+    return {"revisions": [RevisionSummary(
+        revision_id=r.revision_id, directive=r.directive, created_at=r.created_at,
+        reverted=r.reverted,
+        # guardrail_passed 는 Optional[bool] — None(미검사/구형 레코드)을 bool(None)=False 로
+        # '실패' 오보하던 버그 수정. accept 는 guardrail 통과 후에만 기록(=True)하므로 None 은 통과로 매핑.
+        guardrail_passed=(r.guardrail_passed if r.guardrail_passed is not None else True),
+        span_text=r.span_text).model_dump() for r in ch.revisions]}
 
 
 @router.get("/projects/{pid}/export")

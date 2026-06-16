@@ -15,7 +15,8 @@ import re
 from ..domain.project import ProjectSeed, ProjectState
 from ..domain.draft import WorldDraft, ConceptBrief
 from ..domain.world import EntitySpec, WorldRuleSpec
-from ..domain.types import AuthorDirective, ChapterStatus, WikiPage, RelationEdge, RetrievedItem, RuleSpec, SignalGrade
+from ..domain.types import (AuthorDirective, ChapterStatus, WikiPage, RelationEdge, RetrievedItem,
+                            RuleSpec, SignalGrade, ChapterRevision, Violation)
 from ..domain.bible import StoryBible, BibleEntry, CATEGORY_LABEL, template_for, normalize_category
 from ..llm.base import LLMProvider
 from ..llm.factory import create_provider
@@ -183,6 +184,9 @@ class CopilotService:
         self._drafts: dict = {}       # 생성 전 컨셉 드래프트(휘발 — finalize 시 ProjectState 로 승격)
         self._finalizing: set = set() # finalize 진행 중인 draft id(EventSource 재연결 중복 생성 차단)
         self._draft_lock = threading.Lock()
+        self._revise_drafts: dict = {}     # 퇴고 후보 캐시: revision_id → draft dict(휘발, TTL — accept 시 소비)
+        self._revise_lock = threading.Lock()
+        self._revise_ttl: float = 1800     # 30분(만료 후보 정리)
 
     @property
     def wg_provider(self) -> LLMProvider:
@@ -382,6 +386,289 @@ class CopilotService:
             state.directives.append(d)
             self.repo.save(state)
             return d
+
+    # ---- 퇴고(회차 본문 사후 다듬기 — 사실 불변) ----
+    @staticmethod
+    def _norm_claim_map(claims: list[dict], vocab) -> dict:
+        """CheckResult.claims → (entity_id, key) → 정규화 토큰값 맵. G-B 표면 비교 원료.
+        캐논성 키(범주형·수치·상태)만 뽑고 evidence 키·appears_as 는 제외(표면 표현 차이는 정규화로 흡수)."""
+        canon_keys = (set(vocab.categorical_keys) | set(vocab.numeric_keys)
+                      | {a.key for a in vocab.state_specs() if a.key != "status"})
+        out: dict = {}
+        for c in claims or []:
+            eid = c.get("id")
+            if not eid:
+                continue
+            for k in canon_keys:
+                v = c.get(k)
+                if v in (None, "", "null", False):     # 값 없음 = 클레임 없음(누락은 비교 대상 아님)
+                    continue
+                out[(eid, k)] = str(v).strip().lower()  # 표면 표현 차이 흡수
+        return out
+
+    def _guardrail(self, before_text: str, after_text: str, before_res, ids, ont,
+                   checker, chapter: int) -> tuple[dict, object]:
+        """사실 불변 가드레일 전체 판정 — revise_chapter·accept_revision 양쪽에서 재사용.
+
+        G-A(신규 하드 델타 0) AND G-B(클레임 표면값 불변) AND 길이가드. 반환=(판정 dict, after_res).
+        involved_ids 는 호출부가 before_text 전체 스캔으로 고정(D2) — before·after 동일 주입(roster 대칭).
+        """
+        # (1) G-A 신규 하드 델타 — before 에 이미 있던 하드는 퇴고 책임 아니므로 무시
+        before_hard_keys = {(v.entity, v.kind) for v in before_res.hard}
+        after_res = checker.check_text(after_text, ont, chapter, ids)
+        after_hard_keys = {(v.entity, v.kind) for v in after_res.hard}
+        new_hard = after_hard_keys - before_hard_keys
+        g_a_passed = len(new_hard) == 0
+
+        # (2) G-B 클레임 표면 델타 — before 존재 (entity,key) 교집합에서 값이 바뀐 것만 차단
+        vocab = checker.extractor.vocab
+        before_map = self._norm_claim_map(before_res.claims, vocab)
+        after_map = self._norm_claim_map(after_res.claims, vocab)
+        changed = [(e, k, before_map[(e, k)], after_map[(e, k)])
+                   for (e, k) in before_map
+                   if (e, k) in after_map and before_map[(e, k)] != after_map[(e, k)]]
+        new_keys = [(e, k) for (e, k) in after_map if (e, k) not in before_map]   # advisory(신규 단정)
+        g_b_passed = len(changed) == 0
+
+        # (3) 길이 가드(전체 대 전체 — span replace 후 before/after 모두 회차 전체 본문)
+        ratio = len(after_text) / max(1, len(before_text))
+        length_ok = 0.5 <= ratio <= 1.8
+
+        def nm(eid):   # 엔티티 id → 표시명(작가 언어; 실패 시 id 폴백)
+            try:
+                return ont.name(eid)
+            except Exception:
+                return eid
+        reasons = []
+        if not g_a_passed:
+            reasons.append("기존 설정과 충돌하는 표현이 생겼습니다")
+        if not g_b_passed:
+            reasons.append("이름·수치가 바뀌었습니다")
+        if not length_ok:
+            reasons.append("분량이 너무 많이 바뀌었습니다")
+        result = {
+            "passed": g_a_passed and g_b_passed and length_ok,
+            "G_A_passed": g_a_passed, "G_B_passed": g_b_passed, "length_ok": length_ok,
+            "new_hard": [{"entity": e, "kind": k} for (e, k) in sorted(new_hard)],
+            "claim_changes": [{"entity": nm(e), "key": k, "before": bv, "after": av}
+                              for (e, k, bv, av) in changed],
+            "new_keys_advisory": [{"entity": nm(e), "key": k} for (e, k) in new_keys[:8]],
+            "reason": " / ".join(reasons),
+        }
+        return result, after_res
+
+    def _sweep_revise_drafts_locked(self) -> None:
+        """만료(TTL 초과) 퇴고 후보 폐기. _revise_lock 보유 상태에서."""
+        now = time.time()
+        for k in [k for k, d in self._revise_drafts.items()
+                  if now - (d.get("created_at") or 0) > self._revise_ttl]:
+            self._revise_drafts.pop(k, None)
+
+    def revise_chapter(self, pid: str, chapter_no: int, directive: str,
+                       span_text: str = "", passes: list[str] | None = None) -> dict | None:
+        """후보 생성(저장 안 함) — directive+span 으로 다듬은 after 와 가드레일 결과 반환.
+        before 기준선(involved_ids·check)을 1회 계산해 캐시 동봉(accept 산발 차단). 423=생성 중이면 None."""
+        passes = [p for p in (passes or []) if p in ("reformat", "fix_tense")]   # D1: 허용 pass 만
+        directive = (directive or "").strip()
+        if not directive:
+            raise ValueError("작가 지시가 비었습니다")
+        state = self.repo.get(pid)
+        if not state:
+            raise KeyError(pid)
+        ch = state.chapter(chapter_no)
+        if not ch:
+            raise KeyError(chapter_no)
+        if ch.status not in (ChapterStatus.FINALIZED, ChapterStatus.ESCALATED):
+            raise ValueError("대상 회차가 아닙니다")
+        sess = self.sessions.get_or_create(state)
+        # ── (1) 검증+스냅샷(빠름) — sess.lock 을 non-blocking 으로 잡아 '생성 중 즉시 423' 계약 보장.
+        #     locked() 체크 후 with 진입까지의 경쟁창 제거(이슈4): acquire(blocking=False) 가 실패하면 곧 None.
+        if not sess.lock.acquire(blocking=False):   # 회차 생성 중(lost-update 방지) → 423
+            return None
+        try:
+            state = self.repo.get(pid)    # 권위 재읽기
+            if not state:
+                raise KeyError(pid)
+            ch = state.chapter(chapter_no)
+            if not ch:
+                raise KeyError(chapter_no)
+            # TOCTOU 재검증(락 안) — 락 밖 481행 status 검사는 stale 스냅샷.
+            # 두 읽기 사이 다른 스레드가 채택/삭제로 본문·상태를 바꿨으면 before_text 가 잘못된 버전으로 캐시됨.
+            if ch.status not in (ChapterStatus.FINALIZED, ChapterStatus.ESCALATED):
+                raise ValueError("대상 회차가 아닙니다")
+            before_text = ch.text
+            ont = sess.bundle.ontology
+            checker = sess.bundle.checker
+            generator = sess.bundle.generator
+            # span 정규화 검증(있으면 정확히 1회 매칭)
+            if span_text:
+                normalized = re.sub(r"\s+", " ", span_text).strip()
+                from ..engine.harness import ChapterGenerator as _CG
+                if _CG._find_span(before_text, normalized) is None:
+                    raise ValueError("span_not_found")
+            # involved_ids 고정(D2) — before_text 전체 스캔 1회, before·after 동일 주입
+            ids = sorted(set(ont.scan_present_ids(before_text)))
+        finally:
+            sess.lock.release()           # ── LLM 콜 전에 락 해제(이슈1): 생성 스레드 블로킹 방지
+        # ── (2) LLM 콜(락 없음) — before check_text(1콜) + revise_prose(1콜) + 가드레일 after check_text(1콜).
+        #     sess.lock 을 보유하지 않으므로 동시에 'generate_next_chapter' 가 진행 가능.
+        before_res = checker.check_text(before_text, ont, chapter_no, ids)   # before 1회 계산(캐시)
+        after_text = generator.revise_prose(
+            directive, before_text, span_text, passes, ids, ont, chapter_no)
+        guardrail, _after_res = self._guardrail(before_text, after_text, before_res,
+                                                ids, ont, checker, chapter_no)
+        # ── (2.5) 무변경 감지(이슈: revise_prose 가 LLM 실패·길이가드·빈 살균 시 before_text 그대로 폴백).
+        #     after==before 면 가드레일은 ratio=1.0 으로 통과하나 '성공한 퇴고'가 아니다.
+        #     후보를 캐시하지 않고 changed:false 로 명시 반환 → 프론트가 '효과 없음'을 작가에게 고지(채택 무의미).
+        if after_text == before_text:
+            sess.bus.emit("revise", "no_change")   # CopilotService 엔 bus 없음 — 세션 bus 사용(락 밖 로컬 sess 유효)
+            return {
+                "revision_id": None, "before_text": before_text,
+                "after_text": after_text, "span_text": span_text,
+                "changed": False,
+                "guardrail": {k: guardrail[k] for k in
+                              ("passed", "G_A_passed", "G_B_passed", "length_ok",
+                               "new_hard", "claim_changes", "new_keys_advisory", "reason")},
+                "passes_used": passes,
+            }
+        # ── (3) 캐시 저장 — _revise_lock 으로만 최소 보호(sess.lock 불필요).
+        revision_id = uuid.uuid4().hex[:12]
+        with self._revise_lock:
+            self._sweep_revise_drafts_locked()
+            self._revise_drafts[revision_id] = {
+                "before_text": before_text, "after_text": after_text,
+                "before_res": before_res, "ids": ids, "passes": passes,
+                "directive": directive, "span_text": span_text,
+                "chapter_no": chapter_no, "pid": pid, "created_at": time.time(),
+            }
+        return {
+            "revision_id": revision_id, "before_text": before_text,
+            "after_text": after_text, "span_text": span_text,
+            "changed": True,
+            "guardrail": {k: guardrail[k] for k in
+                          ("passed", "G_A_passed", "G_B_passed", "length_ok",
+                           "new_hard", "claim_changes", "new_keys_advisory", "reason")},
+            "passes_used": passes,
+        }
+
+    def accept_revision(self, pid: str, chapter_no: int, revision_id: str,
+                        after_text_fb: str | None = None, span_text_fb: str | None = None,
+                        passes_fb: list[str] | None = None) -> dict | None:
+        """후보 채택 → 새 버전 저장. 서버 가드레일 재검증(before 캐시 신뢰·after 만 재계산).
+        멀티워커 캐시 미스 시 req 의 after_text 폴백을 쓰되 before 는 현재 repo 본문에서 재계산(아직 채택 전=before).
+
+        락 규율(revise_chapter 와 동일 — 이슈1/2/3): LLM 콜(_guardrail·폴백 check_text·_summarize)을
+        sess.lock 밖에서 수행한다. sess.lock 은 (1) 스냅샷·더블-accept 검사 (2) 최종 기록 두 번만 진입하고,
+        _revise_lock 은 sess.lock 진입 *전*에만 단독으로 잡아 pop(중첩 획득 제거 → 락 순서 역전 차단)."""
+        # ── (0) 캐시 pop — sess.lock 진입 전 _revise_lock 단독. 중첩 획득(sess.lock 안 _revise_lock) 제거.
+        #     get+pop 을 한 번에 처리: 만료 후보 정리도 같은 락 구간에서.
+        draft = None
+        with self._revise_lock:
+            self._sweep_revise_drafts_locked()
+            draft = self._revise_drafts.pop(revision_id, None)
+        state = self.repo.get(pid)
+        if not state:
+            raise KeyError(pid)
+        sess = self.sessions.get_or_create(state)
+        # ── (1) 검증+스냅샷(빠름) — sess.lock 안에서 더블-accept 검사·before/after 값 확정까지만.
+        if not sess.lock.acquire(blocking=False):   # 회차 생성/타 채택 진행 중 → 라우트가 423
+            # 락 실패로 채택 미완료 → (0)에서 pop 한 후보를 복원해 재시도가 캐시히트하도록(이슈: 423 재시도 영구실패).
+            #   setdefault: 같은 사이 다른 스레드가 정식 채택을 끝냈으면 덮지 않음(이미 소비된 id 재삽입 방지).
+            if draft is not None:
+                with self._revise_lock:
+                    self._revise_drafts.setdefault(revision_id, draft)
+            return None
+        try:
+            state = self.repo.get(pid)        # 권위 재읽기
+            if not state:
+                raise KeyError(pid)
+            ch = state.chapter(chapter_no)
+            if not ch:
+                raise KeyError(chapter_no)
+            # 더블-accept 방어(락 안) — 이력에 같은 revision_id 가 이미 있으면 거절(이중 기록 방지).
+            if any(r.revision_id == revision_id for r in ch.revisions):
+                raise ValueError("이미 채택된 퇴고입니다")
+            ont = sess.bundle.ontology
+            checker = sess.bundle.checker
+            before_text = draft["before_text"] if draft else ch.text   # 폴백: 현재 본문=아직 채택 전이라 before
+            after_text = draft["after_text"] if draft else after_text_fb
+            if after_text is None:
+                raise ValueError("후보가 만료되었습니다(after_text 폴백 필요)")
+            # 락 밖 LLM 콜 사이 ch.text 가 교체되면(생성 완료) before 캐시가 구버전이 됨(lost-update).
+            # 채택 직전 현재 본문을 고정해 두고 (3)에서 재대조 → 다르면 ValueError 로 재시도 안내(이슈4).
+            current_text_at_snapshot = ch.text
+            ids = draft["ids"] if draft else sorted(set(ont.scan_present_ids(before_text)))
+            before_res_cached = draft["before_res"] if draft else None
+            directive = draft["directive"] if draft else "(폴백)"
+            span_text = draft["span_text"] if draft else (span_text_fb or "")
+            passes_used = draft["passes"] if draft else [p for p in (passes_fb or [])
+                                                         if p in ("reformat", "fix_tense")]
+        finally:
+            sess.lock.release()               # ── LLM 콜 전에 락 해제(이슈1/2): 생성 스레드 블로킹 방지
+        # ── (2) LLM 콜(락 없음) — 폴백 before check_text(고비용 extractor→LLM)·가드레일 after check_text·요약.
+        #     sess.lock 을 보유하지 않으므로 동시에 'generate_next_chapter' 가 진행 가능.
+        before_res = (before_res_cached if before_res_cached is not None
+                      else checker.check_text(before_text, ont, chapter_no, ids))
+        # 서버 가드레일 재검증(클라이언트 불신) — 실패 시 ValueError(라우트가 409)
+        guardrail, after_res = self._guardrail(before_text, after_text, before_res,
+                                               ids, ont, checker, chapter_no)
+        if not guardrail["passed"]:
+            raise ValueError(f"가드레일 재검증 실패: {guardrail['reason']}")
+        new_summary, new_detail = sess.bundle.generator._summarize(after_text, "")   # 요약 재생성(1콜)
+        # ── (3) 최종 기록 — sess.lock 재진입. 더블-accept·본문 변경 재검(락 밖 콜 사이 경쟁 차단).
+        with sess.lock:
+            state = self.repo.get(pid)        # 권위 재읽기
+            if not state:
+                raise KeyError(pid)
+            ch = state.chapter(chapter_no)
+            if not ch:
+                raise KeyError(chapter_no)
+            if any(r.revision_id == revision_id for r in ch.revisions):
+                raise ValueError("이미 채택된 퇴고입니다")    # (1)~(3) 사이 동시 accept 가 먼저 기록
+            if ch.text != current_text_at_snapshot:    # 락 밖 LLM 콜 사이 본문 교체됨 → before 캐시 무효(이슈4)
+                raise ValueError("본문이 생성 사이 변경됨")
+            # 본문 교체 + 이력 레코드 push(append-only) + 요약 반영 + RAG 재색인
+            ch.revisions.append(ChapterRevision(
+                revision_id=revision_id, directive=directive, span_text=span_text,
+                before_text=before_text, after_text=after_text,
+                before_summary=ch.summary, before_detail_synopsis=ch.detail_synopsis,
+                passes_used=passes_used,
+                violations_before=list(before_res.hard), violations_after=list(after_res.hard),
+                claim_changes=guardrail["claim_changes"], guardrail_passed=True,
+                guardrail_reason=guardrail["reason"],
+                created_at=time.strftime("%Y-%m-%dT%H:%M:%S")))
+            ch.text = after_text
+            ch.summary, ch.detail_synopsis = new_summary, new_detail   # 락 밖 재생성분 반영
+            sess.bundle.rag.index_chapter(chapter_no, after_text)   # RAG 재색인(멱등)
+            sess.snapshot_into(state)
+            self.repo.save(state)
+        # 캐시는 (0)에서 이미 소비됨(누수 창 제거).
+        return {"accepted": True, "chapter": ch.model_dump(), "revision_count": len(ch.revisions)}
+
+    def undo_revision(self, pid: str, chapter_no: int) -> dict:
+        """마지막 채택 되돌리기 — text/summary/detail_synopsis 복원 + RAG 재색인(결정론 복원)."""
+        state = self.repo.get(pid)
+        if not state:
+            raise KeyError(pid)
+        sess = self.sessions.get_or_create(state)
+        with sess.lock:
+            state = self.repo.get(pid)        # 권위 재읽기
+            if not state:
+                raise KeyError(pid)
+            ch = state.chapter(chapter_no)
+            if not ch:
+                raise KeyError(chapter_no)
+            last_rev = next((r for r in reversed(ch.revisions) if not r.reverted), None)
+            if last_rev is None:
+                raise ValueError("되돌릴 퇴고 이력이 없습니다")
+            ch.text = last_rev.before_text
+            ch.summary = last_rev.before_summary
+            ch.detail_synopsis = last_rev.before_detail_synopsis
+            last_rev.reverted = True
+            sess.bundle.rag.index_chapter(chapter_no, last_rev.before_text)   # RAG 복원(멱등)
+            sess.snapshot_into(state)
+            self.repo.save(state)
+        return {"reverted": True, "chapter": ch.model_dump(), "revision_id": last_rev.revision_id}
 
     # ---- R1: 작가 직접 입력(엔티티/관계) — 개입지점(R5 일부 선반영) ----
     def add_entity(self, pid: str, name: str, etype: str = "character",

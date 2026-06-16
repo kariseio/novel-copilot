@@ -5,6 +5,7 @@
 - 모든 Violation 은 signal_grade 를 갖는다 → det/quasi 만 binding, semantic 은 보고·escalation.
 """
 from __future__ import annotations
+import uuid
 from enum import Enum
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
@@ -90,6 +91,31 @@ class OntologyChange(BaseModel):
     reason: str = ""
 
 
+class ChapterRevision(BaseModel):
+    """퇴고(회차 본문 사후 다듬기) 1건의 이력 레코드.
+
+    본문은 여전히 ChapterRecord.text 단 하나(최신본)이고 이 레코드는 가산(append)만 한다.
+    undo 는 새 레코드를 만들지 않고 마지막 비-reverted 레코드를 reverted=True 마킹 +
+    before_text/before_summary/before_detail_synopsis 스냅샷으로 결정론 복원한다.
+    모든 필드가 default 보유 → 구 JSON 무중단 로드(revisions 없는 기존 회차는 [] 기본).
+    """
+    revision_id: str = Field(default_factory=lambda: uuid.uuid4().hex[:12])  # 충돌 없는 고유 ID(accept/reject lookup 키)
+    directive: str = ""                               # 작가 자유 지시
+    span_text: str = ""                               # 선택적 구간 원문 부분문자열(없으면 전체 다듬기)
+    before_text: str = ""                             # 퇴고 전 회차 본문(undo 복원용)
+    after_text: str = ""                              # 퇴고 후 회차 본문
+    before_summary: str = ""                          # undo 결정론 복원용 스냅샷
+    before_detail_synopsis: str = ""                  # undo 결정론 복원용 스냅샷
+    passes_used: list[Literal["reformat", "fix_tense"]] = Field(default_factory=list)  # 'reformat' | 'fix_tense' 만 허용(D1)
+    violations_before: list[Violation] = Field(default_factory=list)   # 하드만
+    violations_after: list[Violation] = Field(default_factory=list)    # 하드만
+    claim_changes: list[dict] = Field(default_factory=list)    # G-B: {entity, key, before, after}
+    guardrail_passed: Optional[bool] = None           # None=미검사, False=실패, True=통과
+    guardrail_reason: str = ""
+    reverted: bool = False
+    created_at: str = ""                              # 서버 time.strftime — 클라이언트 생성 금지
+
+
 class ChapterRecord(BaseModel):
     chapter: int
     title: str = ""
@@ -117,6 +143,7 @@ class ChapterRecord(BaseModel):
     rounds: list[RoundTrace] = Field(default_factory=list)
     ontology_changes: list[OntologyChange] = Field(default_factory=list)
     usage_by_stage: dict = Field(default_factory=dict)   # 단계별 토큰(단위경제: 일관성 오버헤드율 계산 재료)
+    revisions: list[ChapterRevision] = Field(default_factory=list)   # 퇴고 이력(append-only; 본문은 text 1개 유지, undo 시 마지막 비-reverted 복원)
 
     @property
     def hard_remaining(self) -> list[Violation]:

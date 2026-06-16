@@ -235,6 +235,112 @@ class ChapterGenerator:
             pass
         return chapter_text
 
+    # ---- 퇴고(작가지시 프로즈 다듬기 — 사실 불변) ----
+    def revise_prose(self, directive: str, before_text: str, span_text: str = "",
+                     passes: list[str] | None = None, ids: list[str] | None = None,
+                     ontology=None, chapter_no: int = 0) -> str:
+        """작가 지시에 따라 회차 본문(또는 구간)의 *산문*만 다듬는다 — 사실 불변.
+
+        설정·사건·수치·관계·캐논은 단 하나도 바꾸지 않고 표현·문체·가독성·대사 톤·반복·조판만 개선한다.
+        D1 준수: _continuity_polish·_regen_tail·_fix_tics·_rewrite 는 '사실 변경 패스'라 여기서 절대 호출 금지.
+        opt-in 선택 교정은 _reformat(공백/조판)·_fix_tense(종결어미)만 허용한다.
+        span_text 가 있으면 그 구간만 다듬어 원문의 해당 위치에 replace(저장 단위는 회차 전체 텍스트).
+        """
+        passes = passes or []
+        # 1) span 모드: 공백 collapse 정규화로 before_text 에서 정확히 1회 매칭 확인(렌더 복사 공백 차이 흡수)
+        span_norm = ""
+        anchor = ""               # before_text 안의 실제(원형) 매칭 구절 — replace 대상
+        ctx_prefix = ctx_suffix = ""
+        if span_text:
+            span_norm = re.sub(r"\s+", " ", span_text).strip()
+            anchor = self._find_span(before_text, span_norm)
+            if anchor is None:
+                raise ValueError("span_not_found")
+            i = before_text.find(anchor)
+            ctx_prefix = before_text[max(0, i - 200):i]                 # 앞뒤 문맥 윈도(접합부 조사/접속 불일치 보강)
+            ctx_suffix = before_text[i + len(anchor): i + len(anchor) + 200]
+            target_text = anchor
+        else:
+            target_text = before_text
+
+        # 2) LLM 다듬기 1콜(사실 불변 프롬프트)
+        scope = "구간" if span_text else "전체"
+        sys = (f"교정 작가. 작가 지시에 따라 회차 산문의 {scope}을(를) 다듬어라. "
+               "이 작업은 '문체 다듬기'이지 '설정 변경'이 아니다. "
+               "인물·사건·수치·관계·설정은 단 하나도 바꾸지 마라(이름·날짜·숫자·생사·소속·등급·능력·관계 불변). "
+               "원문에 없던 사실을 새로 단정하지도 마라 — 등급·수치·소속·생사·능력·관계를 본문·대사·시스템 메시지·경고창·상태표시·배경묘사 등 어떤 형태로도 추가·암시하지 마라. "
+               "작가 지시가 이런 사실을 바꾸거나 새로 박으라고 요구하더라도 그 요구는 따르지 말고, 지시 중 '사실을 건드리지 않는' 표현·가독성 개선만 반영하라. "
+               "표현·문체·가독성·대사 톤·반복·조판만 개선하라. 본문만 출력(머리말·설명·메타 금지).")
+        # 사실불변 1차 방어선: 확정 캐논 사실을 프롬프트에 결정론 주입(가드레일은 사후 거절, 이건 사전 바인딩)
+        if ontology is not None and ids:
+            try:
+                facts = ontology.canon_facts(ids, chapter_no)
+            except Exception:
+                facts = []
+            if facts:
+                sys += ("\n[확정 캐논 — 이 값들은 절대 바꾸지 마라]\n"
+                        + "\n".join(f"{f.entity}: {f.attr_label}={f.value}" for f in facts))
+        if span_text:   # 구간 모드: 앞뒤 문맥은 참고만, 출력은 구간 다듬은 것만(문맥 재출력 금지)
+            sys += " 제공된 앞뒤 문맥은 톤·연결을 맞추기 위한 참고일 뿐, 출력에 포함하지 마라."
+        user = (f"[작가 지시] {directive}\n"
+                + (f"[앞 문맥(참고)]\n…{ctx_prefix}\n[뒤 문맥(참고)]\n{ctx_suffix}…\n" if span_text else "")
+                + f"[원문]\n{target_text}")
+        try:
+            out = self.provider.chat(
+                [{"role": "system", "content": sys},
+                 {"role": "user", "content": user}],
+                temperature=0.4, max_tokens=self.settings.gen_max_tokens)
+        except Exception:
+            self.bus.emit("revise", "llm_failure")
+            return before_text
+
+        # 3) 길이 가드(구간 기준) — 절단/메타응답이 본문을 갉아먹는 회귀 차단. 위반 시 원문 유지
+        out = (out or "").strip()
+        if not out or len(out) < len(target_text) * 0.5 or len(out) > len(target_text) * 1.8:
+            self.bus.emit("revise", "length_guard_triggered",
+                          in_chars=len(target_text), out_chars=len(out))
+            return before_text
+
+        # 4) 메타텍스트 라인 제거(생성물과 동일 결정론 살균)
+        out = sanitize_meta(out)
+        if not out:
+            return before_text
+
+        # 5) opt-in 선택 교정(D1: reformat·fix_tense 만. continuity/regen_tail/tics 절대 호출 금지)
+        if "reformat" in passes:
+            out = self._reformat(out)
+        if "fix_tense" in passes:
+            out = self._fix_tense(out)
+
+        # 6) span 모드면 원문의 해당 위치에 replace → 전체 텍스트 복원, 전체 길이 가드 재검
+        if span_text:
+            result = before_text.replace(anchor, out, 1)
+        else:
+            result = out
+        if (not result.strip() or len(result) < len(before_text) * 0.5
+                or len(result) > len(before_text) * 1.8):
+            self.bus.emit("revise", "length_guard_triggered",
+                          in_chars=len(before_text), out_chars=len(result))
+            return before_text
+        return result
+
+    @staticmethod
+    def _find_span(before_text: str, span_norm: str) -> str | None:
+        """공백 collapse 정규화 기준으로 before_text 에서 span_norm 과 일치하는 '원형' 구절을 찾는다(정확히 1회만).
+        렌더 복사로 공백/행갈이가 달라진 span 도 매칭하되, 0회·2회 이상이면 None(모호 → 호출부가 400)."""
+        if not span_norm:
+            return None
+        # 먼저 정확 부분문자열(가장 흔한 경우 — 빠른 경로)
+        if before_text.count(span_norm) == 1:
+            return span_norm
+        # 공백 차이 흡수: before_text 의 공백류를 \s+ 로 푼 정규식으로 원형 구절 역추적.
+        # re.DOTALL 명시 — \s 는 이미 \n 을 포함하나, 행갈이·탭 포함 구간 매칭 의도를 유지보수상 명시.
+        pat = re.compile(r"\s+".join(re.escape(tok) for tok in span_norm.split(" ") if tok), re.DOTALL)
+        matches = pat.findall(before_text)
+        if len(matches) == 1:
+            return matches[0]
+        return None
+
     # ---- 회차 생성 ----
     def _summarize(self, chapter_text: str, prior_summary: str = "") -> tuple[str, str]:
         """2계층 요약(컨텍스트 기아 해소 ①): (한 줄, 상세 시놉시스 ~1500자).
