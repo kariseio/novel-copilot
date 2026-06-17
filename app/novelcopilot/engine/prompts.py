@@ -11,7 +11,21 @@ from ..domain.world import StyleSpec
 
 def render_style(style: StyleSpec) -> str:
     rules = "\n".join(f"{i + 1}) {r}" for i, r in enumerate(style.rules))
-    return f"[웹소설 문체 규칙 — 반드시 준수]\n{rules}"
+    block = f"[웹소설 문체 규칙 — 반드시 준수]\n{rules}"
+    # Layer 2 작가 문체 오버레이 — 설정 시 위 기본 규칙의 '미학 축'을 작가 지정으로 덮어쓴다(precedence 명시).
+    # 빈 값이면 추가 0 = 기존 동작과 동일(무회귀). '문체는 작가마다 다르다' → 기본 규칙은 디폴트일 뿐, 작가가 갈아끼운다.
+    overlay = (style.author_style or "").strip()
+    if overlay:
+        # 오버레이는 '미학 축'만 덮어쓴다. 바닥 제약은 재나열하지 않고 위 규칙을 참조만(중복 부정 명령 = 두더지잡기).
+        # 분량·시점/시제는 프롬프트가 아니라 결정론 게이트(norm·_fix_tense·tense_leak_ratio)가 실제 방어선이다.
+        block += (
+            "\n\n[작가 지정 문체 — 위 기본 규칙의 미학 축보다 우선]\n"
+            f"{overlay}\n"
+            "※ 문장 리듬·길이 변주·감정 처리 방식·직유/비유 밀도·서술 거리·어휘 격 같은 미학 축이 "
+            "위 기본 규칙과 충돌하면 이 작가 문체를 따른다. 단 위 규칙의 바닥 제약(모바일 가독 줄바꿈·호칭 자연화·"
+            "분량·시점/시제 일관)은 작가 문체와 무관하게 유지하라."
+        )
+    return block
 
 
 class PromptAssembler:

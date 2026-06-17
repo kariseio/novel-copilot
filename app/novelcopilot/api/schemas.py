@@ -60,6 +60,7 @@ class WorldgenTurnRequest(BaseModel):
 class StylePolicyRequest(BaseModel):
     """문체/생성 정책 편집(③ 작가 입력 전용) — 시스템 스티어링을 작가가 제어하는 경로."""
     system_persona: str | None = None
+    author_style: str | None = None           # Layer 2 작가 문체 오버레이(빈 문자열=해제)
     target_chars_per_chapter: int | None = None
     scenes_per_chapter: int | None = None
     rules: list[str] | None = None

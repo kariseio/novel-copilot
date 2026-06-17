@@ -103,6 +103,64 @@ def tense_leak_ratio(text: str) -> float:
     return present / len(sents)
 
 
+def ai_tell_profile(text: str, roster: set[str] | None = None) -> dict:
+    """한국어 'AI 티'의 무사전·결정론 분포 신호(KatFishNet 자질 재구현 — LLM 0콜·사전 0·형태소분석기 의존 0).
+
+    판정기가 아니라 '상대 추세 advisory' 다 — 절대 임계·이진 판정·자동 교정 트리거 금지(G4 측정·가시화 원칙,
+    no-whack-a-mole: 검출 패턴을 '교정 규칙'이 아니라 '측정 피처'로만 격하). 작가가 추세를 보고 판단한다.
+    근거: KatFishNet(ACL2025)·im-not-ai 가 독립 수렴한 한국어 AI티 핵심 축 — 쉼표 분포·문장길이 분산·어휘/종결 다양성.
+      ① comma_*    : AI는 분절적 쉼표가 과다(영어 학습 흔적). 사람은 더 적고 불규칙.
+      ② sent_len_cv: 문장 길이 변동계수(std/mean). 낮을수록 균일=AI 의심(사람은 장단 변주).
+                     ※교란: 액션/대사 위주 회차는 인간이 의도적으로 균일화 → 단독 판정 금물, 추세로만.
+      ③ lexical_mattr: 이동평균 TTR(고유어 제외, 길이-불변). 낮을수록 표현 반복=AI 의심.
+      ④ ending_div : 종결형 다양성(말미 음절 근사 — 어간 혼입 줄이려 마지막 1음절만; 이동평균·길이-불변).
+                     평서문 '~다' 단조 수렴을 포착. 형태소분석기 없는 거친 근사라 절대값 비교 금물.
+      ⑤ simile_per_1k: 비교 형태소(처럼/마치/듯이/듯한) 밀도 — 닫힌 형태소 클래스의 count 신호(교정 아님).
+    값은 절대 판정 금지 — 작품 코퍼스 분위수 대비 상대 추세로만 해석한다.
+    """
+    body = text or ""
+    sents = [s.strip() for s in re.split(r"\n+|(?<=[.!?…])\s+", body) if s and s.strip()]
+    sents = [s for s in sents if len(s) >= 2]
+    n = len(sents)
+    chars = len(re.findall(r"\S", body))
+    if n == 0 or chars == 0:
+        return {"comma_per_100": 0.0, "comma_per_sent": 0.0, "sent_len_cv": 0.0,
+                "lexical_mattr": 0.0, "ending_diversity": 0.0, "simile_per_1k": 0.0, "n_sent": 0}
+    commas = body.count(",") + body.count("，")
+    lens = [len(s) for s in sents]
+    mean = sum(lens) / n
+    sd = (sum((l - mean) ** 2 for l in lens) / n) ** 0.5
+
+    def _mawin(items: list, w: int) -> float:
+        # 이동평균 고유율(MATTR류) — 길이 교란 제거. 원시 TTR/종결율은 텍스트가 길수록
+        # 기계적으로 하락해 '회차 간 비교'를 왜곡(검증서 ch10·ch11 길이차로 확인). 창으로 길이-불변화.
+        # items<=창: 표준 MATTR 한계정의=원시 TTR. 정식 회차(단어~700·문장~130)는 항상 창>충족 →
+        # 이 fallback은 단편/미리보기 입력에만 닿고, 그 경우 값은 회차와 직접 비교하지 말 것.
+        if len(items) <= w:
+            return round(len(set(items)) / max(1, len(items)), 3)
+        rs = [len(set(items[i:i + w])) / w for i in range(len(items) - w + 1)]
+        return round(sum(rs) / len(rs), 3)
+
+    roster = roster or set()
+    words = [w for w in re.findall(r"[가-힣]{2,}", body) if not any(r in w for r in roster)]
+    # 종결형 근사: 말미 구두점·따옴표 제거 후 마지막 음절만(어간 혼입 최소화 — 평서문은 '다'로 수렴해
+    # 단조 AI 산문이 낮은 다양도로 정직하게 잡힌다). 완전한 어미 추출은 형태소분석기 필요 → 거친 근사.
+    def _final_syll(s: str) -> str:
+        t = re.sub(r'[\s.!?…"“”\'’—\-)\]]+$', "", s)
+        return t[-1:] if t else ""
+    endings = [e for e in (_final_syll(s) for s in sents) if e]
+    simile = len(re.findall(r"처럼|마치|듯이|듯한", body))
+    return {
+        "comma_per_100": round(commas / chars * 100, 2),     # ① 밀도(길이-불변)
+        "comma_per_sent": round(commas / n, 2),              # ① 문장당(길이-불변)
+        "sent_len_cv": round(sd / mean, 3) if mean else 0.0,  # ② CV(척도-불변) 낮을수록 균일(AI)
+        "lexical_mattr": _mawin(words, 60),                   # ③ 길이-불변 TTR, 낮을수록 반복(AI)
+        "ending_diversity": _mawin(endings, 40),              # ④ 길이-불변, 낮을수록 종결 단조(AI)
+        "simile_per_1k": round(simile / chars * 1000, 2),     # ⑤ 밀도, 높을수록 비유 강박(AI)
+        "n_sent": n,
+    }
+
+
 def chapter_quality_report(text: str, prev_tails: list[str], roster: set[str] | None = None) -> dict:
     """회차 1개의 결정론 품질 리포트 — 편집자 감점 축 전부 숫자로."""
     from .harness import fragmentation_score, short_line_ratio   # 기존 검출기 재사용
@@ -114,4 +172,5 @@ def chapter_quality_report(text: str, prev_tails: list[str], roster: set[str] | 
         "frag_score": round(fragmentation_score(text), 1),
         "tense_leak": round(tense_leak_ratio(text), 3),
         "directive_leak": bool(re.search(r"^\s*절단", text, re.MULTILINE)),
+        "ai_tell": ai_tell_profile(text, roster),   # 한국어 AI티 분포 신호(advisory 추세)
     }

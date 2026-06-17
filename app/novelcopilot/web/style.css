@@ -512,6 +512,26 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .retro-nudge a{color:var(--accent);font-weight:600;cursor:pointer;text-decoration:underline}
 .ledger-trend{display:flex;align-items:center;gap:.6em;margin:.5em 0 .2em}
 .spark{width:180px;height:34px;flex:none}
+/* 문체 지문 추세 — 중립 표현(경고색 없음: 판정이 아니라 추세) */
+.aitell-grid{display:flex;flex-direction:column;gap:.15em;margin:.4em 0 .5em}
+.aitell-row{display:grid;grid-template-columns:1fr 180px auto;align-items:center;gap:.7em;
+  padding:.3em 0;border-top:1px solid var(--line)}
+.aitell-row:first-child{border-top:none}
+.aitell-lbl{font-size:.84rem;line-height:1.4}
+.aitell-spk{width:180px;height:34px}
+.aitell-val{text-align:right;line-height:1.35;white-space:nowrap}
+.aitell-d{color:var(--muted-soft)}
+/* 모바일: 스파크라인을 숨기지 말고 풀너비로 reflow(추세 정보 유지 — 단일 숫자 강제 판정 회피) */
+@media(max-width:640px){
+  .aitell-row{grid-template-columns:1fr auto;grid-template-areas:"lbl val" "spk spk";row-gap:.25em}
+  .aitell-lbl{grid-area:lbl}.aitell-val{grid-area:val}
+  .aitell-spk{grid-area:spk;width:100%}.aitell-spk svg{width:100%}}
+/* 문체 설정 에디터(설정집 > 문체 탭) */
+.style-edit textarea{width:100%;min-height:6em;font-family:var(--font-sans);font-size:.92rem;line-height:1.6;
+  padding:.6em .7em;border:1px solid var(--line-strong);border-radius:var(--r-ctrl);background:var(--surface);color:var(--ink);resize:vertical}
+.style-row{display:flex;align-items:center;gap:.6em;margin:.6em 0 .2em;flex-wrap:wrap}
+.style-row label{display:flex;align-items:center;gap:.4em;font-size:.88rem}
+.style-actions{margin-left:auto;display:flex;gap:.5em}
 
 /* ===== 경량 모달(설정 추가 등 — 네이티브 prompt/confirm 대체) ===== */
 .modal-overlay{position:fixed;inset:0;z-index:70;background:rgba(17,19,23,.32);backdrop-filter:blur(2px);

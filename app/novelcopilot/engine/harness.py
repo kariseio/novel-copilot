@@ -70,7 +70,8 @@ class ChapterGenerator:
         self.bus = event_bus
         self.settings = settings
         self.assembler = PromptAssembler(style, settings.prev_chapter_context_chars)
-        self.style_block = render_style(style)
+        self.style_block = render_style(style)   # rules+author_style 렌더. 정책 패치는 update_style_policy 가
+        #   세션을 evict→ 다음 요청에 generator 재구성하므로 캐시여도 스테일 없음(라이브 참조 불필요).
 
     # ---- LLM 격리 지점 ----
     def plan_scenes(self, beat: dict, directives: list[AuthorDirective]) -> list[SceneSpec]:
@@ -125,7 +126,7 @@ class ChapterGenerator:
         return self.provider.chat(
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
              {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr}],
-            temperature=0.85, max_tokens=mt)
+            temperature=0.85, max_tokens=mt)   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
 
     def _continue(self, board, sofar: str, closing=False, recent_tails=None, key_events=None) -> str:
         """진행 이어쓰기 — 출고 분량은 지시가 아니라 '이야기 전진'으로 채운다(하한 지시=물 타기 차단).
@@ -147,7 +148,7 @@ class ChapterGenerator:
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
              {"role": "user", "content": self.assembler.assemble(cont_board, spec, sofar[-3500:]) + hook
               + "\n\n이어지는 본문만 출력(이미 쓴 부분 재출력 금지, 머리말·메타 금지)."}],
-            temperature=0.85,
+            temperature=0.85,   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
             max_tokens=self.settings.chapter_max_tokens)
 
     def _rewrite(self, scene_text, violations, board, max_tokens: int | None = None) -> str:
@@ -463,6 +464,7 @@ class ChapterGenerator:
         draft_ctx = {
             "persona": (self.style.system_persona or "")[:240],
             "style_rules": list(self.style.rules),                       # D-1: 매 draft 의 system 헤더 문체 규칙(상수)
+            "author_style": (self.style.author_style or "")[:240],       # Layer 2 작가 문체 오버레이(설정 시만)
             "world_rules": world_rules,                                  # D-6/M-1: 실제 주입되는 세계 규칙
             "ending_hook_mode": self.style.ending_hook,                  # D-3: 끝맺음 정책
             "recent_tails": [(t or "")[-80:] for t in (recent_tails or [])],

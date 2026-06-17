@@ -116,9 +116,11 @@ function bibleSub(sub){     // 설정집 페이지 내부 2차 탭: 설정집 / 
   $("#tab-bible").classList.toggle("hidden",sub!=="bible");
   $("#inspect-onto").classList.toggle("hidden",sub!=="onto");
   $("#inspect-wiki").classList.toggle("hidden",sub!=="wiki");
+  $("#inspect-style").classList.toggle("hidden",sub!=="style");
   if(sub==="bible") loadBible();
   else if(sub==="onto") loadOntology();
   else if(sub==="wiki") loadWiki();
+  else if(sub==="style") loadStylePolicy();
 }
 function serialSub(sub){    // 연재 관리 내부 2차 탭: 연재 현황 / 이야기 구조 (데이터는 loadSpine 가 한 번에 채움)
   STATE.serialSub = sub;
@@ -166,6 +168,38 @@ function gotoFirstEscalated(){   // 개요 '검토 필요' 카드 → 가장 빠
 }
 
 // ---------- 협업형 월드빌딩 대화 (R3) ----------
+// 문체 설정 — Layer 2 작가 문체 오버레이 + 끝맺음 정책. PUT /style 로 저장(다음 회차부터 반영).
+function loadStylePolicy(){
+  const el=$("#inspect-style"); if(!el) return;
+  const st=(STATE.project&&STATE.project.world&&STATE.project.world.style)||{};
+  const hooks=[['cliffhanger','절단신공 — 다음 화 결제 유도'],['soft','잔잔한 여운'],['none','지시 없음(자유)']];
+  el.innerHTML=`<div class="style-edit">
+    <h4>작가 문체 <span class="muted small">— 이 작품을 어떤 결로 쓸지 (선택)</span></h4>
+    <p class="muted small">문체는 작가마다 다릅니다 — 균일한 단문도, 만연체도 정답입니다. 여기 적은 결이 기본 문체의 <b>미학 축</b>(문장 리듬·감정 처리·직유 밀도·서술 거리·어휘 격)보다 우선합니다. 비우면 기본 문체로 씁니다. 분량·모바일 가독·시점/시제 같은 바닥은 항상 유지됩니다.</p>
+    <textarea id="style-author" aria-label="작가 문체" rows="5" maxlength="2000" placeholder="예: 건조하고 짧은 단문 위주. 비유는 거의 쓰지 말고 사실만. 감정은 설명하지 말고 행동으로 드러내라. 군더더기 없이 빠르게.">${esc(st.author_style||"")}</textarea>
+    <div class="style-row">
+      <label>끝맺음 정책 <select id="style-hook">${hooks.map(([v,l])=>`<option value="${v}" ${st.ending_hook===v?'selected':''}>${esc(l)}</option>`).join("")}</select></label>
+      <span class="style-actions"><button onclick="clearAuthorStyle()">비우기</button><button class="primary" id="style-save" onclick="saveStylePolicy()">저장</button></span>
+    </div>
+    <p id="style-msg" class="muted small" role="status"></p></div>`;
+}
+function clearAuthorStyle(){
+  const ta=$("#style-author"), msg=$("#style-msg");
+  if(ta) ta.value="";
+  if(msg) msg.textContent="비웠습니다 — ‘저장’을 눌러야 기본 문체로 돌아갑니다.";
+}
+async function saveStylePolicy(){
+  const ta=$("#style-author"), hook=$("#style-hook"), msg=$("#style-msg"), btn=$("#style-save");
+  if(!ta||!btn) return;
+  btn.disabled=true; if(msg) msg.textContent="저장 중…";
+  try{
+    await api.put(`/api/projects/${STATE.project.id}/style`,{author_style:ta.value.trim(), ending_hook:hook.value});
+    STATE.project = await api.get(`/api/projects/${STATE.project.id}`);   // 전체 재조회 — 부분 동기화 stale 혼합 방지(다른 저장 핸들러 패턴)
+    if(msg) msg.textContent="저장됨 — 다음 회차부터 반영됩니다.";
+    toast("문체 설정을 저장했습니다");
+  }catch(e){ if(msg) msg.textContent="저장 실패: "+e.message; toast("저장하지 못했습니다: "+e.message,"bad"); }
+  finally{ btn.disabled=false; }
+}
 async function loadWorldgen(){
   try{ const r=await api.get(`/api/projects/${STATE.project.id}/worldgen`); renderWgLog(r.chat||[]); }
   catch(e){ $("#wg-log").innerHTML=`<span class="muted">로드 실패: ${esc(e.message)}</span>`; }
@@ -209,6 +243,35 @@ function sparkline(series){
   const w=180,h=38,max=Math.max(1,...series);
   const pts=series.map((v,i)=>`${(i/(series.length-1)*w).toFixed(1)},${(h-v/max*(h-4)-2).toFixed(1)}`).join(" ");
   return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5"/></svg>`;
+}
+function median(a){ if(!a.length) return 0; const s=[...a].sort((x,y)=>x-y), m=s.length>>1; return s.length%2?s[m]:(s[m-1]+s[m])/2; }
+function normMinMax(a){ const lo=Math.min(...a),hi=Math.max(...a); return hi===lo?a.map(()=>0.5):a.map(v=>(v-lo)/(hi-lo)); }  // 추세 '모양'만(저변동 지표도 보이게); 크기는 옆 숫자로
+// 문체 지문 추세 — ai_tell 분포 신호를 '작품 자기 중앙값 대비 상대 추세'로만 노출(절대 판정·임계·경고색 금지, no-whack-a-mole).
+// 출처는 chapters[].ai_tell(copilot 저장 경로). 미측정(도입 전·빈 dict) 회차는 제외하고 백필 안내.
+function aiTellTrend(chapters){
+  const rows=(chapters||[]).filter(c=>c.ai_tell&&c.ai_tell.n_sent).sort((a,b)=>a.chapter-b.chapter);
+  const head=`<h4>문체 지문 추세 <span class="muted small">— 회차 간 분포 신호(상대 추세)</span></h4>`;
+  if(rows.length<2) return `<div class="bible-sec">${head}<p class="muted small">${rows.length?'1개 회차만 측정됨 — 추세는 2화부터 보여요.':'아직 측정된 회차가 없어요. 새 회차를 쓰면 쌓입니다(도입 전 회차는 미측정).'}</p></div>`;
+  const METRICS=[
+    {k:'comma_per_100',   label:'쉼표 밀도',     hint:'높을수록 분절적'},
+    {k:'sent_len_cv',     label:'문장길이 변동', hint:'낮을수록 균일'},
+    {k:'lexical_mattr',   label:'어휘 다양성',   hint:'낮을수록 반복'},
+    {k:'ending_diversity',label:'종결형 다양성', hint:'낮을수록 단조'},
+    {k:'simile_per_1k',   label:'직유 밀도',     hint:'높을수록 비유 강박'},
+  ];
+  const lines=METRICS.map(m=>{
+    const vals=rows.map(c=>c.ai_tell[m.k]).filter(v=>Number.isFinite(v));   // 결측·NaN을 0으로 위장 금지(메트릭별 실측만)
+    if(vals.length<2) return `<div class="aitell-row"><div class="aitell-lbl"><b>${m.label}</b> <span class="muted tiny">${m.hint}</span></div>
+      <div class="aitell-spk muted tiny">측정 부족</div><div class="aitell-val muted tiny">–</div></div>`;
+    const latest=vals[vals.length-1], med=median(vals);
+    const dir=latest>vals[0]?'완만한 상승':(latest<vals[0]?'완만한 하락':'안정');   // 스크린리더용 추세 방향
+    // delta(%) 제거 — 중앙값을 암묵 임계로 세워 단일 회차 판정을 유도하던 누수. 추세는 스파크라인, 크기는 raw 숫자로만.
+    return `<div class="aitell-row"><div class="aitell-lbl"><b>${m.label}</b> <span class="muted tiny">${m.hint}</span></div>
+      <div class="aitell-spk" role="img" aria-label="${m.label} 추세 ${dir}">${sparkline(normMinMax(vals))}</div>
+      <div class="aitell-val muted tiny">최근 ${latest.toFixed(2)}<br><span class="aitell-d">중앙값 ${med.toFixed(2)}</span></div></div>`;
+  }).join("");
+  return `<div class="bible-sec">${head}<div class="aitell-grid">${lines}</div>
+    <p class="muted tiny">작품 자기 중앙값 대비 <b>상대 추세</b>일 뿐 'AI 판정'이 아닙니다 — 문체는 작가마다 다릅니다(균일 단문도 만연체도 사람 글). 한 회차의 한 숫자가 아니라 흐름으로 보세요.</p></div>`;
 }
 async function loadSpine(){
   const statusEl=$("#serial-status"), structEl=$("#serial-structure");
@@ -261,7 +324,7 @@ async function loadSpine(){
       return `<div class="arc ${a.done?'done':''}"><div class="arc-h">${esc(a.title||a.arc_id)}
         <span class="muted small">— ${esc(a.goal)}</span></div>${eps}</div>`;
     }).join("");
-    statusEl.innerHTML=ledgerBlock+reactBlock+retroBlock;   // 연재 현황
+    statusEl.innerHTML=ledgerBlock+reactBlock+aiTellTrend(STATE.project.chapters)+retroBlock;   // 연재 현황
     structEl.innerHTML=gcBlock+ending+`<div class="bible-sec"><h4>단락과 에피소드 <span class="muted small">(현재 단락 ${sp.chapters_in_episode}화째)</span></h4>${arcs}</div>`;   // 이야기 구조
     if(STATE.pendingRetro){ STATE.pendingRetro=false; serialSub('status'); loadRetrospective(); }   // 아크완결 nudge 경유 진입
   }catch(e){ statusEl.innerHTML=`<span class="muted">로드 실패: ${esc(e.message)}</span>`; }
@@ -691,6 +754,7 @@ function genContextHtml(c){
     ${d.story_so_far?`<div class="gd-row"><b>누적 줄거리</b> <span class="muted tiny">(실제 ${d.story_so_far_chars||'?'}자, 예산까지 사용)</span><pre class="gd-pre">${esc(d.story_so_far)}</pre></div>`:''}
     ${d.voice_roster?`<div class="gd-row"><b>보이스·명부</b><pre class="gd-pre">${esc(d.voice_roster)}</pre></div>`:''}
     ${(d.style_rules&&d.style_rules.length)?`<div class="gd-row"><b>문체 규칙</b> <span class="muted tiny">(매 집필 헤더 주입)</span>${d.style_rules.map(r=>`<div class="gd-line">${esc(r)}</div>`).join("")}</div>`:''}
+    ${d.author_style?`<div class="gd-row"><b>작가 지정 문체</b> <span class="muted tiny">(기본 규칙보다 우선 — 미학 축만)</span><div class="gd-line">✍️ ${esc(d.author_style)}</div></div>`:''}
     ${d.prev_chapter_excerpt?`<div class="gd-row"><b>직전 회차 발췌</b> <span class="muted tiny">(${d.prev_chapter_chars||0}자 전문 주입)</span><div class="gd-line">${esc(d.prev_chapter_excerpt)}</div></div>`:''}
     <div class="gd-row muted tiny">끝맺음: ${esc(d.ending_hook_mode||'?')} · 출고규범 ${d.length_norm||'?'}자 · 이어쓰기 ${d.continuations||0}회 · 교정 ${(d.corrections&&d.corrections.length)?esc(d.corrections.join(", ")):'없음'}</div>
     <div class="gd-row muted tiny">집필 화법: ${esc((d.persona||'').slice(0,120))}</div></div>`;

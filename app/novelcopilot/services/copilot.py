@@ -639,11 +639,23 @@ class CopilotService:
                 created_at=time.strftime("%Y-%m-%dT%H:%M:%S")))
             ch.text = after_text
             ch.summary, ch.detail_synopsis = new_summary, new_detail   # 락 밖 재생성분 반영
+            ch.ai_tell = self._recompute_ai_tell(state, sess, after_text)   # 본문 교체 → 문체 신호 재계산(stale 추세 차단)
             sess.bundle.rag.index_chapter(chapter_no, after_text)   # RAG 재색인(멱등)
             sess.snapshot_into(state)
             self.repo.save(state)
         # 캐시는 (0)에서 이미 소비됨(누수 창 제거).
         return {"accepted": True, "chapter": ch.model_dump(), "revision_count": len(ch.revisions)}
+
+    def _recompute_ai_tell(self, state, sess, text: str) -> dict:
+        """본문이 바뀌는 모든 경로(생성·퇴고 accept·undo)에서 ai_tell 을 동일 방식으로 재계산 — stale 추세 소스 차단.
+        결정론·LLM 0콜. roster(인명·고유어)는 어휘다양성 오염 방지."""
+        try:
+            from ..engine.quality_gates import ai_tell_profile
+            roster = {e.name for e in sess.bundle.ontology.entities.values()}
+            roster |= {k for ent in state.bible.entries for k in (ent.keywords or [])}
+            return ai_tell_profile(text, roster)
+        except Exception:
+            return {}
 
     def undo_revision(self, pid: str, chapter_no: int) -> dict:
         """마지막 채택 되돌리기 — text/summary/detail_synopsis 복원 + RAG 재색인(결정론 복원)."""
@@ -664,6 +676,7 @@ class CopilotService:
             ch.text = last_rev.before_text
             ch.summary = last_rev.before_summary
             ch.detail_synopsis = last_rev.before_detail_synopsis
+            ch.ai_tell = self._recompute_ai_tell(state, sess, last_rev.before_text)   # 복원 본문 → 문체 신호 재계산
             last_rev.reverted = True
             sess.bundle.rag.index_chapter(chapter_no, last_rev.before_text)   # RAG 복원(멱등)
             sess.snapshot_into(state)
@@ -1063,6 +1076,8 @@ class CopilotService:
                         if pred:
                             record.reader_feedback = pred           # 작가가 나중에 검토(원장처럼 가시화)
                             sess.bus.emit("reader_desk", "prediction", chapter=next_ch, **pred)
+                    # AI 티 분포 신호(결정론·LLM 0콜·advisory 추세) — 판정·차단 아님, 작가 가시화(측정-주도, no-whack-a-mole)
+                    record.ai_tell = self._recompute_ai_tell(state, sess, record.text)
                     # G7: 신규 고유명사 커밋 가시화(인플레 추세 — 작가 신호, 차단 아님)
                     new_ents = [c for c in changes if getattr(c, "op", "") == "new_entity"]
                     if new_ents:
@@ -1495,6 +1510,9 @@ class CopilotService:
                 st.world.plant_reminder = patch["plant_reminder"]
             if patch.get("system_persona") is not None:
                 style.system_persona = patch["system_persona"]
+            if patch.get("author_style") is not None:
+                style.author_style = (patch["author_style"] or "").strip()[:2000]   # 빈 문자열=오버레이 해제, 매 draft 헤더 주입이라 길이 cap
+
             if patch.get("target_chars_per_chapter") is not None:
                 style.target_chars_per_chapter = max(500, min(20000, int(patch["target_chars_per_chapter"])))
             if patch.get("scenes_per_chapter") is not None:
