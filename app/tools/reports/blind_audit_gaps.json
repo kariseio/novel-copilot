@@ -1,0 +1,202 @@
+{
+ "gaps": [
+  {
+   "id": "G1",
+   "title": "약속-지불 원장(재미의 회계 상태)이 1급 데이터로 부재 — plants/payoffs는 자유 문자열 라벨의 잔재",
+   "classification": "c",
+   "current": "재미 상태를 표현하는 영속 데이터가 없다. 유일한 흔적은 Episode의 plants/payoffs(domain/narrative.py:30-31) — 서로 다른 LLM 콜이 자유 기술한 문자열을 _outstanding_plants(services/copilot.py:56-65)가 '정확 문자열 일치'로 대조하고, 회수돼도 payoffs를 갱신하는 코드가 없으며(설계 시점 값 고정), 미회수 목록은 beat 설계에 '참고용' 슬롯으로만 주입된다. 떡밥의 ID·개설 회차·만기·지불 형태(힘/지위/관계/정보)·상환 검출이라는 생애주기 전체가 없고, 정합성용 온톨로지(SSOT)에 상응하는 '재미용 원장'이 시스템 어디에도 없다.",
+   "ideal": "정합성의 온톨로지와 동형인 '약속 원장'을 1급 영속 상태로 신설: 항목={id, 약속 텍스트, 개설 회차, 만기 회차, 지불 형태, open/paid}. 갱신은 finalize 팬아웃에서 기존 ClaimExtractor 패턴(증거 스팬 강제, 기계 추출=narrative_inferred 잠정)으로 상환을 검출해 트랜잭션 커밋. 소비는 하네스식 컨텍스트 주입 — 만기 임박 항목과 open 잔고를 beat_for_episode·_gen_episodes·아크 설계 프롬프트에 구조화 주입하고, '마지막 확정 지불 후 경과 회차' 카운터를 결정론 텔레메트리로 산출해 작가에게 노출한다. 마감은 강제하지 않되(슬로우번은 작가 지시로 유지) 잔고가 항상 보이게 한다.",
+   "evidence": "헌터물 5화 전체에서 개설된 약속(숨겨진 방호실 보상→파워셀→단말기 데이터→블랙 스캐너→오류형 스킬→이중 각성)이 전부 '임시 적용·조건부 활성·데이터 해석 중'(5화 647행)으로 유예되고 확정 지불 0회 — 각성 측정·등급·공개 인정이 한 번도 없다. 회차말 훅 15개 중 14개가 '미확인 새 존재/변수 등장' 단일 유형(헌터 1~5화, 무협 1·5화 등 직접 확인)으로 약속 부채만 적층. 그런데 평가 18건 전부 hook 8~9 — 부채 잔고를 보는 축이 없다.",
+   "rationale": "4개 설계가 전부 독립 수렴한 유일 최대 항목(약속-지불 원장/떡밥 원장/보상 부채 카운터/떡밥 장부) — 가장 강한 신호. 현 구조에서 이 결함의 소유 레이어가 없다: 라벨은 에피소드 스코프 자유 문자열이라 회차·아크를 횡단하는 생애주기를 가질 수 없고, 갱신 코드와 소비 결정 지점이 둘 다 부재해 프롬프트·컨텍스트 보강으로는 도달 불가. 온톨로지와 동급의 신규 서브시스템(데이터+갱신기+다층 주입)이 필요하므로 레이어 부재 = (c).",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G2",
+   "title": "재미 검수 데스크가 제품 루프에 부재 — 제품 게이트는 전부 산문/정합 축, 평가는 외부 도구의 회차 단독 절대점수",
+   "classification": "c",
+   "current": "제품 내 게이트 체인(quality_gates.py: 틱·훅 유사도·시제·조판 / checker.py: SSOT 정합)은 전부 산문 표층과 설정 정합 축이고, '독자가 이 화에서 무엇을 받았는가'를 묻는 검수는 제품에 없다. 유일한 재미 측정은 외부 도구 tools/sim_persona.py:eval_chapter(134-167) — 회차 단독 5축 절대점수(hook/style/world/consistency/progress, 지불 축 없음), 본문[:9000]만 보고 직전 회차 미주입(chapter_quality_report(text, [], …)로 prev_tails=[] → hook_sim 항상 0), 생성과 같은 provider의 자기 채점이며, avg<6.5에서만 되먹임이 발화한다.",
+   "ideal": "finalize 루프 안에 정합 데스크와 분리된 재미 데스크를 신설: ① 결정론 카운터(코드, LLM 0콜) — 직전 N화 훅 유형 윈도우 반복률, 마지막 확정 지불 후 경과 회차, 스토리 시간/장소 전진량 — 를 산출해 plan_lint 입력으로 주입(기존 '위반 명시 재계획 1회' 패턴과 동형, 교정은 본문이 아니라 계획으로). ② 직전 N화 요약+당화 본문을 블라인드(비트 미공개)로 읽는 장르 독자 페르소나의 행동 예측('주인공이 얻은 것 한 단어', '다음 화 결제 여부', 직전 5화 내 상대 순위)을 advisory 신호+작가 에스컬레이션으로 — LLM 판정은 비구속 유지(결정론 코어 원칙 보존), 생성과 다른 판정 설정으로 분리.",
+   "evidence": "평가 18건 전부 avg≥7.2(8.6 최고), hook 8~9 인플레 — 지불 0회·동일 훅 14/15·5화 시간 정체가 전량 통과했고, avg<6.5 되먹임은 15화 동안 단 한 번도 발화하지 않았다. det 레코드 15건 모두 hook_sim:0.0(죽은 지표). '주인공이 얻은 것 한 단어' 질문을 통과하는 회차가 증거 15화 중 0개.",
+   "rationale": "4개 설계 전부 수렴(블라인드 페르소나 지불 검증/연속 독서 시뮬/행동 예측/윈도우 결제 판정 — 그리고 4개 모두 '절대 점수 금지'를 명시). 회차 단독 절대 루브릭은 누적 결함(훅 반복·지불 유예·시간 정체)에 원리적으로 눈멀고, 증거가 그것을 실측으로 입증했다. 평가의 단위(회차→윈도우)와 계약(점수→행동 예측/상대 비교), 그리고 위치(외부 도구→제품 루프) 자체를 바꿔야 하므로 프롬프트 개선으로 부족 = (c).",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G3",
+   "title": "연재 관리 레이어 부재 — 시계열 신호의 소비자와 아크/엔딩 개정 경로가 없다",
+   "classification": "c",
+   "current": "엔딩·전체 아크는 create_project 시 1회 확정 후 개정 경로가 없고(decision_points 명시: done 마킹만), drift_signals(cast_missing/pacing_overrun)는 record 저장+SSE 방출 후 어떤 코드도 소비하지 않으며, pacing_overrun은 is_finale이 회차 수로 강제되어 정상 경로에서 발화 불능이다. lazy 에피소드 재설계(_gen_episodes)는 직전 3~4회차 요약줄만 보고, 사이다 간격·훅 유형 엔트로피·시간 진행·조연 등장 간격 같은 시계열 지표는 산출 자체가 없다.",
+   "ideal": "에피소드/아크 경계에 회고 단계를 신설: 결정론 시계열 지표(코드 산출 — 훅 유형 분포, 지불 간격, 신규 명사 도입률, 조연 미등장 간격, 화당 스토리 시간 진행)를 누적하고, 아크 종료 시 LLM이 지표 이상치의 원인 가설+다음 아크 카드 수정안을 '제안'하면 작가가 승인하는 처방 루프(코파일럿 조향 모델 유지). 승인된 처방과 회고 요약을 _gen_episodes·build_spine 재호출의 컨텍스트로 주입하고, 엔딩/아크에 개정 트랜잭션 경로를 연다.",
+   "evidence": "헌터물 5화가 하룻밤·단일 시퀀스(시험장→방호실→통로→금고)에 갇히고 긴장이 단조 상승(이완 비트 0회), 로판 남주 후보 루시안이 1화(710~744행) 이후 완전 증발 — 모두 회차 단위에서는 안 보이고 시계열로만 보이는 결함인데, 이를 잡을 어떤 신호도 발화하지 않았다(평가 18건 전부 7점 이상).",
+   "rationale": "4개 설계 전부 수렴(L6 연재 관리/텔레메트리 롤링 게이트/작가 코크핏 시계열/연독 분석 루프). 페이싱 드리프트는 회차 단위 검수로 원리적으로 검출 불가가 4개 설계 공통 진단이며 증거가 실증한다. 현 구조에는 시계열을 소비할 결정 지점(아크 재설계 경로)이 존재하지 않으므로, 어떤 레이어 내부 개선으로도 도달 불가 = (c). drift.py는 씨앗이 있으나 소비자 없는 advisory로 끝난다.",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G4",
+   "title": "회차 비트 산출물에 독자 보상 차원이 없다 — Beat는 사건 요약일 뿐, 회차의 '기능'이 미정의",
+   "classification": "b",
+   "current": "Beat 스키마는 title/summary/key_events/entities뿐(arc_planner.py:beat_for_episode 225행 출력 계약). 이 회차가 지불인지 약속인지, 훅 유형은 무엇인지, 감정 목표·시간 경과·장소 전환은 얼마인지를 설계 단계가 결정하지 않고, plan_lint는 무효 id·제거 인물·비트 재탕(>0.86)만 검사한다. 훅 재탕 방지는 본문 생성 후 hook_repeat_semantic(>0.82 임베딩)으로 표면 유사도만 잡아, '문장은 다르지만 유형은 동일'(매회 새 존재 등장)을 통과시킨다.",
+   "ideal": "같은 결정 지점(집필 전, 회차당 1회)에서 Beat 스키마를 확장: 회차 기능 태그(지불/약속/격상/관계/완급), 훅 유형, 스토리 시간 경과·장소 필드. 컨텍스트로 최근 N화의 훅 유형 이력·G1 원장 만기분·장소 체류 카운터를 주입하고(하네스식 — 금지 규칙이 아니라 정보 제공), plan_lint에 결정론 유형 비교(직전 N화와 훅 유형 동일, 시간 진행 0 연속)를 추가해 기존 '위반 명시 재계획 1회' 패턴으로 처리. 태그는 G2 데스크의 의도-실측 대조 기준이 된다.",
+   "evidence": "회차말 훅 15개 중 14개 동일 유형인데 임베딩 hook 게이트와 plan_lint 둘 다 무반응(평가 det의 hook_sim 0.0, 본문은 FINALIZED). 헌터 1~5화 시간 경과 사실상 0(하룻밤), 무협 1화 eval defect '제자리걸음: 회차 내 실질적 결단이나 변화가 드러나지 않음', 로판 연회장 장기 체류 — 전부 설계 단계에 해당 필드가 없어서 생긴 결함.",
+   "rationale": "4개 설계 전부 비트 시트 수렴. 단 레이어 자체는 올바른 위치에 이미 존재한다(집필 전 회차당 계획 + plan_lint + 재계획 1회 + 임베딩 재탕 검사 — 방향 일치). 결함은 산출물 스키마의 정보 부족과 설계 콜에 주입되는 이력 컨텍스트 부족이므로 레이어 내 데이터·컨텍스트 보강으로 해결 가능 = (b). 설계들의 '필수 필드 공란 시 차단' 류 강제는 사용자 확정 원칙에 따라 채택하지 않고 주입+재계획 패턴으로 대체.",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G5",
+   "title": "장르 계약(쾌감 엔진·독자 기대·금기·필수 비트 일정)이 컨셉 산출물에 없다",
+   "classification": "b",
+   "current": "ConceptBrief는 logline/premise/setting/characters/world_rules/conflicts/themes — 범용 문예 필드뿐이고, '이 장르 독자가 결제하는 쾌감이 무엇인가'(회귀헌터=정보우위→공개 격상, 로판=관계 역학, 무협 잠입=이중생활)와 장르 어휘·금기·초반 필수 비트(첫 측정 1~3화 등)·유료전환 설계를 담는 필드가 없다. 장르 지식은 월드젠 persona 문구와 bible 카테고리 템플릿 수준이며, 하류(스파인·비트·드래프트·평가)가 상속할 계약 객체가 없다.",
+   "ideal": "Concept Studio(사용자 확정 front-door)는 그대로 두고 브리프 스키마를 확장: 쾌감 엔진 정의, 독자 기대 톱5, 장르 어휘 화이트/블랙 톤 가이드, 핵심 전제 보호 조항(예: '십 년 잠입'은 장기 자산), 초반 필수 비트 일정. 장르 문법 카드 라이브러리(정적 지식)를 컨셉 대화와 build_spine·beat_for_episode·draft persona·G2 페르소나 평가의 컨텍스트로 일관 주입 — 강제가 아니라 모든 레이어가 같은 계약을 '보게' 한다.",
+   "evidence": "로판이 2화 만에 '디버깅 노트·0.2초 데이터 송출' 어휘로 표류(eval ch2 defect 명시)하고 5화엔 '미러망/오라석/혈통 코드 위계 불명'(eval ch5 defect) — 장르 침식. 무협은 '십 년 잠입' 전제를 1화 도입부터 정체 노출 추격전으로 소모(1421~1499행: '네가 누구인지 직접 확인해야겠군'). 헌터물은 장르 필수 비트인 각성 측정이 5화 내내 부재. 전부 계약 부재가 원천.",
+   "rationale": "4개 설계 전부 수렴(장르 계약/IP 차터/장르 문법 카드/장르 관습 체크리스트). 그러나 레이어는 올바르게 존재한다(Concept Studio가 생성 전 대화로 설계서를 만들고 locks로 작가 확정값을 보존하는 구조 — 방향 일치). 결함은 브리프가 담는 정보의 종류와 하류 주입 경로이므로 스키마·라이브러리·컨텍스트 보강 수준 = (b).",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G6",
+   "title": "설계 콜의 컨텍스트 기아 — 비트는 인물 id 문자열만, 프로필은 데뷔 1회만, lazy 에피소드는 이전 아크를 모른다",
+   "classification": "b",
+   "current": "beat_for_episode(arc_planner.py:209,222-223)는 인물을 'id 목록'으로만 받아 이름·프로필·생사·관계를 모른 채 비트를 설계한다. 인물 프로필은 cast_debut 앵커로 데뷔 1회만 주입되고 이후 위키 카드(임베딩 k=3 매칭 시에만)로 격하된다. _gen_episodes는 직전 3~4회차 요약줄만 받고 brief·완료 에피소드 롤업·이전 아크 plants를 못 본다. RAG/Wiki 질의도 beat.summary 한 문장뿐.",
+   "ideal": "각 설계 콜에 '그 결정에 필요한 구조화 슬라이스'를 주입: beat_for_episode에 등장 인물의 이름+프로필 발췌+현 상태(생사·소속, 온톨로지에서 결정론 조회)+관계 엣지+욕망 1줄, _gen_episodes에 brief 핵심+완료 에피소드 롤업+미회수 원장 항목, 검색 질의에 key_events·climax·인물명 합성. 전부 기존 ContextBoard 타입 분리 슬롯 규약 안에서의 주입 확장.",
+   "evidence": "조연이 욕망 없는 반사판으로 퇴화 — 강현식이 5화 내내 같은 기능의 대사만 반복('이 상황, 예상했어?'(1화), '어디까지 알고 있는 거야?'(3화 378행), '뭘 얼마나 보고 온 건데'(5화 574행)). 루시안(로판 남주 후보)은 1화 후 어떤 설계 콜도 그의 존재를 상기받지 못해 증발. 설계 LLM이 인물 정보를 받지 못하니 인물에서 사건이 나올 수 없다.",
+   "rationale": "4개 설계 모두 레이어별 컨텍스트 팩(인물 카드·관계 수치·말투 앵커 주입)을 명세하나, 이는 현 ContextBoard 아키텍처가 이미 가진 패턴의 적용 범위 문제다. 슬롯·데이터·주입 경로 모두 존재하고 연결만 안 된 상태이므로 전형적 (b). observed_weaknesses 1·2·4·18이 코드 실측으로도 자인하는 항목.",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G7",
+   "title": "명명 사전 부재 — 집필 LLM이 등록 명부를 모르고, 명사 인플레가 world 점수를 보상해킹",
+   "classification": "b",
+   "current": "집필 프롬프트에 '현재 등록된 고유명사 명부'가 주입되지 않는다(확정 설정은 terminal 상태+binding 속성만, 나머지는 bible digest·RAG 단편). 본문이 발명한 이름은 OntologyUpdater가 사후 provisional 자동커밋하며 uncast_character 공정 위반 '이벤트'만 방출(ontology_updater.py:132-135) — 도입률을 보는 텔레메트리도, 설계(비트)가 허용 명사를 선언하는 슬롯도 없다.",
+   "ideal": "온톨로지를 명명 사전으로 활용: 등록 명부(인물·장치·조직)와 '최근 N화 신규 도입 수'를 draft·beat 컨텍스트에 주입해 '이미 있는 것'을 쓰도록 유도하고(금지가 아니라 가시화), 비트에 신규 도입 의도 슬롯을 둬 발명을 설계 시점으로 끌어올린다. 신규 커밋 카운터를 G3 시계열로 노출해 작가가 인플레 추세를 보게 한다. 자동커밋=provisional 비대칭은 그대로 유지.",
+   "evidence": "헌터물 5화 만에 무허가 장치·코드명 십수 개(파워셀·블랙 스캐너·차단구·구속 재머·각인판·E-05·NHMA·철혈무기상회·마나 방해 필터·이형 보조기…), 로판 '미러망/오라석/혈통 코드 위계 불명'(eval ch5 defect), 무협 '천명 인장' 등 — 그런데 world 점수는 8~9로 오히려 최고 축. 설정 명사 살포가 world 축을 채우는 보상 해킹이 실측됐다.",
+   "rationale": "설계 2·3·4가 명명 사전 등록제/버짓/화이트리스트로 수렴(설계 1도 에스컬레이션 예산). 검출 인프라(ontology_updater의 발명 감지)는 이미 있고, 결함은 상류 컨텍스트(집필이 명부를 못 봄)와 신호의 소비처 부재다. '회당 ≤N 강제' 류는 사용자 원칙상 무효이므로 주입+텔레메트리로 동일 소스를 차단 — 레이어 내 보강 = (b).",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G8",
+   "title": "스파인 산출물 무검증 — '엔딩 먼저' 계약이 빈 문자열로 조용히 통과한다",
+   "classification": "b",
+   "current": "build_spine의 ending/central_question/thematic_payoff, 아크 goal, 에피소드 climax/plants 등 스파인 레벨 산출물은 사람·코드 어느 쪽의 완결성 검사도 거치지 않는다(observed_weaknesses 20: 실패 시 빈 NarrativeSpine 폴백만). max_tokens=3000 고정(arc_planner.py:63)이라 아크 수에 비례한 출력 예산도 없다. 빈 엔딩은 이후 모든 회차에 '[작품 엔딩 방향] 결말: (공백)' 앵커로 주입된다.",
+   "ideal": "월드젠이 이미 쓰는 패턴(Pydantic 검증 실패 시 교정 1회→재생성 1회)을 스파인에 동일 적용: 필수 필드 비공백·아크당 goal/전환점 존재·에피소드 climax 존재를 스키마 검증으로 확인하고, 미달 시 해당 부분만 교정 재호출. max_tokens를 n_arcs에 비례시키고, 검증 실패 잔존 시 silent 폴백 대신 이벤트로 작가에게 가시화. '엔딩 먼저 역설계'라는 현 계약 자체는 유지.",
+   "evidence": "증거의 3작품 전부 '엔딩 설계: (공란)'(9·707·1418행) — 엔딩-퍼스트가 핵심 차별 설계인데 실제 산출에서 3/3 빈 값으로 통과했고, 중심질문만 남았다. 그 결과 매 회차가 '결말 없는 중심질문'만 보고 수렴 없이 변수만 증식(헌터물 5화의 무한 에스컬레이션)하는 구조적 원인 중 하나가 됐다.",
+   "rationale": "설계 1(계약 필드 완결성 린트)·2(킬 게이트)·3(작가 승인 게이트)이 스파인 레벨 검증으로 수렴. 현 시스템이 월드젠에서 이미 검증·교정 패턴을 갖고 있으므로 같은 패턴의 적용 누락 — 명백한 레이어 내 보강 = (b). 구조 검증(스키마 완결성)은 결정론 코어 원칙(③)에 부합하며 창작 강제 규칙이 아니다.",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G9",
+   "title": "회차 완결성 계약 결핍 — 분량 미달 silent 출고와 이어쓰기 패스의 회차말 마커 무시",
+   "classification": "b",
+   "current": "출고 규범(norm=target_chars×0.85, harness.py:348)은 _continue 최대 2회 후 미달이어도 그대로 FINALIZED하며 미달을 알리는 이벤트·텔레메트리가 없다. _continue는 의도적으로 말미 3,500자만 보는데(재서술 압력 차단 — 타당) 잔여 비트·'회차가 어디까지 왔는지'를 모르므로, 직전 패스가 회차를 닫는 마커를 쓴 뒤에도 그 너머로 계속 쓴다.",
+   "ideal": "이어쓰기 패스에 '회차 완결성 상태'를 구조화 주입: 비트 key_events 중 미달성 목록과 '이 화는 아직 미완' 선언(말미 3,500자 한정 정책은 유지). 회차 종결 마커류는 기존 strip_directive_leak 결정론 게이트의 관할로 일원화하고, 규범 미달 출고는 차단이 아니라 chapter_under_norm 이벤트로 작가·텔레메트리에 가시화해 G3 회고의 입력이 되게 한다.",
+   "evidence": "무협 5화 전부 3,274~4,109자로 기본 규범(5,000×0.85=4,250) 미달인데 전량 FINALIZED·무신호 — 시장 관행(고정 제약 ①) 위반. 헌터 2화 본문 한가운데 '(다음 회, 완전히 엉클어진 …)'(212행)가 박힌 채 그 뒤로 본문이 계속되고, 로판 1화 말미에 '(다음 회에서 계속)'(848행) 잔존 — 이어쓰기가 회차 종결을 인식하지 못한 사고와 게이트 누락이 동시에 실측됐다.",
+   "rationale": "설계 4가 정확히 이 사고('비트 잔여 체크' 없는 분할 이어쓰기의 재탕·메타텍스트)를 지목했고, 단일 패스+코드 판정 이어쓰기라는 현 방식 자체는 설계 4와 수렴(통짜 금지인 설계 1~3과 갈림)하므로 방향은 맞다. 결함의 소스는 이어쓰기 컨텍스트 결핍이지 레이어 배치가 아니다. 검출기 추가가 아니라 소스(컨텍스트) 보강으로 푸는 (b).",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G10",
+   "title": "정합 검증의 도메인 폭 — 위치·소유·인원수의 회차 내 자기일관성이 검사 대상 밖",
+   "classification": "b",
+   "current": "checker는 ground_truth tier+객관 엣지의 닫힌 4종 술어와 conflicts_with '선언된' 관계쌍만 하드 검사하고(checker.py:46), 본문이 자기 안에서 선언한 수치(인원·소지·위치)와 같은 화의 서술이 어긋나는 클레임은 추출 스키마의 대상이 아니다. 무협 2화의 '다섯 겹 그림자 vs 실제 인원' 모순은 제품 게이트가 아니라 외부 평가 LLM이 사후에 적발했다.",
+   "ideal": "ClaimExtractor의 기존 QUASI 경로(증거 인용 강제+코드 비교)에 '회차 내 자기일관성' 클레임 유형을 추가: 본문이 명시 선언한 수치·위치·소지와 동일 회차 내 열거·서술의 결정론 대조. 캐논 대비가 아닌 텍스트 내부 모순이므로 비대칭 불변식(기계 추출=잠정)과 충돌 없이 text_hard(QUASI)로 기존 재작성 루프에 합류 가능. 인물별 위치·소지 추적은 narrative_inferred로 적재해 G6 설계 컨텍스트에 공급.",
+   "evidence": "무협 2화 eval defect: \"수치모순: '다섯 겹의 그림자'라고 했으나 등장인물 수와 일치하지 않음\" — FINALIZED로 출고. 헌터 3화 \"'폭주 확률 30%' 수치 근거 불명\" defect. 정합 7~9점의 다른 축은 잘 막히는 가운데 이 유형만 반복 누출되는 것은 검사 도메인의 구멍이 원인.",
+   "rationale": "설계 1·2·3이 위치/소유/인원의 상태 추적으로 수렴. 그러나 검증 데스크 자체(추출→코드 비교→국소 패치)는 현 구조에 올바르게 존재하고 작동 중이므로, 결함은 추출 스키마와 술어의 커버리지 — 레이어 내 데이터 보강 = (b). QUASI=binding은 기존 불변식 그대로이므로 사용자 결정과 무충돌.",
+   "touches_user_decision": false
+  },
+  {
+   "id": "G11",
+   "title": "비대칭 신뢰 계층·결정론 코어 — 이상 설계들의 '추출→원장 커밋' 오염 리스크를 현재가 더 잘 풀고 있다",
+   "classification": "a",
+   "current": "기계 추출은 narrative_inferred로 착지하고 자동으로 binding이 되지 않으며(비가역·terminal 진입 포함), 하드 게이트는 LLM 0콜 결정론(SSOT 자기모순·post-death·닫힌 술어)과 증거 스팬이 실재하는 QUASI만. 교정은 전량 재작성이 아닌 국소 패치(count==1 강제), best-so-far 보존, 트랜잭션 롤백, ESCALATED 시 결정론 진단+회복 레버.",
+   "ideal": "설계 1·3은 추출 LLM이 갱신하는 원장을 '진실의 원천'으로 삼는다(결정론 머지를 둔다 해도 기계 산출이 캐논으로 적재됨). 환각 추출 1건이 원장에 들어가면 이후 200화의 모든 생성·검증이 오염을 상속하는 단일 장애점 — 4개 설계 모두 이 리스크의 깊이를 현재 구조만큼 다루지 않았다. 현재의 '기계=잠정, 작가 명시행위만 캐논' 계층이 이 실전 제약의 더 옳은 해법이며, G1~G10의 어떤 개선도 이 불변식 위에 얹는 것이 맞다.",
+   "evidence": "증거 15화에서 캐논급 오염(사망자 재등장·시간 역행·관계 모순류) 0건, consistency 7~9 일관 유지 — 결함은 전적으로 재미 축에 있고 정합 하한은 실측으로 지켜졌다. 즉 정합 기계는 작동 중이며, 같은 기간 이상 설계들이 가정하는 '추출 기반 원장'이었다면 헌터물의 명사 폭주(G7) 수준의 발명이 캐논으로 적재됐을 위험이 있다.",
+   "rationale": "이상 설계가 놓친 실전 제약(LLM 추출의 비신뢰성, 200화 누적 오염의 비가역성)을 현재 구조가 이미 더 정교하게 해결한 지점 = (a). 사용자 확정 결정 ②③을 실측이 정당화하는 사례이므로, G1(원장)·G2(데스크)·G10(스키마 확장) 구현 시에도 기계 산출의 잠정 착지와 결정론 우선 원칙을 유지해야 한다.",
+   "touches_user_decision": false
+  }
+ ],
+ "verified": [
+  {
+   "gap": {
+    "id": "G1",
+    "title": "약속-지불 원장(재미의 회계 상태)이 1급 데이터로 부재 — plants/payoffs는 자유 문자열 라벨의 잔재",
+    "classification": "c",
+    "current": "재미 상태를 표현하는 영속 데이터가 없다. 유일한 흔적은 Episode의 plants/payoffs(domain/narrative.py:30-31) — 서로 다른 LLM 콜이 자유 기술한 문자열을 _outstanding_plants(services/copilot.py:56-65)가 '정확 문자열 일치'로 대조하고, 회수돼도 payoffs를 갱신하는 코드가 없으며(설계 시점 값 고정), 미회수 목록은 beat 설계에 '참고용' 슬롯으로만 주입된다. 떡밥의 ID·개설 회차·만기·지불 형태(힘/지위/관계/정보)·상환 검출이라는 생애주기 전체가 없고, 정합성용 온톨로지(SSOT)에 상응하는 '재미용 원장'이 시스템 어디에도 없다.",
+    "ideal": "정합성의 온톨로지와 동형인 '약속 원장'을 1급 영속 상태로 신설: 항목={id, 약속 텍스트, 개설 회차, 만기 회차, 지불 형태, open/paid}. 갱신은 finalize 팬아웃에서 기존 ClaimExtractor 패턴(증거 스팬 강제, 기계 추출=narrative_inferred 잠정)으로 상환을 검출해 트랜잭션 커밋. 소비는 하네스식 컨텍스트 주입 — 만기 임박 항목과 open 잔고를 beat_for_episode·_gen_episodes·아크 설계 프롬프트에 구조화 주입하고, '마지막 확정 지불 후 경과 회차' 카운터를 결정론 텔레메트리로 산출해 작가에게 노출한다. 마감은 강제하지 않되(슬로우번은 작가 지시로 유지) 잔고가 항상 보이게 한다.",
+    "evidence": "헌터물 5화 전체에서 개설된 약속(숨겨진 방호실 보상→파워셀→단말기 데이터→블랙 스캐너→오류형 스킬→이중 각성)이 전부 '임시 적용·조건부 활성·데이터 해석 중'(5화 647행)으로 유예되고 확정 지불 0회 — 각성 측정·등급·공개 인정이 한 번도 없다. 회차말 훅 15개 중 14개가 '미확인 새 존재/변수 등장' 단일 유형(헌터 1~5화, 무협 1·5화 등 직접 확인)으로 약속 부채만 적층. 그런데 평가 18건 전부 hook 8~9 — 부채 잔고를 보는 축이 없다.",
+    "rationale": "4개 설계가 전부 독립 수렴한 유일 최대 항목(약속-지불 원장/떡밥 원장/보상 부채 카운터/떡밥 장부) — 가장 강한 신호. 현 구조에서 이 결함의 소유 레이어가 없다: 라벨은 에피소드 스코프 자유 문자열이라 회차·아크를 횡단하는 생애주기를 가질 수 없고, 갱신 코드와 소비 결정 지점이 둘 다 부재해 프롬프트·컨텍스트 보강으로는 도달 불가. 온톨로지와 동급의 신규 서브시스템(데이터+갱신기+다층 주입)이 필요하므로 레이어 부재 = (c).",
+    "touches_user_decision": false
+   },
+   "votes": [
+    {
+     "reasoning": "UPHOLD. 증거와 코드를 전수 검증한 결과 갭의 사실 주장과 인과 주장이 모두 성립한다. (1) 본문 결함 실재: 헌터물 5화에서 개설된 약속 6건(방호실 보상→파워셀→단말기 데이터→블랙 스캐너→오류형 스킬→이중 각성)이 전부 유예되고 확정 지불 0회 — 5화 647행 \"[‘이중 각성’—잠정 고유 스킬, 임시 적용]\"과 595행 \"[조건부 활성. 데이터 해석 중…]\"을 원문 그대로 확인했고, 1화에서 시작한 각성 시험 자체가 5화까지 종결(측정·등급·공개 인정)되지 않는다. 회차말 훅은 3작품 15개 전부 직접 확인 — 14/15가 '미확인 새 존재/변수 등장' 단일 유형(유일 예외: 로판 5화)으로 주장과 정확히 일치한다. (2) 측정 맹점 실재: 15건 평가 전부 hook 8~9, hook_sim 결정론 게이트는 전부 0.0(표면 텍스트만 비교, 유형 단조 불가시), 기록된 결함은 전부 산문 레벨(토막행갈이/반복대사/메타텍스트)이며 지불 부채 관련 결함은 0건. sim_persona.py:134-167의 심판은 '해당 회차 본문만' 보므로 횡단 부채를 구조적으로 볼 수 없고, fix_directive는 avg<6.5에서만 발화(관찰 점수 7.4~8.6)해 닫힌 루프가 이 결함을 한 번도 교정하지 않았다 — 오히려 회차 단위 hook 축이 가장 값싼 훅(새 위협 등장)을 보상한다. (3) 소유 레이어 부재 검증: plants/payoffs는 설계 시점 자유 문자열로 고정되고 e.payoffs를 갱신하는 코드가 전무하며, _outstanding_plants(copilot.py:56-65)는 done 에피소드만 정확 문자열 일치로 대조(5화 연재에선 사실상 공집합), 소비는 '[미회수 복선 — 참고용]' advisory 슬롯뿐(arc_planner.py:215-216). 갭이 언급하지 않은 두 번째 흔적(wiki plot_thread+payoff_deadline+payoff_of 엣지, types.py:155/178, wiki.py:89-96)을 발견했으나 이는 판정을 오히려 강화한다 — payoff_of 엣지를 만드는 Wiki.add_edge의 호출자가 코드베이스에 0개(상환 검출이 문자 그대로 불가능)이고 wiki.lint는 읽기 전용 엔드포인트(copilot.py:1102)에서만 호출되어 생성 루프에 전혀 피드백되지 않는다. 원장의 데이터 골격을 만들고도 갱신·소비 경로를 둘 다 배선하지 못한 화석이 존재한다는 것 자체가 '레이어 부재'의 직접 증거다. (4) 대안 원인 기각: 가장 강한 반론인 '에피소드 climax가 지불의 지정 소유자'는 증거가 직접 반박한다 — 헌터 ep1 finale(4화)에서 climax는 실제로 터졌으나 지불이 '임시/조건부'로 착지했고 5화가 재유예했다. 즉 설계 의도(climax 지시)만으로는 지불이 확정되지 않으며, 착지를 검증할 검출기와 횡단 상태가 없다는 것이 정확히 이 갭이다. 'LLM 클리프행어 편향이 원인'이라는 반론은 이 시스템의 명시적 설계 철학(harness over model: LLM 결함은 코드가 검출·교정) 하에서 uphold를 지지한다 — 다른 모든 품질 축(틱·시제·조판·비트반복·정합성)은 코드 소유자가 있는데 재미 회계만 없다. directive 조향은 작동함이 실증되어 있으므로(red_pen·fix_directive 메커니즘) 신호만 있으면 교정 가능했다는 반사실도 그럴듯하다. (5) downgrade_to_b 기각: 약속의 생애주기(개설 회차→만기→상환 검출)는 회차·에피소드·아크를 횡단하는 영속 상태를 요구하는데, 현 구조의 유일한 보유 후보 두 곳(에피소드 스코프 자유 문자열, 죽은 wiki plot_thread)이 모두 이를 담을 수 없음이 검증됐다. 상환 검출(ClaimExtractor 패턴)+영속 상태+다층 주입을 새로 배선해야 하므로 프롬프트·컨텍스트 보강으로 도달 불가 — (c) 분류가 맞다.",
+     "verdict": "uphold"
+    },
+    {
+     "verdict": "uphold",
+     "reasoning": "코드를 직접 검증한 결과 G1의 사실 주장은 전부 성립하고, local-fix 렌즈의 uphold 트리거(같은 결함의 국소 수정 2회 이상 재발)가 명시적으로 발화한다.\n\n[사실 검증 — 전부 확인됨]\n1. plants/payoffs는 자유 문자열 라벨(domain/narrative.py:30-31), _outstanding_plants는 정확 문자열 일치로 대조(services/copilot.py:59,64). payoffs를 쓰는 코드는 에피소드 '설계 시점' 파싱뿐(worldgen/arc_planner.py:130) — finalize 팬아웃(copilot.py:639-681)은 온톨로지·바이블·커서·롤업만 갱신하고 약속 상태는 한 줄도 건드리지 않는다.\n2. 정확 일치가 구조적으로 불가능: lazy _gen_episodes(arc_planner.py:134-151)는 미회수 plants를 아예 입력받지 않으므로(시그니처에 plant_notes 없음, 프롬프트엔 최근 줄거리만) 후속 에피소드의 payoffs 문자열은 선행 plants를 모른 채 작성된다. 서로 다른 LLM 콜의 자유 기술이 일치할 경로가 없다.\n3. 더 결정적으로, 회수 라벨은 '본문이 실제로 지불했는가'와 무관 — 설계 라벨이 있으면 paid 처리된다. 증거 파일이 보여주듯 본문은 전부 유예한다(blind_audit_evidence.md:647 \"[‘이중 각성’—잠정 고유 스킬, 임시 적용]\"). 즉 현 원장은 설계 의도를 측정하지 실제 서사 상태를 측정하지 않는다.\n4. 측정 축 부재 확인: 15건 chapter_eval 전부 hook 8~9, hook_sim=0.0(evidence 1923-1939행) — 회차말 훅이 5회 연속 '미확인 새 존재 등장' 동일 유형인데(1·2·3·4·5화 말미 직접 확인) 임베딩 유사도 게이트도, 평가 5축(sim_persona.py:146 hook/style/world/consistency/progress)도 부채 적층을 보지 못한다.\n\n[downgrade_to_b를 시도한 최강 반론과 기각 사유]\n반론 (a): 소비 주입점은 이미 존재한다 — plant_notes가 beat_for_episode에 참고 슬롯으로 들어가고(copilot.py:546-556, arc_planner.py:216), plant_backlog advisory(copilot.py:613-615)와 plant_reminder 다이얼(world.py:165)도 있다. 맞다 — rationale의 \"소비 결정 지점 부재\"는 과장이다. 그러나 이 슬롯에 공급되는 데이터가 허구(설계 라벨 diff)라서, 주입을 아무리 보강해도 실제 미지불 약속(이중 각성·블랙 스캐너 등 — 전부 '본문이 발명'했고 에피소드 plants에 선언된 적 없는 항목)은 목록에 존재하지 않는다. 프롬프트·컨텍스트로는 입력 데이터 자체가 도달 불가.\n반론 (b): 위키에 원장 골격이 이미 있다 — WikiPage plot_thread + payoff_deadline + payoff_of 엣지 + 결정론 lint(wiki.py:89-96). 이것이 오히려 uphold의 결정 증거다: Wiki.add_edge(payoff_of 엣지의 유일한 생성 경로, wiki.py:74)는 호출자 0(grep 전수 확인 — 모든 add_edge 호출은 ont.add_edge), lint는 읽기 전용 스냅샷 엔드포인트(copilot.py:1102)에서만 소비되고 생성 루프에 안 들어간다. 즉 상환 검출(갱신기)이 없어 죽은 비계로 남았다.\n\n[재발 카운트 — 렌즈의 uphold 트리거]\n같은 결함('연 약속이 지불 확인 없이 적층')에 대한 국소 메커니즘이 이미 2세대 이상 존재하고 모두 실패했다: 1세대=위키 plot_thread 원장(초기 커밋 d209d3b/b4f3a04, 죽은 코드), 2세대=스파인 plants/payoffs + _outstanding_plants + plant_notes/plant_backlog/plant_reminder/plant_inject_cap/plant_backlog_threshold 5종 노브(8dc7222에서 도입, 4a00498·3a717d1·6a31351에서 반복 손질), 3세대(증상측)=훅 재탕 게이트+recent_tails 로테이션(copilot.py:623) — 그리고 최신 컨텍스트 보강(d05d423·c5225ce) 이후의 2026-06-12 신규 E2E에서도 결함이 그대로 재현됐다(확정 지불 0회, 훅 단일 유형, 모든 게이트 침묵). 국소 수정 누적으로 수렴하지 않는다는 실증이 코드와 산출물 양쪽에 있다.\n\n[필요 작업의 성격]\n같은 효과를 내려면 최소한 (i) 본문 기준 약속 개설·상환 검출(증거 스팬 강제 추출기 — 새 갱신 코드, 프롬프트가 아님), (ii) 에피소드 스코프를 횡단하는 ID 있는 영속 상태, (iii) 그 상태를 소비하는 결정론 텔레메트리가 필요하다. 이는 데이터+갱신기+다층 주입의 신규 서브시스템으로, 온톨로지(SSOT)와 동형 구조다. 정합성 쪽에는 이 레이어가 있고 재미 쪽에는 없다는 비대칭 진단이 정확하다. 분류 (c) 유지.\n\n(부수 교정 2건 — 판정 불변: \"평가 18건\"은 chapter_eval 15건+run_summary 3건의 합산이며 15건 전부 hook 8~9인 것은 사실. \"생애주기 전체가 없다\"는 위키 plot_thread의 죽은 골격을 누락했으나, 미배선 사장 코드의 존재는 오히려 소유 레이어 부재의 추가 증거다.)"
+    },
+    {
+     "verdict": "uphold",
+     "reasoning": "Migration-cost lens verdict: the redesign is incrementally deliverable, breaks no working invariant, and its cost is small relative to an empirically confirmed benefit — uphold.\n\n(1) No invariant breakage. Signal asymmetry: the proposal adds zero binding gates — repayment detection commits as narrative_inferred, the exact tier policy already enforced in ontology_updater.py:182-188 (irreversible transitions non-binding) and :237-254 (machine-extracted relations, no auto-promotion to ground_truth). Deterministic gates: the 'chapters since last confirmed payment' counter is pure arithmetic over ledger state, same class as the existing advisory plant_backlog event (services/copilot.py:613-615) and drift_signals; quality_gates.py/checker.py/harness.py rewrite loop are untouched. Persistence: ProjectState (domain/project.py) is a Pydantic aggregate where all accumulating fields use default_factory — adding promise_ledger is strictly additive, old project JSONs load unchanged, repository/filesystem.py needs zero changes (only rag_chunks are special-cased); precedent: bible_migrated, runtime_edges, narrative_progress were added the same way. Transactionality: the updater hooks into the existing FINALIZED-only fanout (copilot.py:640-700) before the single repo.save, identical risk profile to runtime_entities/timeline/edges accumulation; the ESCALATED rollback path never touches it.\n\n(2) Incremental migration is concretely possible in three independent phases riding existing seams: (a) data model + deterministic counter coexisting with legacy plants/payoffs strings; (b) repayment detection reusing the ClaimExtractor evidence-span discard discipline (engine/extractor.py:19-24, 98-108) — or piggybacked as one extra key on OntologyUpdater.propose for zero additional LLM calls; (c) consumption via the already-built plant_notes reference slot (worldgen/arc_planner.py:208, 215-216 — explicitly separated from authority per the mode contract), with existing config knobs (plant_inject_cap, plant_backlog_threshold, plant_reminder off/gentle/active in config.py:37-38, domain/world.py:165) preserving author control and slow-burn opt-out unchanged. Estimated footprint: one small domain model, ~100-150 line updater, ~50 lines of wiring; marginal runtime <=1 temperature-0 call per finalized chapter.\n\n(3) Benefit verified, downgrade_to_b rejected. Code confirms the structural cause the audit claims: payoffs is written exactly once at design time in _mk_episode (arc_planner.py:130) from LLM JSON — grep shows no code path ever updates it from prose, so _outstanding_plants (copilot.py:56-65) exact-string-matches free labels emitted by different LLM calls (build_spine vs lazy _gen_episodes) and is structurally incapable of ever registering a payment; the backlog only accumulates. Evidence file checks out: blind_audit_evidence.md line 647 contains the cited '이중 각성—잠정 고유 스킬, 임시 적용' deferral, and the 15 chapter evals (lines 1921-1939) all score hook 8-9 with no promise-debt axis and no unpaid-promise defects flagged. A (b)-grade fix inside the current structure (fuzzy-matching the existing strings, prompt reinforcement) cannot reach the defect: the strings have no identity (no ID), no cross-arc home (lazy episode generation means future episodes' payoff slots cannot reliably reference plants opened in earlier arcs), and no lifecycle fields (open chapter/due/payment-type/status) — any robust fix necessarily creates the first-class ledger, which is precisely the (c) classification. Residual migration risks (fuzzy payment matching producing false 'paid' marks, prompt token budget) are bounded by the non-binding narrative_inferred tier + author-confirm promotion gate and the existing injection caps/truncation-visibility events, and do not approach overwhelming the benefit."
+    }
+   ],
+   "final": "c-confirmed"
+  },
+  {
+   "gap": {
+    "id": "G2",
+    "title": "재미 검수 데스크가 제품 루프에 부재 — 제품 게이트는 전부 산문/정합 축, 평가는 외부 도구의 회차 단독 절대점수",
+    "classification": "c",
+    "current": "제품 내 게이트 체인(quality_gates.py: 틱·훅 유사도·시제·조판 / checker.py: SSOT 정합)은 전부 산문 표층과 설정 정합 축이고, '독자가 이 화에서 무엇을 받았는가'를 묻는 검수는 제품에 없다. 유일한 재미 측정은 외부 도구 tools/sim_persona.py:eval_chapter(134-167) — 회차 단독 5축 절대점수(hook/style/world/consistency/progress, 지불 축 없음), 본문[:9000]만 보고 직전 회차 미주입(chapter_quality_report(text, [], …)로 prev_tails=[] → hook_sim 항상 0), 생성과 같은 provider의 자기 채점이며, avg<6.5에서만 되먹임이 발화한다.",
+    "ideal": "finalize 루프 안에 정합 데스크와 분리된 재미 데스크를 신설: ① 결정론 카운터(코드, LLM 0콜) — 직전 N화 훅 유형 윈도우 반복률, 마지막 확정 지불 후 경과 회차, 스토리 시간/장소 전진량 — 를 산출해 plan_lint 입력으로 주입(기존 '위반 명시 재계획 1회' 패턴과 동형, 교정은 본문이 아니라 계획으로). ② 직전 N화 요약+당화 본문을 블라인드(비트 미공개)로 읽는 장르 독자 페르소나의 행동 예측('주인공이 얻은 것 한 단어', '다음 화 결제 여부', 직전 5화 내 상대 순위)을 advisory 신호+작가 에스컬레이션으로 — LLM 판정은 비구속 유지(결정론 코어 원칙 보존), 생성과 다른 판정 설정으로 분리.",
+    "evidence": "평가 18건 전부 avg≥7.2(8.6 최고), hook 8~9 인플레 — 지불 0회·동일 훅 14/15·5화 시간 정체가 전량 통과했고, avg<6.5 되먹임은 15화 동안 단 한 번도 발화하지 않았다. det 레코드 15건 모두 hook_sim:0.0(죽은 지표). '주인공이 얻은 것 한 단어' 질문을 통과하는 회차가 증거 15화 중 0개.",
+    "rationale": "4개 설계 전부 수렴(블라인드 페르소나 지불 검증/연속 독서 시뮬/행동 예측/윈도우 결제 판정 — 그리고 4개 모두 '절대 점수 금지'를 명시). 회차 단독 절대 루브릭은 누적 결함(훅 반복·지불 유예·시간 정체)에 원리적으로 눈멀고, 증거가 그것을 실측으로 입증했다. 평가의 단위(회차→윈도우)와 계약(점수→행동 예측/상대 비교), 그리고 위치(외부 도구→제품 루프) 자체를 바꿔야 하므로 프롬프트 개선으로 부족 = (c).",
+    "touches_user_decision": false
+   },
+   "votes": [
+    {
+     "verdict": "uphold",
+     "reasoning": "증거를 직접 검증한 결과 핵심 주장 전부가 실측과 일치한다. (1) 평가 레코드(blind_audit_evidence.md:1923-1939): 15건 전부 avg 7.2~8.6, hook 축 전건 8~9, det.hook_sim 전건 0.0 — sim_persona.py:153이 prev_tails=[]로 호출해 지표가 구조적으로 죽어 있음을 코드로 확인했고, avg<6.5 되먹임(sim_persona.py:210)은 수학적으로 한 번도 발화 불가했다(최저 7.2). 자기 채점도 확인(sim_persona.py:140, 서비스와 동일 settings의 provider). (2) 본문 결함은 실재한다: 15화 말미를 전수 확인 — 14~15/15가 동일 훅 유형('미지의 존재/목소리/이름 직전 절단')이고, 작품2의 5화 말미는 quality_gates.py:69에 '알려진 재탕 템플릿'으로 문서화된 바로 그 문형('누구의 X가 …할지—아무도 모른다')과 일치한다. 시간 정체도 3작품 전부 실측(작품1=시험장 하루의 연속 위기 5화, 작품2=같은 연회장 하룻밤 5화, 작품3=하룻밤 연속). 지불은 전부 잠정/즉시 폐기(파워셀·단말기 미끼로 투기, 스킬은 5화 내내 '잠정·임시·조건부'). (3) 인과의 적대 검증: 가장 강한 반박 후보 '결함의 원인은 생성 정책(클리프행어 스타일+직전 말미 기반 비트 파생)이지 검출 부재가 아니다'는 세 가지로 기각된다 — ① 이 시스템의 닫힌 루프 철학에서 미검출=미교정이며, quality_gates.py:4-5가 '게이트 없는 축은 런마다 주사위'라는 1차 실측을 스스로 문서화한다(게이트 부재가 품질 결과에 인과적이라는 자체 증거). ② 같은 평가 레코드 안의 내부 대조가 인과를 입증한다: 결정론 검출기가 있는 축(style)은 틱·토막행갈이 검출로 4~5까지 끌려 내려온 반면, 검출기 없는 축(hook/progress)은 시계가 멈춘 회차에 8~9로 부유 — 측정기 유무가 점수-실재 괴리를 정확히 가른다. ③ plan_lint.py:6이 '재미·전개 품질은 비구속(여기서 다루지 않음)'을 명시 — 부재는 설계상 사실이다. (4) (c) 분류도 유지: 현 구조의 인접 도구들이 같은 증거에서 실패했음을 확인 — 제품 내 의미 훅 게이트(harness.py:412, 0.82)는 활성 상태였음에도 14/15 동일 유형 훅을 통과시켰고(유형 반복≠표층 의미 유사), 루브릭에 이미 '제자리걸음/반복대사'가 있는 심판이 윈도우를 못 보기 때문에 정체 회차에 progress 7~9를 줬다 — 프롬프트가 아니라 평가 단위·입력·위치의 문제다. 사소한 과장 2건을 발견했으나 비하중적: '본문[:9000]'은 사실이나 이 증거에선 비구속(전 회차 3,274~5,346자), '얻은 것 한 단어 0개'는 2~3개 회차(블랙 스캐너·검패)에서 다툴 여지가 있다. 둘 다 핵심 인과사슬(죽은 지표 15/15·되먹임 0회 발화·훅 유형 반복·시간 정체·점수 인플레)을 흔들지 못한다. 판정 유지."
+    },
+    {
+     "verdict": "uphold",
+     "reasoning": "검증 결과 판정 유지(uphold). 국소수정 렌즈로 깨뜨리려 시도했으나 실패했고, 오히려 렌즈의 uphold 트리거(동일 결함 2회 이상 재발)가 실측으로 충족된다.\n\n[사실 검증 — 갭의 핵심 주장 전부 실증]\n① sim_persona.py:153 — chapter_quality_report(text, [], roster=roster)로 prev_tails가 리터럴 빈 리스트. hook_repeat(quality_gates.py:55-65)는 빈 루프로 무조건 0.0 반환. test_history.jsonl의 chapter_eval det 레코드 전수(28건, 갭이 인용한 15건 포함)가 hook_sim:0.0 — 죽은 지표 확정. ② sim_persona.py:144-148 — 회차 단독 5축 절대 루브릭, 지불 축 없음, text[:9000], 직전 회차 미주입; 140행 create_provider(get_settings())로 생성과 동일 provider 자기 채점. ③ 210행 되먹임 임계 avg<6.5 — 전체 28건 최저 7.0으로 단 한 번도 발화 안 함(갭의 '18건 전부 ≥7.2'는 7.0 1건이 있어 미세 부정확하나 부하지지 주장인 '되먹임 0회 발화'는 그대로 성립). hook 점수는 전 레코드 8~9. ④ 제품 루프 전수 확인 — quality_gates(틱/말미유사/시제/조판/지시어), checker(SSOT), plan_lint(id정합/사망배정/비트재탕), drift.py(cast_missing+pacing_overrun=회차수 초과뿐, \"의미 판정자는 두지 않음\" 명시) — 지불·훅 유형 다양성·스토리 시간 전진을 묻는 코드는 어디에도 없음. '현재' 기술 정확.\n\n[증거 본문 대조] 작품2(악역 공녀)는 5화 전부 한 연회장의 연속된 하룻밤, 작품1은 5화 전부 각성 시험장 단일 사건 — '5화 시간 정체' 실증. 15화 말미가 전부 임박위협/폭로 직전 줄표 절단 동형이고, 작품2 5화 말미는 quality_gates.py:69가 '잡으려고 만든' 바로 그 R7 템플릿(\"누구의 결말이 먼저 송출될지—아무도…가늠할 수 없었다\")인데 hook 8점으로 출고됨. 작품2 1화는 \"(다음 회에서 계속)\" 메타 누출을 싣고 avg 8.6.\n\n[국소수정 반박 시도와 그 실패] (a) prev_tails 빈 리스트 수정+심판 프롬프트에 윈도우 컨텍스트/지불 축 주입은 한 줄~프롬프트 수준으로 가능하나, 데스크가 외부 dev 하네스에 남는 위치 문제는 그대로(실제 작가의 회차는 재미 검수 0회) — 갭이 지적하는 '위치' 결함 미해소. (b) 제품 내 hook_repeat_semantic@0.82(harness.py:410-414)의 임계 완화(설정 보강)는 측정축이 '윈도우 내 내용 유사'라 훅 '유형' 단조·지불 유예와 직교 — 같은 장면 연속 회차에서 대량 오탐만 유발. ending_hook=cliffhanger가 스타일로 박혀 있어 모든 말미가 설계상 절단인 시스템에서 유사도 튜닝으로는 '유형 다양화/지불'을 표현할 수 없음. (c) '마지막 지불 후 경과 회차·시간 전진량' 컨텍스트 주입은 산출원이 없음 — 추출기 스키마는 정합 클레임 전용이라 지불/시간 추적은 신규 추출·상태·카운터 코드 추가가 필요, 이는 컨텍스트·프롬프트·데이터 보강의 범위를 벗어남.\n\n[재발 이력 = 설계 결함의 결정적 증거] 훅/재미 축은 국소 수정 3회 이후에도 재발: ① R1→R7 프롬프트 정책기(\"훅재탕13회 — 프롬프트지시 한계 확정\", test_history.jsonl 백필) → ② 자카드 hook_repeat 게이트 추가 → 0.17 미탐(quality_gates.py:68-70 문서화) → ③ 임베딩 hook_repeat_semantic 제품 투입 → 한 층 깊은 수준(훅 유형 14/15 동형·지불 0·시간 정체)으로 재발, R7 템플릿 재출고. quality_gates.py:4-5의 자체 교훈(\"프롬프트 지시만 있는 축은 런마다 주사위\")이 프롬프트-only 대안을 코드 내 문서로 기각하고 있고, 사용자 프로젝트 원칙(두더지잡기 금지: 결함 2회 재발=설계 결함, 검출기 추가 금지·소스 차단)도 동일 결론. 평가의 단위(회차→윈도우)·계약(절대점수→행동/상대비교)·위치(외부→제품 finalize 루프)를 바꿔야 하며, 이는 (c) 분류가 타당하다."
+    },
+    {
+     "verdict": "uphold",
+     "reasoning": "UPHOLD — 이행 비용 렌즈에서 (c) 판정은 깨지지 않는다. 오히려 제안된 이행 경로는 기존 불변식을 보존하도록 설계되어 점진 이행 가능성이 코드로 확인된다.\n\n[증거 실측 확인] sim_persona.py:153 chapter_quality_report(text, [])가 prev_tails=[]를 하드코딩 → hook_sim 구조적 사망(증거 파일 1923-1939행 det 레코드 15건 전부 0.0 확인). :148 text[:9000], :140 create_provider(get_settings()) 생성과 동일 provider 자기채점, :210 avg<6.5 되먹임 — 실측 점수 바닥이 7.2(최고 8.6, hook 전부 8~9)라 발화 불가능, 실제 0회 발화. 본문 5개 화 직접 읽음: 전부 '새 변수/인물/경고 난입' 동일 훅 유형의 어휘만 다른 변주 — 임베딩 말미 게이트(harness.py:410-414, >0.82)가 원리적으로 못 잡는 추상 수준이며, 임계 하향은 모든 클리프행어를 오탐.\n\n[refute 기각 — 비용이 효익을 압도하지 않음] ①결정론 카운터는 LLM 0콜 코드이고 주입처(plan_lint+위반명시 재계획 1회, copilot.py:557-583)가 이미 배선돼 있음. 계획 단계 교정은 draft 콜을 절약(plan_lint.py:5 자체 논리). ②페르소나 판정은 화당 advisory 1콜(~수초 vs 회차 생성 ~2.5분), finalize 팬아웃에 비차단 배치 가능. 효익: 전 스택 유일의 재미 되먹임이 15화 동안 0회 발화 + 핵심 지표 사망 상태로 동일훅 14/15·지불 0회가 전량 출고 — 연재물의 핵심 가치축이 무방비.\n\n[불변식 검사 — 깨지지 않음] 카운터는 결정론 등급 신호이고, 재미축 binding의 제품 내 선례가 이미 존재: plan_beat_repeat(copilot.py:564-575)는 임베딩 1콜인데도 DETERMINISTIC 등급으로 재계획을 binding — 순수 카운터는 이보다 더 강한 근거. LLM 페르소나는 SEMANTIC/advisory 유지(types.py:13-29의 비대칭 슬롯 그대로). 영속은 가산적(회차 본문/요약 기영속, 말미 소급 재계산 가능, plants 원장 copilot.py:56-64 기존재). 슬로우번 충돌 리스크는 plant_reminder(off/gentle/active)·plant_backlog_threshold(config.py:37) 작가 레버 선례로 한정됨.\n\n[downgrade_to_b 기각] 가장 강한 (b) 논거 — 재미 데스크 '파편'이 이미 존재(hook_repeat_semantic+_regen_tail, _outstanding_plants, drift advisory) — 는 추상 수준에서 무너진다. 전부 표층 유사도 또는 계획 적합성 검사이고, 증거가 그것을 실측 반증: 동일 훅 유형 14/15·지불 0·5화 시간 정체가 모든 파편을 통과했다. 낡은 계획은 자기 자신에 적합하다. 결정적으로 plan_lint.py:6이 코드로 명시: \"재미·전개 품질은 비구속(여기서 다루지 않음)\" — 부재는 파라미터 누락이 아니라 현행 설계다. sim_persona prev_tails 수정은 1줄이지만 도구는 여전히 외부·회차단독·절대점수·자기채점·발화불능 임계로 남는다. 단위(회차→윈도우)·계약(점수→행동예측)·위치(외부→제품 루프) 변경은 실재하며, 이행이 싼 이유는 배선 패턴 재사용이지 구조 변경의 부재가 아니다. 렌즈 규칙대로: 점진 이행 가능 + 불변식 보존 + 효익>비용 = uphold."
+    }
+   ],
+   "final": "c-confirmed"
+  },
+  {
+   "gap": {
+    "id": "G3",
+    "title": "연재 관리 레이어 부재 — 시계열 신호의 소비자와 아크/엔딩 개정 경로가 없다",
+    "classification": "c",
+    "current": "엔딩·전체 아크는 create_project 시 1회 확정 후 개정 경로가 없고(decision_points 명시: done 마킹만), drift_signals(cast_missing/pacing_overrun)는 record 저장+SSE 방출 후 어떤 코드도 소비하지 않으며, pacing_overrun은 is_finale이 회차 수로 강제되어 정상 경로에서 발화 불능이다. lazy 에피소드 재설계(_gen_episodes)는 직전 3~4회차 요약줄만 보고, 사이다 간격·훅 유형 엔트로피·시간 진행·조연 등장 간격 같은 시계열 지표는 산출 자체가 없다.",
+    "ideal": "에피소드/아크 경계에 회고 단계를 신설: 결정론 시계열 지표(코드 산출 — 훅 유형 분포, 지불 간격, 신규 명사 도입률, 조연 미등장 간격, 화당 스토리 시간 진행)를 누적하고, 아크 종료 시 LLM이 지표 이상치의 원인 가설+다음 아크 카드 수정안을 '제안'하면 작가가 승인하는 처방 루프(코파일럿 조향 모델 유지). 승인된 처방과 회고 요약을 _gen_episodes·build_spine 재호출의 컨텍스트로 주입하고, 엔딩/아크에 개정 트랜잭션 경로를 연다.",
+    "evidence": "헌터물 5화가 하룻밤·단일 시퀀스(시험장→방호실→통로→금고)에 갇히고 긴장이 단조 상승(이완 비트 0회), 로판 남주 후보 루시안이 1화(710~744행) 이후 완전 증발 — 모두 회차 단위에서는 안 보이고 시계열로만 보이는 결함인데, 이를 잡을 어떤 신호도 발화하지 않았다(평가 18건 전부 7점 이상).",
+    "rationale": "4개 설계 전부 수렴(L6 연재 관리/텔레메트리 롤링 게이트/작가 코크핏 시계열/연독 분석 루프). 페이싱 드리프트는 회차 단위 검수로 원리적으로 검출 불가가 4개 설계 공통 진단이며 증거가 실증한다. 현 구조에는 시계열을 소비할 결정 지점(아크 재설계 경로)이 존재하지 않으므로, 어떤 레이어 내부 개선으로도 도달 불가 = (c). drift.py는 씨앗이 있으나 소비자 없는 advisory로 끝난다.",
+    "touches_user_decision": false
+   },
+   "votes": [
+    {
+     "verdict": "downgrade_to_b",
+     "reasoning": "필요성 렌즈에서 인과를 직접 검증한 결과, 갭의 코드 사실관계는 전부 정확하지만(드리프트 신호의 소비자 부재 — web/app.js:673의 UI 배지가 유일, drift.py 독스트링이 약속한 작가 REGEN 재계획 경로는 미구현; pacing_overrun은 copilot.py:545의 is_finale 등호 발화로 len(ep_chs)==target이 강제되어 발화 불능; 아크/엔딩 개정 경로 부재), '관찰된 증거 결함의 원인이 이 레이어 부재'라는 인과는 깨진다. (1) 두 작품의 증거 5화 전부가 첫 에피소드 내부다(data/projects/83020455e387.json: arc1_ep1 target=8, chapters_in_episode=5; 5f6fe7b57d06.json: target=7, 동일) — 갭이 제안한 에피소드/아크 경계 회고는 ch8/ch7에야 처음 발화하므로, 이상적 레이어를 추가했어도 인용된 결함은 하나도 예방되지 않았다. (2) 헌터물 '하룻밤 단조 상승'은 드리프트가 아니라 설계 시점 산물이다: build_spine이 단일 사건(각성 시험장)에 8화를 배정했고, beat_for_episode(arc_planner.py:210-213)가 매 화 '직전 말미 즉시 인계+절정으로 한 걸음 전진+아직 터뜨리지 말 것'을, ending_hook 기본값 cliffhanger(world.py:129, harness.py:93-95)가 매 화 위기 절단을 강제한다 — 시간 도약 허용·이완 비트 지시가 어디에도 없어 연속 시간 단일 시퀀스가 결정론적으로 산출된다. 원인은 레이어 3/4 내부. (3) 루시안 증발은 캐스팅 설계 결함이다: 월드젠이 로판 남주를 아예 설계하지 않았고(entities: isabella/celine/adrian뿐), ep1 절정이 '황태자'를 참조하면서도 설계된 4개 에피소드 전부의 required_cast에서 제외 — 그는 1화 본문이 발명해 자동커밋된 provisional cast_3일 뿐이다. cast_missing은 required_cast 기준이라 소비자가 있었어도 그에 대해 영원히 발화 불능 — '씨앗은 있으나 소비자 없음' 프레임이 이 결함과 무관함을 데이터가 증명한다. 원인은 레이어 2/3 내부(장르별 필수 역할 캐스팅 정책+절정-캐스트 정합 검증, plan_lint 확장으로 해결 가능). (4) (c) 분류의 핵심 전제 '시계열을 소비할 결정 지점이 없다'는 현 구조의 기존 루프 3개가 반증한다: _outstanding_plants→plant_notes→beat_for_episode(copilot.py:546-556, 회차 횡단 복선 원장을 매 화 소비), recent_tails 훅 로테이션+hook_sim 게이트(copilot.py:623), 전 8화 틱 절제 원장(copilot.py:624-632). 조연 미등장 간격·스토리 시간 진행 지표는 scan_present_ids 등 기존 결정론 수단으로 산출해 동일 패턴으로 동일 결정 지점에 주입 가능 — 신규 레이어/개정 트랜잭션 없이 도달 가능한 (b)다. 비판된 lazy _gen_episodes 근시안은 두 런 모두에서 실행조차 되지 않았다(arc1 에피소드는 build_spine 선행 설계). 품질 문제 자체는 실재하고 회차 단위 평가에 비가시적이라는 관찰도 옳으므로 전면 refute는 과하지만, 관찰된 결함의 더 그럴듯한 원인은 설계 시점의 레이어 내부 결함이고 교정도 기존 구조의 기존 패턴 확장으로 충분하므로 downgrade_to_b."
+    },
+    {
+     "verdict": "uphold",
+     "reasoning": "모든 사실 주장이 코드로 검증됨: (1) drift_signals 소비자 부재 — copilot.py:678-681이 record 저장+SSE 방출, 전체 레포에서 유일한 하류 소비자는 web/app.js:673의 건수 배지뿐. (2) pacing_overrun 발화 불능 — drift.py:21은 len>target에서만 발화하나 is_finale 블록(copilot.py:674) 안에서만 계산되고, is_finale=chapters_in_episode+1>=target(545행), 카운터는 FINALIZED에서만 증가+ESCALATED 롤백+재생성은 동일 회차 교체이므로 평가 시점에 len==target 정확히 성립, 정상 경로에서 strict > 도달 불가. (3) 개정 경로 부재 — routes.py:266 spine 엔드포인트는 GET 전용, current_episode는 전진/done 마킹만, 아크 카드·엔딩은 build_spine 1회 기록 후 불변. (4) _gen_episodes는 요약 3-4줄만 수신(copilot.py:502-507), 존재하는 교차 회차 원장은 전부 단기 표면유사도(word_tics 8화/recent_tails 3화/beat_repeat 4화/hook tails 3-5화)로 훅 유형 엔트로피·지불 간격·스토리 시간 진행·조연 미등장 간격 산출은 없음. 증거도 실증: 헌터 5화 전부가 단일 밤·단일 시퀀스(시험장→방호실→통로→금고)이고 5화 모두 동일 유형 훅('바로 그때 뜻밖의 변수 난입')으로 끝나는데 hook_sim은 전부 0.0(검출기가 유형 단조에 구조적으로 맹목), 루시안은 710-744행(1화)에만 등장 후 2-5화에서 0회, 평가 18건 전부 avg 7.2-8.6. 렌즈의 결정 기준인 '동종 결함 국소수정 2회 이상 재발'이 충족됨: 이 시계열 드리프트 패밀리에 이미 4개 이상의 국소 수정이 존재하고(beat_for_episode 프롬프트의 '리셋·반복 금지·한 단계 전진' 지시는 증거 런 당시 활성 상태였으나 각 비트가 방 하나씩 전진하며 문자적으로만 충족, beat_repeat_score 0.86 lint(커밋 4a00498) 미발화, 훅 게이트+recent_tails 로테이션(03868b3) 0.0 판독, 캐스트 플랜 레이어 재설계(38115af)에도 루시안 증발, 아크 페이싱 산술(6881233)도 동족 선행 수정) 2026-06-12 신규 런이 전부를 무력화. 다운그레이드 최강 반론(restraint/plant_notes 패턴의 최종등장 원장 주입)은 루시안 사례 일부만 완화 가능하나, 주 증거인 페이싱 단조는 불변 에피소드 카드·고정 절정으로의 코드 라우팅 수렴 구조상 컨텍스트 주입으로 도달 불가 — 재계획 트리거는 결정론 lint뿐이고, 시스템 자체 불변식('라우팅=코드')상 advisory 프롬프트 줄은 결정 지점이 아니며 본 런이 그 실패를 실증. 처방 루프(작가 승인+아크/엔딩 개정 트랜잭션)는 새 상태·API·트랜잭션 경로를 요구해 렌즈 도구상자(컨텍스트·프롬프트·데이터 보강) 밖. 추가 검출기+주입 처방은 프로젝트 자체의 두더지잡기 금지 원칙이 명시 금지하는 5번째 두더지. 분류 (c) 유지."
+    },
+    {
+     "verdict": "uphold",
+     "reasoning": "사실 검증(전부 코드로 확인): (1) drift_signals 소비자 부재 — grep 결과 record 저장(copilot.py:678)·bus emit(680-681)·web/app.js:673의 건수 표시뿐, 어떤 코드도 재계획에 사용하지 않음. drift.py:7 docstring이 약속한 \"재계획은 작가 선택(REGEN)\"은 코드베이스 전체에 존재하지 않는 경로(유일한 regen은 harness.py의 tail_regen=회차 결말 재작성, 무관). (2) pacing_overrun 발화 불능 확인 — is_finale은 chapters_in_episode+1>=target_chapters로 강제(copilot.py:545)되고 episode_id는 FINALIZED 레코드에만 부여(672)되므로 finale 시점 ep_chs 길이는 정확히 target과 일치, drift.py:21의 `>` 조건은 정상 경로에서 참이 될 수 없음. (3) 개정 경로 부재 — 스파인 API는 GET /projects/{pid}/spine 단 하나(routes.py:266), Arc/Episode의 유일한 사후 변이는 done 마킹과 summary 롤업. (4) 증거 실증 — 헌터물 1~5화가 단일 야간 시퀀스임을 본문으로 확인, 루시안은 증거파일 710~744행(1화) 이후 등장 0회, 평가 로그는 같은 밤에 갇힌 회차들에 progress 8~9점을 부여(blind_audit_evidence.md:1923-1939) — 회차 단위 검수의 원리적 사각을 실증.\n\nmigration-cost 렌즈 판정 — 점진 이행 가능, 불변식 무손상: (a) 신호 비대칭 보존 — domain/narrative.py:5 docstring이 명시하듯 엔딩/아크/에피소드 목표는 '서사 의도'(narrative 슬롯)지 ground_truth가 아니므로, 개정 트랜잭션은 결정론 게이트·캐논 티어·binding 판정을 단 하나도 건드리지 않는 순수 advisory 공간의 변경이다. (b) 처방 승인 루프는 기존 거버넌스 패턴의 3번째 인스턴스 — bible 증분이 status=\"ai_unreviewed\"로 append되고 작가 promote 게이트를 거치는 패턴(copilot.py:656-667), 온톨로지 escalation 미적용 패턴과 동형. (c) 이행 이음새가 이미 코드에 존재 — 생산자 훅: is_finale 블록(copilot.py:674-681, 롤업+드리프트가 이미 거기서 산출됨)과 arc.done 지점(arc_planner.py:190); 지표 재료: scan_present_ids(결정론 substring, drift.py가 이미 사용)로 조연 미등장 간격, _outstanding_plants로 지불 간격, ontology_changes/runtime_entities로 신규 명사 도입률, 평가 로그의 det.hook_sim이 증명하는 기존 임베딩 인프라로 훅 엔트로피 — 대부분 이미 영속된 산출물에서 파생 가능해 스키마 마이그레이션 없이 온디맨드 계산도 가능; 소비자 슬롯: _gen_episodes의 recent 자유텍스트 파라미터와 beat_for_episode의 plant_notes(arc_planner.py:215-216 '시스템 참고 슬롯, 모드 계약 §1' 주석이 정확한 선례). (d) 개정 트랜잭션 비용 낮음 — lazy 설계 덕에 미래 아크는 episodes가 빈 배열이라 4개 텍스트 필드 수정의 다운스트림 결합이 0이고, 작가 변이 트랜잭션 패턴(sess.lock→권위 재읽기→변이→snapshot_into→save)은 end_relation(copilot.py:440-460)에 완비. 커서 불변식(NarrativeProgress의 episode_id 참조)은 아크 경계 한정 정책으로 회피 가능. (e) 영속 호환 — drift_signals 자체가 types.py:106에 default_factory로 추가된 전례 그대로, 신규 필드는 구 JSON과 하위호환. (f) 단계별 출하 가능: P1 지표 산출+영속+SSE(행동 무변경) → P2 참고 슬롯 주입 → P3 아크 경계 회고 제안+승인+차기 아크 카드 수정 → P4 엔딩 개정 — 각 단계가 독립 롤백 가능하며, 최근 커밋들(plan_lint.py 신규, 품질 게이트 닫힌 루프, bible 증분)이 정확히 이 규모의 추가형 변경을 반복 출하해온 이력이 있다. 회차 생성 핫패스(harness.py 내부 루프·checker·quality_gates)는 무수정.\n\nrefute 불가 사유: 효익이 투기적이지 않고 실증됨(평가 18건이 시계열 결함에 전부 무감), 어떤 이행 단계도 binding 게이트나 영속 구조를 깨지 않음. downgrade_to_b 불가 사유: (b)의 최대치인 '기존 비트/에피소드 프롬프트에 지표 주입'만으로는 이미 물질화된 첫 아크의 에피소드 구조(헌터물 1~5화 결함이 살던 곳)를 고칠 수 없음 — 코드베이스 전체에서 스파인의 유일한 개정 동사는 done 마킹이고 API는 읽기 전용이므로, 개정 결정 지점+승인 거버넌스는 서비스/API/영속을 가로지르는 신설이 필요해 (c) 분류가 정당하다. 유일한 정직한 경고: 제안 지표 중 화당 스토리 시간 진행·훅 유형 분류는 순수 결정론이 아니라 추출이 필요하나, 증거 스팬 강제 QUASI 패턴(extractor)이 정확히 이 용도로 존재하고 advisory로만 진입하므로 판정을 뒤집지 못한다."
+    }
+   ],
+   "final": "c-confirmed"
+  }
+ ],
+ "stats": {
+  "designs": 4,
+  "gaps": 11,
+  "cVerified": 3
+ }
+}
