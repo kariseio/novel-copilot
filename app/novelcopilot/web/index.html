@@ -91,6 +91,11 @@
           <input id="ctl-target" type="number" min="1" max="1000" value="200" oninput="lockParam('target_chapters', this.value)" />
           <div class="ctl-chips" id="ctl-target-chips"></div>
         </div>
+        <div class="bc-field">
+          <label class="bf-label" for="ctl-keyword-input">키워드·트로프 <span class="muted small">(여러 개 선택 — 장르 따라 추천, 최대 6개)</span></label>
+          <input id="ctl-keyword-input" placeholder="직접 입력 후 Enter (예: 빙의, 약혼파기)" onkeydown="if(event.key==='Enter'){event.preventDefault();addCustomKeyword(this);}" />
+          <div class="ctl-chips" id="ctl-keyword-chips"></div>
+        </div>
       </div>
       <div id="brief-body" class="brief-body"></div>
       <button class="primary brief-generate" id="brief-gen" onclick="finalizeDraft()">세계 생성 →</button>

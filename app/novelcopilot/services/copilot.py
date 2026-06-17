@@ -238,12 +238,21 @@ class CopilotService:
                 except (ValueError, TypeError):
                     continue
             locks[k] = v
+        kw = params.get("keywords")     # 트로프 키워드(작가 칩 선택) — 리스트. _apply_locks 가 brief.keywords 에 setattr.
+        if isinstance(kw, list):
+            cleaned = [str(x).strip() for x in kw if str(x).strip()][:6]   # 소프트 캡 6(태그 남발 방지)
+            if cleaned:
+                locks["keywords"] = cleaned
+            else:
+                locks.pop("keywords", None)
         return locks
 
     @staticmethod
     def _apply_locks(brief: ConceptBrief, locks: dict) -> ConceptBrief:
         for k, v in (locks or {}).items():
-            if hasattr(brief, k):
+            if k == "keywords" and isinstance(v, list):   # S1: AI 추론 키워드 + 작가 칩 = 합집합(치환 아님 — 칩이 AI 추론분을 지우지 않게)
+                brief.keywords = list(dict.fromkeys(list(brief.keywords or []) + v))[:8]
+            elif hasattr(brief, k):
                 setattr(brief, k, v)
         return brief
 

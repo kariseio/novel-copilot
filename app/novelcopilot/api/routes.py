@@ -55,14 +55,15 @@ def get_draft(did: str, request: Request):
 
 
 @router.get("/drafts/{did}/finalize")
-async def finalize_draft(did: str, request: Request, target_chapters: int = 0, genre: str = "", tone: str = ""):
+async def finalize_draft(did: str, request: Request, target_chapters: int = 0, genre: str = "", tone: str = "", keywords: str = ""):
     """SSE: 누적 브리프로 세계 생성(세계관→이야기 구조→설정집) 실시간 진행.
-    작가가 컨트롤로 정한 파라미터(target_chapters/genre/tone)를 최종 반영."""
+    작가가 컨트롤로 정한 파라미터(target_chapters/genre/tone/keywords)를 최종 반영."""
     from ..engine.observability import EventBus
     svc = _svc(request)
     if not svc.get_draft(did):
         raise HTTPException(404, "draft not found")
     params = {k: v for k, v in {"target_chapters": target_chapters, "genre": genre, "tone": tone}.items() if v}
+    params["keywords"] = [k.strip() for k in keywords.split("|") if k.strip()]   # 트로프 칩(B1: finalize 채널 — 빈 리스트면 _merge_locks 가 잠금 해제)
     loop = asyncio.get_event_loop()
     q: "queue.Queue" = queue.Queue()
     bus = EventBus()
