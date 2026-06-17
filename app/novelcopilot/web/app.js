@@ -140,7 +140,7 @@ async function renderOverview(){
       <div class="eyebrow">${esc(p.world.genre||"작품")}${p.world.tone?` · ${esc(p.world.tone)}`:""}</div>
       <h3 class="ov-logline">${esc(p.world.premise||p.world.title||"무제")}</h3>
       <div class="ov-actions">
-        <button class="primary" onclick="goSection('write')">${last?`${last}화에 이어 쓰기 →`:"1화 쓰기 →"}</button>
+        <button class="primary" onclick="overviewWrite(${last?0:1})">${last?`${last}화에 이어 쓰기 →`:"1화 쓰기 →"}</button>
         <button onclick="openViewer()">📖 읽기 모드</button>
       </div>
     </div>
@@ -528,7 +528,7 @@ function updateMeter(pct, ready){     // 미터는 '안내'일 뿐 — 생성 �
   pct = Math.max(0, Math.min(100, pct||0));
   const rdy = !!ready && pct >= 35;
   const fill = $("#brief-fill"); fill.style.width = pct + "%"; fill.classList.toggle("is-ready", rdy);
-  $("#brief-pct").textContent = `완성도 ${pct}%`;
+  $("#brief-pct").textContent = rdy ? `✓ 생성 준비 완료 · ${pct}%` : `완성도 ${pct}%`;   // 준비됐는데 '88% 고정'으로 멈춘 듯 보이던 문제 — 준비 상태를 명시
   const meter = document.querySelector(".brief-meter"); if(meter) meter.setAttribute("aria-valuenow", pct);
   const gen = $("#brief-gen"), hint = $("#brief-gen-hint");
   gen.classList.toggle("ready", rdy);
@@ -909,6 +909,10 @@ function genTick(){ const el = $("#p-genstatus"); if(!el) return;
   el.innerHTML = `<span class="spin"></span> ${esc(_genLabel)} · ${Math.floor(s/60)}:${String(s%60).padStart(2,"0")}`; }
 function genStop(){ if(_genTimer){ clearInterval(_genTimer); _genTimer = null; } const el = $("#p-genstatus"); if(el) el.classList.add("hidden"); }
 
+function overviewWrite(autostart){   // 개요 CTA: 이동만 하던 이중클릭 해소 — 1화는 바로 집필 시작, 이어쓰기는 지시 입력 여지 위해 이동만
+  goSection('write');
+  if(autostart) generateNext();
+}
 function generateNext(){
   if(STATE.generating) return;
   const pid = STATE.project.id;

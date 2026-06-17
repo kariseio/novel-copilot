@@ -38,6 +38,7 @@ class ConceptBrief(BaseModel):
         score += min(24, len(self.characters) * 12)     # 인물 2명이면 만점
         score += min(14, len(self.world_rules) * 7)
         score += min(12, len(self.conflicts) * 6)
+        score += min(8, len(self.themes) * 4)           # 주제도 준비도 축(누락분 보강 — 디테일 추가가 미터에 반영되게)
         score += 6 if self.genre else 0
         return min(100, score)
 
