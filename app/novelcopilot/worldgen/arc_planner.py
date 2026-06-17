@@ -82,6 +82,9 @@ class ArcPlanner:
             if getattr(brief, "logline", ""): bp.append(f"로그라인: {brief.logline}")
             if getattr(brief, "conflicts", None): bp.append("핵심 갈등: " + " / ".join(brief.conflicts))
             if getattr(brief, "themes", None): bp.append("주제: " + ", ".join(brief.themes))
+            if getattr(brief, "keywords", None):
+                bp.append("키워드·트로프: " + ", ".join(brief.keywords)
+                          + " (관계형 트로프[후회·복수]의 회수는 후반 아크에 배치 — 초반 남발 금지)")
             cw = "; ".join(f"{c.name}({c.role}): {c.want}".strip(" :()")
                            for c in (brief.characters or []) if getattr(c, "name", ""))
             if cw: bp.append("인물 동기: " + cw)

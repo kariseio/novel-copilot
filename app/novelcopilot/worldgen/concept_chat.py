@@ -19,7 +19,8 @@ _SYS = (
     "- reply: 작가에게 건네는 2~4문장. 공감 + '이번에 무엇을 어떻게 반영/제안했는지' + 자연스러운 다음 한 걸음.\n"
     "- brief: 설계서 '전체'를 갱신해 다시 써라(기존 내용 유지 + 이번 반영). 필드: "
     "title, genre, tone, logline(한 문장 핵심), premise(2~4문장), setting(세계·배경), "
-    "characters[{name, role, want}], world_rules[문장], conflicts[문장], themes[단어], target_chapters(정수).\n"
+    "characters[{name, role, want}], world_rules[문장], conflicts[문장], themes[단어], "
+    "keywords[웹소설 트로프·키워드 태그 — 아카데미·회귀·후회·먼치킨·빙의 등 대화에서 드러나면 채워라], target_chapters(정수).\n"
     "  · 장르·분위기(tone)·target_chapters 는 대화에서 드러나면 적극 제안해 채워라(웹소설은 보통 장편 연재 100~300화). "
     "단 [작가 확정]으로 표시된 값은 절대 바꾸지 말고 그대로 둬라.\n"
     "- changes: 이번 턴에 바뀐 것 짧은 항목들(예: '추가: 마법은 수명을 대가로 쓴다', '구체화: 주인공의 동기').\n"
@@ -30,7 +31,7 @@ _SYS = (
 )
 
 _SCHEMA = ('{"reply":"","brief":{"title":"","genre":"","tone":"","logline":"","premise":"","setting":"",'
-           '"characters":[{"name":"","role":"","want":""}],"world_rules":[],"conflicts":[],"themes":[],'
+           '"characters":[{"name":"","role":"","want":""}],"world_rules":[],"conflicts":[],"themes":[],"keywords":[],'
            '"target_chapters":200},"changes":[],"questions":[],"gaps":[],"ready":false}')
 
 

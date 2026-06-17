@@ -290,6 +290,11 @@ class CopilotService:
             parts.append("[핵심 갈등] " + " / ".join(brief.conflicts))
         if brief.themes:
             parts.append("[주제] " + ", ".join(brief.themes))
+        if getattr(brief, "keywords", None):
+            parts.append(
+                "[키워드·트로프] " + ", ".join(brief.keywords)
+                + " — 이 트로프 관습을 세계·인물·전개에 반영하라. 단 관계형 트로프(후회·복수 등)는 대상(가해자·연적 등)을 "
+                "초반에 깔되 회수(후회·복수 실행)는 한참 뒤로 미루는 장기 자산으로 설계하라(매 회차 반복 금지).")
         hint = next((f"{c.name}: {c.want}".strip(" :") for c in brief.characters
                      if c.role and ("주인공" in c.role or "주연" in c.role)), "")
         return ProjectSeed(

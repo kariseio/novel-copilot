@@ -27,6 +27,7 @@ class ConceptBrief(BaseModel):
     world_rules: list[str] = Field(default_factory=list)
     conflicts: list[str] = Field(default_factory=list)
     themes: list[str] = Field(default_factory=list)
+    keywords: list[str] = Field(default_factory=list)   # 웹소설 트로프·키워드 태그(아카데미·회귀·후회 등) — worldgen·스파인에 foundation 주입(매 화 반복 금지)
     target_chapters: int = 200                          # 웹소설 기본=장편 연재(상한 아님, 작가가 조정)
 
     def completeness(self) -> int:
