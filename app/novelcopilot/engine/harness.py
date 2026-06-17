@@ -498,7 +498,10 @@ class ChapterGenerator:
         norm = int(self.style.target_chars_per_chapter * 0.85)   # 출고 규범(코드 판정 — 모델은 분량을 모른다)
         draft_ctx["length_norm"] = norm                          # D-2: 출고 규범(문체규칙의 '5천자' 지시와 대조 가능)
         ext = 0
-        while len(text) < norm and ext < 2:
+        # 보강 상한 2→4: 건조한 author_style(또는 짧은 비트)은 세그먼트가 짧아 2회로 norm(5천자) 미달(페르소나 실측 3,618자).
+        # '이야기 전진'으로만 채우는 원칙은 유지 — 아래 진행 가드(<200자 중단)가 '진짜 더 쓸 게 없으면' 알아서 멈춰 물타기·낭비를 막는다.
+        # 정상 문체는 0~2회로 norm 도달해 루프를 빠져나가므로 추가 비용 없음(짧게 나오는 회차만 3~4회 사용).
+        while len(text) < norm and ext < 4:
             ext += 1
             self.bus.emit("draft_chapter", "extend", chapter=ch_no, chars=len(text), round=ext)
             # G9: 이어쓰기에 '이 회차의 계획 사건'을 컨텍스트로(아직 못 다룬 쪽으로 전진하게 — 정보 제공, 분량 지시 아님)
