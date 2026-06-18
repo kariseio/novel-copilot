@@ -48,7 +48,10 @@ class OpenAIProvider(LLMProvider):
     def embed(self, texts):
         if not texts:
             return []
-        r = self._client.embeddings.create(model=self.embed_model, input=texts)
+        # 빈/공백 문자열은 임베딩 API 가 400 거부('input cannot be an empty string') — 호출부 길이/정렬
+        # (rag.py zip(paras, vecs))을 깨지 않도록 공백 1칸으로 치환(드롭 금지). 결정론·순서 보존.
+        safe = [t if (t and t.strip()) else " " for t in texts]
+        r = self._client.embeddings.create(model=self.embed_model, input=safe)
         self.usage.embed_calls += 1
-        self.usage.embed_items += len(texts)
+        self.usage.embed_items += len(safe)
         return [d.embedding for d in r.data]
