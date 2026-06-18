@@ -961,6 +961,11 @@ class CopilotService:
                             beat.entities = [e for e in beat.entities
                                              if e in sess.bundle.ontology.entities and
                                              sess.bundle.ontology.name(e) not in bad] or beat.entities[:1]
+                    # T1 측정(매직버퍼 기각 교훈 — 가정 말고 계측): 회차 비트 사건 수 + 밀도 플래그(advisory·강제 아님, G4).
+                    _nev = len(beat.key_events)
+                    sess.bus.emit("plan_beat", "events", chapter=next_ch, n=_nev,
+                                  target_chars=state.world.style.target_chars_per_chapter, finale=is_finale,
+                                  density=("over" if (not is_finale and _nev > 6) else "thin" if _nev < 2 else "ok"))
                     hint = f"{beat.title} {beat.summary} {' '.join(beat.key_events)} {ep.climax}"
                     anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars, hint)
                     anchors = anchors + _arc_anchors(spine, arc, ep)

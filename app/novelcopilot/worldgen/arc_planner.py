@@ -295,6 +295,9 @@ class ArcPlanner:
         sys = ("에피소드 안에서 다음 회차 1개의 beat 를 설계하라. 절정으로 수렴하되 기존 설정과 모순 금지. " + hook +
                " 직전 화 말미의 미결 위기·중단된 상황을 이번 화 도입에서 '즉시 이어받아' 회수하라 — 리셋·동일 클라이맥스 재연·비트 반복 금지, 공간 또는 상황을 반드시 한 단계 전진. "
                "세계 고유 설정(경제·무기·기술 체계)을 사건의 구체 디테일로 쓰라. "
+               f"key_events 는 이 회차를 약 {world.style.target_chars_per_chapter}자로 자연스럽게 채울 만큼의 '구체적으로 일어나는 사건'을 담아라 — "
+               "보통 3~5개(도입·휴지 회차는 적게, escalation·finale 회차는 절정 사건을 더 몰아서). 억지로 2개로 줄이지 마라(회차가 빈약·저밀도가 되는 원인). "
+               "에피소드 필수 사건 중 이번 회차가 다룰 것을 골라 분배하되, 한 회차에 과밀(8개 이상)도 금지. "
                # G4: chapter_function/hook_type/time_advance/place 는 '강제'가 아니라 '네 계획을 그대로 라벨링'(서술 메타데이터).
                # 이 라벨로 회차 내용을 바꾸라는 게 아니라, 설계한 회차가 어떤 기능·끝맺음·시간·장소인지 자기 기술하라는 것(작가 가시화·분석용).
                "끝으로 설계한 이 회차를 자기 기술하라(내용을 바꾸지 말고 있는 그대로 짧은 라벨만 — 분석용 메타데이터라 한 단어로) — "
@@ -311,12 +314,13 @@ class ArcPlanner:
         cast_block = (f"[등장 인물 — 이름·설정(배경·성격·욕망·관계)·현재 상태]\n{cast_context}\n[유효 인물 id]{char_ids}\n"
                       if cast_context else f"[인물 id]{char_ids}\n")
         usr = (spine_block + _contract_block(world) +
-               f"[아크 목표]{arc.goal}\n[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
+               f"[아크 목표]{arc.goal}{(' · 중심 갈등:'+arc.central_conflict) if arc.central_conflict else ''}{(' · 전환점:'+arc.turning_point) if arc.turning_point else ''}\n"
+               f"[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
                f"[필수 사건]{episode.required_events}\n[등장해야 할 인물 id]{episode.required_cast}\n"
                f"{cast_block}[최근 줄거리]\n" + "\n".join(recent) +
                f"\n[작가 지시]{json.dumps(directives, ensure_ascii=False)}{notes_block}\n"
                f"[회차]{chapter} (에피소드 내 finale={is_finale})\n"
-               '{"title":"","summary":"","key_events":["",""],"entities":["인물 id"],'
+               '{"title":"","summary":"","key_events":["구체 사건1","구체 사건2","구체 사건3","(분량 채울 만큼 더)"],"entities":["인물 id"],'
                '"chapter_function":"","hook_type":"","time_advance":"","place":""}')
         try:
             d = self.provider.chat_json([{"role": "system", "content": sys},
@@ -332,6 +336,7 @@ class ArcPlanner:
                         place=(d.get("place") or "").strip())
         except Exception:
             beat = Beat(chapter=chapter, title=f"{chapter}화", summary=episode.climax or episode.premise,
-                        key_events=episode.required_events[:2], entities=(episode.required_cast or char_ids[:2]),
+                        key_events=(episode.required_events[:5] or [episode.climax or episode.premise]),   # T1: 2개 절단 완화 — 에피소드 필수 사건을 넉넉히(빈약 회차 방지)
+                        entities=(episode.required_cast or char_ids[:2]),
                         arc_id=arc.arc_id, episode_id=episode.episode_id, is_episode_finale=is_finale)
         return beat
