@@ -63,7 +63,20 @@ def test_anchors_and_drift() -> bool:
     s2 = episode_drift_signals(ep, ["주인공 등장", "x", "y"], o)                   # hero 등장 + 3화>2 target
     ok &= any("cast_missing" in x for x in s1)
     ok &= (not any("cast_missing" in x for x in s2)) and any("pacing_overrun" in x for x in s2)
-    print(f"[{'OK' if ok else 'FAIL'}] 앵커 3(narrative) + 드리프트(cast_missing/pacing_overrun)")
+    # T2: 필수 사건 커버리지(키워드 결정론) — ev1 키워드는 본문에 있고 ev2는 없음 → 1/2 미실현 신호.
+    ep2 = Episode(episode_id="e2", arc_id="a", order=1, target_chapters=3,
+                  required_events=["입학 시험 통과", "비밀 결사 가입"])
+    s3 = episode_drift_signals(ep2, ["주인공이 입학 시험을 통과했다.", "그리고 자리를 떠났다."], o)
+    s4 = episode_drift_signals(ep2, ["입학 시험 통과", "비밀 결사 가입 완료"], o)         # 둘 다 키워드 충족
+    ok &= any("event_uncovered" in x and "1/2" in x and "비밀 결사 가입" in x for x in s3)
+    ok &= not any("event_uncovered" in x for x in s4)
+    # T2 교착어 robust(적대리뷰 실측 결함): 키워드에 조사가 박혀도('광민과'/'도윤의') 본문의 다른 조사형
+    # ('광민이'/'도윤에게')과 어간 매칭 → 미실현 오탐 안 함. 어간 미정규화면 0/3으로 거짓 flag → 이 케이스로 회귀 차단.
+    ep3 = Episode(episode_id="e3", arc_id="a", order=1, target_chapters=3,
+                  required_events=["광민과 도윤의 대화"])
+    s5 = episode_drift_signals(ep3, ["광민이 도윤에게 말을 걸었다."], o)
+    ok &= not any("event_uncovered" in x for x in s5)
+    print(f"[{'OK' if ok else 'FAIL'}] 앵커 3 + 드리프트(cast_missing/event_uncovered/교착어어간/pacing_overrun)")
     return ok
 
 
