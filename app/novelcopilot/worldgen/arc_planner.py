@@ -288,7 +288,8 @@ class ArcPlanner:
     # ---- 3.5) T3: 에피소드 활성 시 '적시 사건 메뉴'(신선 컨텍스트로 8~12 사건 풀) ----
     def generate_event_menu(self, world: WorldConfig, arc: Arc, episode: Episode,
                             recent: list[str], cast_context: str = "", plant_notes: str = "",
-                            outstanding: list[str] | None = None) -> list[str]:
+                            outstanding: list[str] | None = None,
+                            required_override: list[str] | None = None) -> list[str]:
         """에피소드가 활성화되는 시점에 '구체적 한 줄 사건' 풀(8~12)을 신선 컨텍스트로 생성한다.
         T1의 천장(에피소드 required_events 가 빈약하면 비트가 끌어올 재료가 없음)을 올리는 게 목적.
 
@@ -299,7 +300,9 @@ class ArcPlanner:
           치우쳐 빈약한 required_events 를 누락 → 본문이 메뉴만 실현하고 required 미실현 → T2 event_uncovered
           역증가(T2 역설). no-whack-a-mole: '프롬프트 지시 한계'는 이미 입증됨 → 코드 강제.
         - 메뉴는 advisory '후보 풀'이지 '지시'가 아니다(억지 회수·온레일 금지). 약속/복선 라벨은 원문 그대로(ledger _key 정합)."""
-        req = [e for e in (episode.required_events or []) if (e or "").strip()]
+        # required_override(T4 refresh): 이미 실현된 required 를 뺀 '미실현만' 전달 → 소진 사건 재투입 방지.
+        _req_src = required_override if required_override is not None else (episode.required_events or [])
+        req = [e for e in _req_src if (e or "").strip()]
         due = [o for o in (outstanding or []) if (o or "").strip()][:6]
         menu: list[str] = []
         try:

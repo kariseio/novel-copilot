@@ -38,6 +38,7 @@ class Settings(BaseSettings):
     plant_inject_cap: int = 5                # 비트 설계에 참고로 노출할 미회수 복선 최대 수(plant_reminder opt-in 시)
     reader_desk: bool = True                 # G2: 블라인드 독자 행동 예측(advisory, +1콜/화). 비용 절감 시 off
     event_menu: bool = True                  # T3: 에피소드 활성 시 '적시 사건 메뉴' 생성(+1콜/에피소드 ≈ +0.1~0.3콜/화). off=결정론 폴백
+    event_menu_refresh_every: int = 0        # T4: >0 이면 에피소드 중반 N회차마다 메뉴 재생성(긴 EP stale 해소, +비용·비결정성). 0=off(T3 1회 캐시)
 
     data_dir: str = ""                       # 비우면 패키지 옆 data/
 

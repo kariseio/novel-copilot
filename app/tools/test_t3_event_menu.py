@@ -82,8 +82,26 @@ def test_persistence_roundtrip() -> bool:
     return ok
 
 
+def test_t4_refresh_drops_spent_required() -> bool:
+    # T4: 메뉴 refresh 시 이미 실현된 required 는 빠지고(소진) 미실현만 앞에 유지
+    from novelcopilot.engine.drift import uncovered
+    body = "도윤이 입학 시험을 통과했다. 그리고 자리를 떠났다."
+    ok = (uncovered(["입학 시험 통과", "비밀 결사 가입"], body) == ["비밀 결사 가입"])   # 실현된 입학시험 제외
+    w = _world(); arc = w.spine.arcs[0]
+    p = ArcPlanner(FakeEmpty())
+    ep = _ep(required_events=["원래필수A", "원래필수B"])
+    menu = p.generate_event_menu(w, arc, ep, [], required_override=["남은필수X"])      # override 가 required 대체
+    ok &= (menu[0] == "남은필수X") and ("원래필수A" not in menu) and ("원래필수B" not in menu)
+    # override=None 이면 기존 동작(episode.required_events 사용)
+    menu2 = p.generate_event_menu(w, arc, ep, [])
+    ok &= (menu2[:2] == ["원래필수A", "원래필수B"])
+    print(f"[{'OK' if ok else 'FAIL'}] T4: refresh 소진 required 제외(uncovered) + required_override 대체/None 호환")
+    return ok
+
+
 if __name__ == "__main__":
     results = [test_fallback_never_throws_never_empty(), test_required_prepended_even_when_llm_omits(),
-               test_beat_fallback_merges_menu(), test_persistence_roundtrip()]
+               test_beat_fallback_merges_menu(), test_persistence_roundtrip(),
+               test_t4_refresh_drops_spent_required()]
     print("\nT3 검증:", "ALL GREEN ✅" if all(results) else "FAIL ❌")
     sys.exit(0 if all(results) else 1)

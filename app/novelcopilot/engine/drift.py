@@ -32,6 +32,21 @@ def _event_keywords(s: str) -> list[str]:
     return re.findall(r"[가-힣A-Za-z0-9]{2,}", s or "")
 
 
+def uncovered(events: list[str], body: str) -> list[str]:
+    """body 에 키워드 어간이 과반 미만으로 나타나는 사건만 반환(event_uncovered 와 동일 기준).
+    T2(완료 점검)·T4(메뉴 refresh 시 실현된 required 소진 제외)가 공유 — 단일 기준 출처."""
+    out: list[str] = []
+    for ev in events:
+        if not (ev or "").strip():
+            continue
+        kws = _event_keywords(ev)
+        if not kws:
+            continue
+        if sum(1 for k in kws if _stem(k) in body) / len(kws) < 0.5:   # 어간 과반 미달 → 미실현
+            out.append(ev)
+    return out
+
+
 def episode_drift_signals(episode, chapter_texts: list[str], ontology) -> list[str]:
     signals: list[str] = []
     appeared: set = set()
@@ -46,15 +61,9 @@ def episode_drift_signals(episode, chapter_texts: list[str], ontology) -> list[s
     #     → 판정 아닌 신호, 차단 안 함. (적대리뷰 실측: 어간 미정규화 시 false positive 42%, 정규화로 회복)
     body = " ".join(chapter_texts)
     planned = [e for e in (episode.required_events or []) if (e or "").strip()]
-    uncovered = []
-    for ev in planned:
-        kws = _event_keywords(ev)
-        if not kws:
-            continue
-        if sum(1 for k in kws if _stem(k) in body) / len(kws) < 0.5:   # 어간 과반 미달 → 미실현 의심
-            uncovered.append(ev)
-    if uncovered:
-        signals.append(f"event_uncovered: 계획 필수 사건 미실현 의심 {len(uncovered)}/{len(planned)}건 — {', '.join(uncovered[:3])}")
+    unc = uncovered(planned, body)
+    if unc:
+        signals.append(f"event_uncovered: 계획 필수 사건 미실현 의심 {len(unc)}/{len(planned)}건 — {', '.join(unc[:3])}")
     if len(chapter_texts) > episode.target_chapters:
         signals.append(f"pacing_overrun: {len(chapter_texts)}화 사용 > 목표 {episode.target_chapters}화")
     return signals

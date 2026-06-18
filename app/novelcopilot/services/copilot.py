@@ -934,11 +934,26 @@ class CopilotService:
                     cast_context = _cast_context(ont, state.world, cast_ids, next_ch)
                     # T3: 에피소드 활성(첫 회차 & 미생성) 시 '적시 사건 메뉴' 1회 생성 — 비트가 끌어쓸 풍부한 풀.
                     # 스냅샷(spine_snap, 위)·ep 확정 이후 & current_episode 밖에서 단일 적재 → ESCALATED/예외 자동 롤백·정상시 영속.
-                    if (self.settings.event_menu and ep is not None and not ep.event_menu
-                            and state.narrative_progress.chapters_in_episode == 0):
+                    _cie = state.narrative_progress.chapters_in_episode
+                    _re = self.settings.event_menu_refresh_every
+                    _activate = (self.settings.event_menu and ep is not None and not ep.event_menu and _cie == 0)
+                    # T4: 긴 EP stale 해소 — refresh_every>0 이면 중반 N회차마다 신선 컨텍스트로 재생성(기본 off).
+                    _refresh = (self.settings.event_menu and ep is not None and bool(ep.event_menu)
+                                and _re > 0 and _cie > 0 and _cie % _re == 0)
+                    if _activate or _refresh:
                         _mb0 = sess.provider.usage.as_dict()
+                        _req_override = None
+                        if _refresh:   # 이미 실현된 required 는 빼고(소진) 미실현만 앞에 유지 — T2 커버리지 기준 재사용
+                            from ..engine.drift import uncovered as _uncovered
+                            # _epbody 필터(episode_id==ep.episode_id)는 finale 의 ep_chs(아래 동일 필터)와 일치 — 커버리지 기준 단일.
+                            #   episode_id 는 FINALIZED 회차에만 박히므로 ESCALATED 본문은 양쪽 다 제외(일관). adversarial M1 검증: 불일치 아님.
+                            # 안전망: required 는 메뉴와 무관하게 beat 의 [필수 사건] 슬롯(episode.required_events 전체)으로 항상 전달 →
+                            #   refresh 가 메뉴에서 일부 required 를 빼도 '약속 누락'이 아니라 '풀 패딩 최적화'(substring 부정확성 영향 국한, M2).
+                            _epbody = " ".join(c.text for c in prior if c.episode_id == ep.episode_id and c.text)
+                            _req_override = _uncovered(ep.required_events or [], _epbody)
                         ep.event_menu = planner.generate_event_menu(
-                            state.world, arc, ep, summaries, cast_context, plant_notes, outstanding)
+                            state.world, arc, ep, summaries, cast_context, plant_notes, outstanding,
+                            required_override=_req_override)
                         _menu_used = _usage_delta(_mb0, sess.provider.usage.as_dict())
                     beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
                                                     summaries, [d.text for d in active],
