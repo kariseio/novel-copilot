@@ -32,6 +32,8 @@ class Episode(BaseModel):
     target_chapters: int = 4          # 이 에피소드에 배정할 회차 수(3~10)
     summary: str = ""                 # 완료 후 롤업 요약(계층 story_so_far 재료)
     done: bool = False
+    event_menu: list[str] = Field(default_factory=list)   # T3 적시 사건 메뉴: 활성 시 신선 생성한 후보 풀(advisory).
+    #   required_events(구속 뼈대, T2 점검)와 별개 — 비트가 끌어쓰는 재료지 지시 아님. T2는 이 필드를 읽지 않는다.
 
 
 class Arc(BaseModel):

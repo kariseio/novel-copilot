@@ -881,6 +881,7 @@ class CopilotService:
                 self.sessions.evict(pid)
             saved = False
             try:
+                _menu_used = {}   # T3: 적시 메뉴 LLM 사용량(생성 시만 채워짐) — before 차감으로 usage_total 정직 반영
                 if spine and spine.arcs:   # R4 spine 모드: 에피소드(절정 backward) 단위로 beat 파생
                     # B: 커서/spine 변이를 트랜잭션으로 — FINALIZED 아니면 롤백(재시도 결정성·orphan/조기 arc.done 방지)
                     prog_snap = state.narrative_progress.model_copy(deep=True)
@@ -931,9 +932,18 @@ class CopilotService:
                     actor_ids = [e.id for e in state.world.entities if ont.is_actor(e.etype)]
                     cast_ids = list(dict.fromkeys((ep.required_cast or []) + recent_present + actor_ids))[:8]
                     cast_context = _cast_context(ont, state.world, cast_ids, next_ch)
+                    # T3: 에피소드 활성(첫 회차 & 미생성) 시 '적시 사건 메뉴' 1회 생성 — 비트가 끌어쓸 풍부한 풀.
+                    # 스냅샷(spine_snap, 위)·ep 확정 이후 & current_episode 밖에서 단일 적재 → ESCALATED/예외 자동 롤백·정상시 영속.
+                    if (self.settings.event_menu and ep is not None and not ep.event_menu
+                            and state.narrative_progress.chapters_in_episode == 0):
+                        _mb0 = sess.provider.usage.as_dict()
+                        ep.event_menu = planner.generate_event_menu(
+                            state.world, arc, ep, summaries, cast_context, plant_notes, outstanding)
+                        _menu_used = _usage_delta(_mb0, sess.provider.usage.as_dict())
                     beat = planner.beat_for_episode(state.world, arc, ep, next_ch, is_finale,
                                                     summaries, [d.text for d in active],
-                                                    plant_notes=plant_notes, cast_context=cast_context)
+                                                    plant_notes=plant_notes, cast_context=cast_context,
+                                                    event_menu=ep.event_menu)
                     # ---- 계획 하네스: 비트도 본문처럼 생성→결정론 lint(캐논 정합만)→교정 1회 ----
                     from ..engine.plan_lint import lint_beat, beat_repeat_score
                     from ..domain.types import Violation as _V, SignalGrade as _SG
@@ -952,7 +962,8 @@ class CopilotService:
                         beat = planner.beat_for_episode(   # 위반 명시 재계획 1회(M4식 — 무한 루프 금지)
                             state.world, arc, ep, next_ch, is_finale, summaries,
                             [d.text for d in active] + [f"(계획 결함 교정 필수) {fix_note}"],
-                            plant_notes=plant_notes, cast_context=cast_context)
+                            plant_notes=plant_notes, cast_context=cast_context,
+                            event_menu=ep.event_menu)   # 재계획도 같은 메뉴 풀 사용(LLM 0콜 — 비대칭 방지)
                         remaining = lint_beat(beat.model_dump(), sess.bundle.ontology, next_ch)
                         if remaining:   # 잔존 → 가시화 + 보수 폴백(무효/제거 인물만 제외하고 진행 — 정지 금지)
                             sess.bus.emit("plan_lint", "non_convergence", chapter=next_ch,
@@ -989,7 +1000,11 @@ class CopilotService:
                 prev_text = prev.text if prev else ""
 
                 before = sess.provider.usage.as_dict()
+                if _menu_used:   # T3: 메뉴 콜은 before 이전(~비트 설계 단계)에 발생 → before 에서 차감해 delta(=usage_total)에 정직 반영
+                    before = {k: v - _menu_used.get(k, 0) for k, v in before.items()}
                 sess.bus.reset()
+                if _menu_used:   # 메뉴 새로 생성됨(캐시 재사용 아님) — reset 이후 emit 해야 작가에게 보임. truthy⟹spine·ep 확정
+                    sess.bus.emit("plan_menu", "generated", chapter=next_ch, size=len(ep.event_menu))
                 if dropped:   # 오래된 맥락이 예산에서 잘림 — 조용한 정지 금지(가시화)
                     sess.bus.emit("assemble_memory", "story_truncated", chapter=next_ch, dropped=dropped)
                 # I-1: 누적 줄거리 예산 사용률 가시화 — 경계 직후 silent 미달(예산 큰데 콘텐츠 1줄)을 작가가 보게
@@ -1037,11 +1052,15 @@ class CopilotService:
                         "cast_context": (cast_context or "")[:1400],
                         "plant_notes": (plant_notes or "")[:400],
                         "restraint": list(restraint or [])[:10],
+                        "event_menu": (ep.event_menu or [])[:14] if ep else [],   # T3: 어떤 신선 사건 풀이 이 회차를 먹였나(작가 가시화)
+                        "menu_generated_this_chapter": bool(_menu_used),          # 새 생성 vs 캐시 재사용(신선도 추적)
                         "genre_contract": (_gc.model_dump() if _gc else None),
                     }
 
                 # 동적 온톨로지 업데이트(엔진 고도화) — FINALIZED 회차에만
                 if record.status == ChapterStatus.FINALIZED:
+                    if _menu_used:   # T3 적시 메뉴 비용 가시화(advisory 스테이지 — usage_total 에는 before 차감으로 이미 반영)
+                        record.usage_by_stage["event_menu"] = _menu_used.get("chat_tokens", 0)
                     _t0 = sess.provider.usage.chat_tokens
                     for eid in sess.bundle.ontology.scan_present_ids(record.text):   # 데뷔 완료 마킹(이후 앵커 중복 방지)
                         e = next((x for x in state.world.entities if x.id == eid), None)
@@ -1233,6 +1252,7 @@ class CopilotService:
                       "episodes": [{"episode_id": e.episode_id, "title": e.title, "climax": e.climax,
                                     "target_chapters": e.target_chapters, "done": e.done,
                                     "required_cast": [sess.bundle.ontology.name(c) for c in e.required_cast],
+                                    "event_menu": (e.event_menu or [])[:14],   # T3: 에피소드 구조 뷰에 적시 메뉴 노출
                                     "summary": e.summary} for e in a.episodes]}
                      for a in sorted(spine.arcs, key=lambda x: x.order)],
         }

@@ -285,10 +285,58 @@ class ArcPlanner:
             nxt.arc_id, ep.episode_id, 0
         return ep
 
+    # ---- 3.5) T3: 에피소드 활성 시 '적시 사건 메뉴'(신선 컨텍스트로 8~12 사건 풀) ----
+    def generate_event_menu(self, world: WorldConfig, arc: Arc, episode: Episode,
+                            recent: list[str], cast_context: str = "", plant_notes: str = "",
+                            outstanding: list[str] | None = None) -> list[str]:
+        """에피소드가 활성화되는 시점에 '구체적 한 줄 사건' 풀(8~12)을 신선 컨텍스트로 생성한다.
+        T1의 천장(에피소드 required_events 가 빈약하면 비트가 끌어올 재료가 없음)을 올리는 게 목적.
+
+        설계 불변식:
+        - NEVER throws · NEVER empty — LLM 실패 시 결정론 폴백(required_events·climax·만기약속·payoffs).
+          (활성 가드가 회귀 테스트의 Fake provider 경로를 타므로 예외/빈 반환 금지가 필수.)
+        - required_events 는 '코드로' 무조건 맨 앞에 보존 — 프롬프트 지시만으론 LLM 이 풍부한 메뉴 쪽으로
+          치우쳐 빈약한 required_events 를 누락 → 본문이 메뉴만 실현하고 required 미실현 → T2 event_uncovered
+          역증가(T2 역설). no-whack-a-mole: '프롬프트 지시 한계'는 이미 입증됨 → 코드 강제.
+        - 메뉴는 advisory '후보 풀'이지 '지시'가 아니다(억지 회수·온레일 금지). 약속/복선 라벨은 원문 그대로(ledger _key 정합)."""
+        req = [e for e in (episode.required_events or []) if (e or "").strip()]
+        due = [o for o in (outstanding or []) if (o or "").strip()][:6]
+        menu: list[str] = []
+        try:
+            end = world.spine.ending if world.spine and world.spine.ending else None
+            sys = ("이 에피소드(3~10화 분량) 전체에서 '실제로 일어나는 구체적 한 줄 사건' 8~12개를 만들어라 — "
+                   "추상 주제·요약 금지, 장면으로 바로 쓸 수 있는 사건만. "
+                   "① 에피소드 '필수 사건'을 맨 앞에 모두 포함하고 더 구체화한다. "
+                   "② 만기된 미회수 약속/복선이 있으면 그 '회수(지불) 사건'을 다음에 배치(억지 회수 아닌 자연스러운 정산). "
+                   "③ 인물의 욕망·직전 화 위기·세계 고유 설정에서 신선한 사건을 더한다. ④ 에피소드 절정으로 수렴한다. "
+                   "이건 '지시'가 아니라 비트가 골라 쓸 '후보 메뉴'다. 약속/복선 라벨은 원문 그대로 노출(변형·풀어쓰기 금지). "
+                   '{"event_menu":["사건1","사건2","..."]} JSON만.')
+            usr = ((f"[중심 질문]{end.central_question}\n" if end else "") +
+                   f"[아크 목표]{arc.goal}{(' · 갈등:'+arc.central_conflict) if arc.central_conflict else ''}"
+                   f"{(' · 전환점:'+arc.turning_point) if arc.turning_point else ''}\n"
+                   f"[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
+                   f"[필수 사건 — 맨 앞에 모두 포함·구체화]{req}\n"
+                   f"[만기 약속/복선 — 자연스러우면 회수]{due}\n"
+                   f"[심은 복선]{list(episode.plants or [])}\n[회수 예정]{list(episode.payoffs or [])}\n" +
+                   (f"[등장 인물 — 이름·설정·현재 상태]\n{cast_context}\n" if cast_context else "") +
+                   (f"[참고 미회수 복선]{plant_notes}\n" if plant_notes else "") +
+                   "[최근 줄거리]\n" + "\n".join(recent[-3:])[-280:] + "\n"
+                   '{"event_menu":[]}')
+            d = self.provider.chat_json([{"role": "system", "content": sys},
+                                         {"role": "user", "content": usr}], temperature=0.4)
+            menu = [str(s).strip() for s in (d.get("event_menu") or []) if str(s).strip()][:12]
+        except Exception:
+            menu = []   # 결정론 폴백 — 아래 seed 합성이 빈 메뉴를 required·climax·약속으로 메운다(never empty)
+        # 코드 강제: required_events 를 무조건 맨 앞에 보존 + (LLM 실패 시) 결정론 재료 합성 → dedup·cap 12.
+        seed = req + menu + due + ([episode.climax] if episode.climax else []) + list(episode.payoffs or [])
+        out = list(dict.fromkeys(s.strip() for s in seed if (s or "").strip()))[:12]
+        return out or [episode.premise or episode.climax or f"{episode.title} 전개"]
+
     # ---- 4) 에피소드 → 회차 beat 파생(절정으로 수렴, finale면 절단신공) ----
     def beat_for_episode(self, world: WorldConfig, arc: Arc, episode: Episode, chapter: int,
                          is_finale: bool, recent: list[str], directives: list[str],
-                         plant_notes: str = "", cast_context: str = "") -> Beat:
+                         plant_notes: str = "", cast_context: str = "",
+                         event_menu: list[str] | None = None) -> Beat:
         char_ids = [e.id for e in world.entities if e.etype == "character"]
         hook = ("이번 회차가 에피소드 절정(finale): 아래 climax 를 이번 회차에서 터뜨려라(끝맺음 방식은 작품 문체 정책을 따름)."
                 if is_finale else "에피소드 절정으로 한 걸음 전진. 아직 절정을 다 터뜨리지 말 것.")
@@ -298,6 +346,7 @@ class ArcPlanner:
                f"key_events 는 이 회차를 약 {world.style.target_chars_per_chapter}자로 자연스럽게 채울 만큼의 '구체적으로 일어나는 사건'을 담아라 — "
                "보통 3~5개(도입·휴지 회차는 적게, escalation·finale 회차는 절정 사건을 더 몰아서). 억지로 2개로 줄이지 마라(회차가 빈약·저밀도가 되는 원인). "
                "에피소드 필수 사건 중 이번 회차가 다룰 것을 골라 분배하되, 한 회차에 과밀(8개 이상)도 금지. "
+               "'적시 사건 메뉴'가 제공되면 그 풀에서 골라 key_events 를 풍부하게 구성하라 — 단 '필수 사건'을 반드시 우선 실현하고(메뉴가 필수 사건을 밀어내지 마라), 메뉴는 보강 재료다. "
                # G4: chapter_function/hook_type/time_advance/place 는 '강제'가 아니라 '네 계획을 그대로 라벨링'(서술 메타데이터).
                # 이 라벨로 회차 내용을 바꾸라는 게 아니라, 설계한 회차가 어떤 기능·끝맺음·시간·장소인지 자기 기술하라는 것(작가 가시화·분석용).
                "끝으로 설계한 이 회차를 자기 기술하라(내용을 바꾸지 말고 있는 그대로 짧은 라벨만 — 분석용 메타데이터라 한 단어로) — "
@@ -313,10 +362,13 @@ class ArcPlanner:
         # G6: 인물을 id 문자열이 아니라 '이름·설정·현재 상태·관계'로 보게(컨텍스트 기아 해소 — 욕망 있는 인물에서 사건이 나오게)
         cast_block = (f"[등장 인물 — 이름·설정(배경·성격·욕망·관계)·현재 상태]\n{cast_context}\n[유효 인물 id]{char_ids}\n"
                       if cast_context else f"[인물 id]{char_ids}\n")
+        # T3: 적시 사건 메뉴 = 후보 풀(지시 아님). 필수 사건 슬롯은 그대로 두고 그 '아래'에 배치(필수 우선·메뉴 보강).
+        menu_block = (f"[적시 사건 메뉴 — key_events 채울 후보 풀(지시 아님, 필수 사건 우선 실현 후 보강)]{list(event_menu)}\n"
+                      if event_menu else "")
         usr = (spine_block + _contract_block(world) +
                f"[아크 목표]{arc.goal}{(' · 중심 갈등:'+arc.central_conflict) if arc.central_conflict else ''}{(' · 전환점:'+arc.turning_point) if arc.turning_point else ''}\n"
                f"[에피소드]{episode.title} / 도입:{episode.premise}\n[에피소드 절정]{episode.climax}\n"
-               f"[필수 사건]{episode.required_events}\n[등장해야 할 인물 id]{episode.required_cast}\n"
+               f"[필수 사건]{episode.required_events}\n[등장해야 할 인물 id]{episode.required_cast}\n" + menu_block +
                f"{cast_block}[최근 줄거리]\n" + "\n".join(recent) +
                f"\n[작가 지시]{json.dumps(directives, ensure_ascii=False)}{notes_block}\n"
                f"[회차]{chapter} (에피소드 내 finale={is_finale})\n"
@@ -335,8 +387,11 @@ class ArcPlanner:
                         time_advance=(d.get("time_advance") or "").strip(),
                         place=(d.get("place") or "").strip())
         except Exception:
+            # T1+T3 폴백: 필수 사건을 앞에 두고 적시 메뉴로 보강(빈약 회차 방지) → dedup·cap 8.
+            _fb = list(dict.fromkeys(e.strip() for e in
+                       ((episode.required_events or []) + list(event_menu or [])) if (e or "").strip()))[:8]
             beat = Beat(chapter=chapter, title=f"{chapter}화", summary=episode.climax or episode.premise,
-                        key_events=(episode.required_events[:5] or [episode.climax or episode.premise]),   # T1: 2개 절단 완화 — 에피소드 필수 사건을 넉넉히(빈약 회차 방지)
+                        key_events=(_fb or [episode.climax or episode.premise]),
                         entities=(episode.required_cast or char_ids[:2]),
                         arc_id=arc.arc_id, episode_id=episode.episode_id, is_episode_finale=is_finale)
         return beat

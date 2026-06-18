@@ -37,6 +37,7 @@ class Settings(BaseSettings):
     plant_backlog_threshold: int = 3         # 미회수 복선 적체 경보 임계(advisory)
     plant_inject_cap: int = 5                # 비트 설계에 참고로 노출할 미회수 복선 최대 수(plant_reminder opt-in 시)
     reader_desk: bool = True                 # G2: 블라인드 독자 행동 예측(advisory, +1콜/화). 비용 절감 시 off
+    event_menu: bool = True                  # T3: 에피소드 활성 시 '적시 사건 메뉴' 생성(+1콜/에피소드 ≈ +0.1~0.3콜/화). off=결정론 폴백
 
     data_dir: str = ""                       # 비우면 패키지 옆 data/
 
