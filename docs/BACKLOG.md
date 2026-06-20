@@ -36,7 +36,6 @@
 | **B-07** | 작가 노브 UI(슬라이더) | 단문↔만연/대사비중/서술거리 구조화 노브(자유텍스트 에디터는 출하됨) | M | style-layering §5 |
 | **B-08** | 퇴고→문체 학습 루프 | 작가지시 퇴고를 supervision으로 누적 → author_style 자동 추론 | L | style-layering §5 |
 | **B-09** | ai_tell 분위수/z-score·최근 N화 윈도우 | 현재 중앙값 상대. 코퍼스 쌓이면 분위수 띠·윈도우(50화+ 가독) | M | ai-style §5 |
-| **B-10** | 사망교정 패스 floor-only 렌더 | rewrite/사망교정에 미학 오버레이 주입 → 교정폭 확대 우려 | S | code-critic(style) |
 | **B-20** | 퇴고 기능 LOW 3건 + LLM e2e | 퇴고(caea390) 출하분의 LOW 미결 3건·LLM 왕복 e2e(단일프로세스라 무영향, 의도된 비차단) | M | webnovel-revision memory |
 | **B-21** | 블라인드 감사 b백로그 G4~G10 '채움' | 레이어는 옳고 채움 부족 — 다음 개선 루프 대상(G11=건드리지 말 것) | M~L | blind-audit memory |
 
@@ -98,6 +97,7 @@
 | **D-18** | 에피소드 적시 사건 메뉴(T3) — 빈약한 required_events 천장을 활성시점 신선 풀(8~12 사건)로 끌어올림. **10-에이전트 적대 워크플로** 설계(commitment-safe). 머지전 블로커 2(usage누수·롤백테스트 발화)+major(T2 역설=required 코드강제 prepend) 전부 코드로 닫음. **실측 라이브**: ch7(ep2 활성) 메뉴 12개·required 4개 맨앞 보존·영속. 결정론 4/4·R4 6/6 | `fec2791` |
 | **D-19** | 임베딩 빈문자열 400 방어(선재 결함) — 빈/공백 input 이 회차 생성을 generate_failed 로 죽이던 것을 프로바이더 경계서 공백 치환(정렬 보존). T3 라이브 검증 중 발견·T3 무관 | `581a001` |
 | **D-20** | 적시 메뉴 stale 갱신(T4) — `event_menu_refresh_every`(기본 off) 중반 N회차 재생성 + 소진 required 제외(`drift.uncovered` 단일기준 공유). 적대리뷰 머지차단 0(M1 오인 검증·M2 영향국한=2채널 안전망). 결정론 5/5·R4 6/6 | `6f4da7d` |
+| **D-21** | 교정 패스 floor-only(B-10) — `_rewrite`(설정/사망 교정)가 full style_block(미학+오버레이) 주입해 '재문체화'로 번지던 것을 `floor_only()`(바닥 제약만)로 차단. 메인 생성은 full 유지(무회귀). LLM0 검증 | `6ca3951` |
 
 ---
 
