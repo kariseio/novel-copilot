@@ -32,7 +32,6 @@
 | ID | 제목 | 설명 | 노력 | 출처 |
 |---|---|---|---|---|
 | **B-05** | 정보창/시스템창 빈도 조향 | author_style "두세 번만" 미준수(실측 5~6개). 측정 카운트·구조화 입력 검토 | M | 페르소나 #4 |
-| **B-06** | escalation 액션 명확화 | "어휘 밖 — 사람 확인 필요" 시 작가가 뭘 할지 모호 | S | 페르소나 #5 |
 | **B-07** | 작가 노브 UI(슬라이더) | 단문↔만연/대사비중/서술거리 구조화 노브(자유텍스트 에디터는 출하됨) | M | style-layering §5 |
 | **B-08** | 퇴고→문체 학습 루프 | 작가지시 퇴고를 supervision으로 누적 → author_style 자동 추론 | L | style-layering §5 |
 | **B-09** | ai_tell 분위수/z-score·최근 N화 윈도우 | 현재 중앙값 상대. 코퍼스 쌓이면 분위수 띠·윈도우(50화+ 가독) | M | ai-style §5 |
@@ -98,6 +97,7 @@
 | **D-19** | 임베딩 빈문자열 400 방어(선재 결함) — 빈/공백 input 이 회차 생성을 generate_failed 로 죽이던 것을 프로바이더 경계서 공백 치환(정렬 보존). T3 라이브 검증 중 발견·T3 무관 | `581a001` |
 | **D-20** | 적시 메뉴 stale 갱신(T4) — `event_menu_refresh_every`(기본 off) 중반 N회차 재생성 + 소진 required 제외(`drift.uncovered` 단일기준 공유). 적대리뷰 머지차단 0(M1 오인 검증·M2 영향국한=2채널 안전망). 결정론 5/5·R4 6/6 | `6f4da7d` |
 | **D-21** | 교정 패스 floor-only(B-10) — `_rewrite`(설정/사망 교정)가 full style_block(미학+오버레이) 주입해 '재문체화'로 번지던 것을 `floor_only()`(바닥 제약만)로 차단. 메인 생성은 full 유지(무회귀). LLM0 검증 | `6ca3951` |
+| **D-22** | escalation 액션 명확화(B-06) — ontology_updater 6개 escalation 의 'reason'에 '의도면 A/오류면 B' 구체 행동 동봉 + bus emit `action=`(recovery.py 철학·출력레이어만). prove_escalation 3/3·summary_ontology 그린 | `16de8ff` |
 
 ---
 
