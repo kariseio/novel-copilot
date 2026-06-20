@@ -158,26 +158,29 @@ class OntologyUpdater:
                     continue
                 if spec and spec.states and newv not in spec.states:
                     # 선언 어휘 밖 상태값 → 침묵 통과/자동커밋 금지(비가역 전이가 표면형 불일치로 ground_truth 박히는 누수 방지)
+                    _act = f"이 상태가 맞으면 설정집에서 {slabel} 속성의 states 에 '{newv}'를 추가(승인)하세요. 오타·환각이면 본문을 교정해 재생성하세요."
                     changes.append(OntologyChange(op="contradiction", entity=ent.name,
                                                   detail=f"{slabel} 미정의 상태값 '{newv}'(선언 어휘 밖)", applied=False,
-                                                  reason="선언된 states 밖 — 사람 확인 필요(escalation)"))
-                    self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
+                                                  reason=f"선언된 states 밖 상태값 '{newv}' — {_act}"))
+                    self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr, action=_act)
                     continue
                 if curv is not None and curv in irr and not self.allow_reversal:
                     # 비가역 상태 이탈(예: 사망→생존, 각성→미각성) → 모순. 회귀/부활 세계(allow_reversal)는 허용.
+                    _act = f"회귀·부활 세계라면 작품 설정에서 '상태 되돌림 허용'을 켜세요. 본문 오류라면 그 장면을 회상·환영으로 바꿔(작가 지시) 재생성하세요."
                     changes.append(OntologyChange(op="contradiction", entity=ent.name,
                                                   detail=f"{slabel} 비가역 상태 '{curv}' 이탈 시도→'{newv}'",
-                                                  applied=False, reason="비가역 상태 이탈(escalation)"))
-                    self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
+                                                  applied=False, reason=f"비가역 상태 '{curv}'→'{newv}' 이탈 — {_act}"))
+                    self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr, action=_act)
                     continue
                 # 동일 시점(eid,attr,eff)에 이미 다른 ground_truth 값 존재 → 커밋하면 ssot_ambiguous 영구 점등.
                 # (시드 예약 vs 자동추출 충돌 — 시뮬 실측) 커밋 대신 escalation 으로 작가에게.
                 if any(t2[0] == eid and t2[1] == attr and t2[3] == eff and t2[5] == "ground_truth"
                        and str(t2[2]) != newv for t2 in ontology.timeline):
+                    _act = f"공식 설정에서 {slabel}의 {eff}화 시점 값을 하나로 확정하세요(시드 예약과 자동 감지가 충돌)."
                     changes.append(OntologyChange(op="contradiction", entity=ent.name,
                                                   detail=f"{slabel} {eff}화 시점에 상충 예약 존재({newv} vs 기존)",
-                                                  applied=False, reason="동시점 충돌 — 작가 확인 필요(escalation)"))
-                    self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
+                                                  applied=False, reason=f"동시점 충돌 — {_act}"))
+                    self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr, action=_act)
                     continue
                 # 비가역/제거 전이 = 작가 확정 전 비구속(narrative_inferred). 가역 전이 = '전진만' 자동커밋(ground_truth).
                 binding_irrev = (newv in irr) or (newv in term)
@@ -200,10 +203,11 @@ class OntologyUpdater:
                     bad = (spec.monotonic == "non_decreasing" and ti < ci) or \
                           (spec.monotonic == "non_increasing" and ti > ci)
                     if bad:
+                        _act = f"값이 실제로 그 방향으로 변했다면 설정집에서 {self.vocab.label(attr)}의 단조 제약을 완화하세요. 본문 오류라면 교정해 재생성하세요."
                         changes.append(OntologyChange(op="contradiction", entity=ent.name,
                                                       detail=f"{self.vocab.label(attr)} 단조 위반 {cur}→{val}",
-                                                      applied=False, reason="단조 제약 위반(escalation)"))
-                        self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
+                                                      applied=False, reason=f"단조 제약 위반 {cur}→{val} — {_act}"))
+                        self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr, action=_act)
                         continue
                 except (ValueError, TypeError):
                     pass
@@ -211,10 +215,11 @@ class OntologyUpdater:
             # categorical 통제어휘 검증 — 어휘 밖 자유값을 ground_truth 로 자동커밋하면
             # 이후 모든 회차가 '쓰레기 캐논 vs 어휘값' 영구 불일치로 ESCALATED 에 갇힌다(시뮬 실측 결함).
             if spec and spec.kind == "categorical" and spec.vocab and str(val).strip() not in spec.vocab:
+                _act = f"이 값이 맞으면 설정집에서 {self.vocab.label(attr)}의 통제어휘에 '{val}'을 추가하세요. 오타·환각이면 본문을 교정해 재생성하세요."
                 changes.append(OntologyChange(op="contradiction", entity=ent.name,
                                               detail=f"{self.vocab.label(attr)} 통제어휘 밖 값 '{val}'",
-                                              applied=False, reason="어휘 밖 — 사람 확인 필요(escalation)"))
-                self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
+                                              applied=False, reason=f"통제어휘 밖 값 '{val}' — {_act}"))
+                self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr, action=_act)
                 continue
             mutable = bool(spec and spec.mutable)
             if mutable:
@@ -229,10 +234,11 @@ class OntologyUpdater:
                                               detail=f"{self.vocab.label(attr)}: {cur}→{val}({eff}화부터)",
                                               applied=True))
             else:
+                _act = f"{self.vocab.label(attr)}이(가) 실제로 변할 수 있는 속성이면 설정집에서 가변으로 바꾸세요. 본문 오류라면 교정해 재생성하세요."
                 changes.append(OntologyChange(op="contradiction", entity=ent.name,
                                               detail=f"{self.vocab.label(attr)} 불변속성 변경 {cur}→{val}",
-                                              applied=False, reason="immutable 속성(escalation)"))
-                self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr)
+                                              applied=False, reason=f"불변 속성 변경 {cur}→{val} — {_act}"))
+                self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr, action=_act)
 
         # 3) 관계 — 자동추출은 narrative_inferred(비binding, 비대칭 보존: ground_truth 자동승격 금지)
         def _resolve(x):
