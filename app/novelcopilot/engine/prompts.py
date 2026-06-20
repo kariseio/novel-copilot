@@ -9,6 +9,17 @@ from ..domain.types import ContextBoard, SceneSpec
 from ..domain.world import StyleSpec
 
 
+# 바닥(floor) 제약 — 미학과 무관한 비협상 조판/시장 제약. 미학 오버레이가 못 덮고, 교정 패스도 이것만 유지(단일 출처).
+FLOOR_CONSTRAINTS = "모바일 가독 줄바꿈·호칭 자연화·분량·시점/시제 일관"
+
+
+def floor_only() -> str:
+    """교정/재작성 패스 전용 floor-only 블록 — 미학(기본 규칙·작가 오버레이) 0, 바닥 제약만.
+    B-10: 최소 교정(설정 위반 수정)이 미학 오버레이 주입으로 '재문체화'로 번지는 것을 차단."""
+    return (f"[조판 바닥 제약만 유지 — 미학 변경 금지]\n{FLOOR_CONSTRAINTS} 만 지키고, "
+            "문장 리듬·길이·비유 밀도·서술 거리·어휘 격 같은 미학은 원문 그대로 보존하라(재문체화·재서술 금지).")
+
+
 def render_style(style: StyleSpec) -> str:
     rules = "\n".join(f"{i + 1}) {r}" for i, r in enumerate(style.rules))
     block = f"[웹소설 문체 규칙 — 반드시 준수]\n{rules}"
@@ -22,8 +33,8 @@ def render_style(style: StyleSpec) -> str:
             "\n\n[작가 지정 문체 — 위 기본 규칙의 미학 축보다 우선]\n"
             f"{overlay}\n"
             "※ 문장 리듬·길이 변주·감정 처리 방식·직유/비유 밀도·서술 거리·어휘 격 같은 미학 축이 "
-            "위 기본 규칙과 충돌하면 이 작가 문체를 따른다. 단 위 규칙의 바닥 제약(모바일 가독 줄바꿈·호칭 자연화·"
-            "분량·시점/시제 일관)은 작가 문체와 무관하게 유지하라."
+            f"위 기본 규칙과 충돌하면 이 작가 문체를 따른다. 단 위 규칙의 바닥 제약({FLOOR_CONSTRAINTS})은 "
+            "작가 문체와 무관하게 유지하라."
         )
     return block
 

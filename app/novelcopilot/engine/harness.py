@@ -57,7 +57,7 @@ from ..domain.types import (ContextBoard, SceneSpec, ChapterRecord, ChapterStatu
 from ..domain.world import StyleSpec
 from ..llm.base import LLMProvider
 from .checker import Checker
-from .prompts import PromptAssembler, render_style
+from .prompts import PromptAssembler, render_style, floor_only
 from .observability import EventBus
 
 
@@ -72,6 +72,7 @@ class ChapterGenerator:
         self.assembler = PromptAssembler(style, settings.prev_chapter_context_chars)
         self.style_block = render_style(style)   # rules+author_style 렌더. 정책 패치는 update_style_policy 가
         #   세션을 evict→ 다음 요청에 generator 재구성하므로 캐시여도 스테일 없음(라이브 참조 불필요).
+        self.floor_block = floor_only()          # B-10: 교정 패스(_rewrite)용 — 미학 오버레이 없이 바닥 제약만(재문체화 차단).
 
     # ---- LLM 격리 지점 ----
     def plan_scenes(self, beat: dict, directives: list[AuthorDirective]) -> list[SceneSpec]:
@@ -157,7 +158,8 @@ class ChapterGenerator:
         out = self.provider.chat(
             [{"role": "system", "content":
               "교정 작가. 지적된 설정 위반만 고치고 문체·줄바꿈·분량은 보존. 확정 설정·세계규칙이 비트보다 우선. "
-              "'제거 상태'(사망·소멸 등) 인물의 현재 행동은 회상/환영/삭제로, 속성·관계는 캐논값으로 교정. 본문만.\n" + self.style_block},
+              "'제거 상태'(사망·소멸 등) 인물의 현재 행동은 회상/환영/삭제로, 속성·관계는 캐논값으로 교정. 본문만.\n"
+              + self.floor_block},   # B-10: 미학 오버레이(작가 문체) 주입 제거 — 최소 교정이 재문체화로 번지는 것 차단
              {"role": "user", "content": f"[확정 설정]\n{gt}\n[설정 위반]\n{vlist}\n[원본 본문]\n{scene_text}"}],
             temperature=0.4, max_tokens=max_tokens or self.settings.gen_max_tokens)
         # 길이 보존 가드: 절단/메타응답이 본문을 갉아먹는 회귀 차단(R2 본문 파괴 교훈 — 전량 재작성 채널의 안전망)
