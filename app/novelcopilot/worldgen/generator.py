@@ -135,8 +135,8 @@ class WorldGenerator:
                     "genre_contract": (world.genre_contract.model_dump() if world.genre_contract else None)}
             sys = ("너는 클리셰 사냥꾼 편집자다. 아래 세계관에서 '이 장르의 가장 전형적인 디폴트'(간판어·뻔한 인물 설정·예측 가능한 "
                    "규칙·추상적 쾌감 서술)를 골라 작품의 집착에 맞게 *구체적·감각적·비자명*하게 다시 써라. 겉만 바꾸지 말고 "
-                   "디폴트를 비틀되 인물 id 와 속성 구조는 유지(인물 추가/삭제 금지). 수정한 필드만 같은 키로 반환 — "
-                   'synopsis(문자열), entities([{id, name?, profile}]), world_rules(문자열 배열 전체), genre_contract(객체). JSON만.')
+                   "디폴트를 비틀되 인물 id·이름·속성 구조는 유지(인물 추가/삭제/개명 금지 — profile 내용만 비튼다). 수정한 필드만 같은 키로 반환 — "
+                   'synopsis(문자열), entities([{id, profile}]), world_rules(문자열 배열 전체), genre_contract(객체). JSON만.')
             usr = f"[작품의 집착]{ob}\n[현재 세계 — 진부한 부분을 비틀 대상]\n{json.dumps(snap, ensure_ascii=False)}"
             d = self.provider.chat_json([{"role": "system", "content": sys},
                                          {"role": "user", "content": usr}], temperature=0.8)
@@ -145,11 +145,8 @@ class WorldGenerator:
             patch = {x.get("id"): x for x in (d.get("entities") or []) if x.get("id")}
             for e in world.entities:
                 p = patch.get(e.id)
-                if p:
-                    if (p.get("profile") or "").strip():
-                        e.profile = p["profile"].strip()
-                    if (p.get("name") or "").strip():
-                        e.name = p["name"].strip()
+                if p and (p.get("profile") or "").strip():
+                    e.profile = p["profile"].strip()   # 이름은 보존(개명 시 aliases·타 인물 profile 잔존명·캐논 substring 탐지 누수 — critic major)
             nr = [s.strip() for s in (d.get("world_rules") or []) if (s or "").strip()]
             for i, r in enumerate(world.world_rules):
                 if i < len(nr):

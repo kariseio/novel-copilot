@@ -39,8 +39,11 @@ class Settings(BaseSettings):
     reader_desk: bool = True                 # G2: 블라인드 독자 행동 예측(advisory, +1콜/화). 비용 절감 시 off
     event_menu: bool = True                  # T3: 에피소드 활성 시 '적시 사건 메뉴' 생성(+1콜/에피소드 ≈ +0.1~0.3콜/화). off=결정론 폴백
     event_menu_refresh_every: int = 0        # T4: >0 이면 에피소드 중반 N회차마다 메뉴 재생성(긴 EP stale 해소, +비용·비결정성). 0=off(T3 1회 캐시)
-    world_obsession: bool = True             # 풍부함①: worldgen 전 '집착 벡터' 추출→편중 파생(평균회귀 차단, +1콜). A/B 실측 ON 5:0 OFF·8.0 vs 5.0
-    world_weird: bool = True                  # 풍부함③: worldgen 후 안티-클리셰 weirding(진부한 디폴트를 집착에 맞게 비틈, +1콜). A/B 실측 WEIRD 5:0·9.0 vs 6.4
+    # 풍부함①③: worldgen 메타데이터는 풍부해지나(집착 편중·안티클리셰), **중립 프로즈 A/B 는 3:3 무승부** —
+    #   풍부한 세계가 회차 본문엔 도달 안 함(초기 5:0/9:0 은 생성 어휘를 심사 루브릭이 보상한 순환 측정, 적대리뷰 적발).
+    #   → default OFF(프로즈 미검증). 코드·토글은 보존(작가용 세계 풍부화 보조·장기 아크 주제 일관 가능성, 미검).
+    world_obsession: bool = False            # 집착 벡터 추출→편중 파생(+1콜/생성). 프로즈 효과 미검 → 기본 off
+    world_weird: bool = False                # 안티-클리셰 weirding(+1콜/생성). 프로즈 효과 미검 → 기본 off
 
     data_dir: str = ""                       # 비우면 패키지 옆 data/
 
