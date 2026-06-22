@@ -26,7 +26,8 @@
 ### P1 — 다음 착수 후보 (높은 가치·실측 근거)
 | ID | 제목 | 설명 | 노력 | 출처 |
 |---|---|---|---|---|
-| **R-2** | 풍부함②: 선역사 빙산(HistoryEngine) | epoch forward-chain 인과 시뮬→HistoryLedger(40~120사건·95% 잠금), 묻힌비밀→약속원장 씨앗. "세계가 오래됐다"의 출처. **A/B 검증 후 적용**(DF legends·Hemingway 빙산) | M~L | prewrite 풍부함 research |
+| **R-X** | ⚠️ **프로즈 풍부함 = 회차생성 레버**(D-26 발견) | prewrite 세계풍부화(①③)는 메타데이터만 풍부·**프로즈 미도달(3:3 실측)**. 영혼없는 *본문*을 고치려면 worldgen 이 아니라 **회차 생성**(스타일·집필 프롬프트·세계 활용·감정 크래프트)을 공략. R-2~5(아래)는 '세계 메타 풍부화'라 프로즈엔 효과 미검 — 재검토 필요 | — | D-26 실측 |
+| **R-2** | 풍부함②: 선역사 빙산(HistoryEngine) | epoch forward-chain 인과 시뮬→HistoryLedger(95% 잠금). 단 **세계 메타 풍부화라 프로즈 미도달 위험(D-26)** — 적용 전 *프로즈* A/B 필수 | M~L | prewrite research |
 | **R-4** | 풍부함④: Tension Ledger(생산적 모순) | 약속원장(닫힘) 옆에 안 닫히는 핵심모순 3~5(institutional/power-cost/inner). 'paid 없는 원장이 200화를 끈다'. **A/B 검증** | M | prewrite research |
 | **R-5** | 풍부함⑤: 비대칭 게이트(완전성→비대칭) | worldgen 완료판정을 '커버리지'에서 '집착축 과밀도·빙산비율·tail채택률·긴장잔고'로 뒤집기(advisory, 무강제). SL 빈약함 직타 | M | prewrite research |
 | **T5** | 엔티티 등록부/연속성 SSOT (메타누출·인물드리프트 근본) | 본문 신규 고유명 즉시 등록·역참조 + 인물/인원/스탯 상태 누적·보존. 모델이 모순을 '(…수정 필요)' 주석으로 때우는 상황 자체를 제거(B-24 근본·시드빈약 핵심). 나혼렙 비교서 '김동수' 즉석명명·인원수 흔들림 실측 | M | SL비교·B-24 적대검증 |
@@ -104,7 +105,8 @@
 | **D-22** | escalation 액션 명확화(B-06) — ontology_updater 6개 escalation 의 'reason'에 '의도면 A/오류면 B' 구체 행동 동봉 + bus emit `action=`(recovery.py 철학·출력레이어만). prove_escalation 3/3·summary_ontology 그린 | `16de8ff` |
 | **D-23** | 메타 누출 저감(B-24) — 모델 자기수정 메모 본문 누출(ch4). 소스 지시 강화(out_instr·_continue)+발행경계 sanitize 보증. **결정론 인라인 검출기는 적대검증(3에이전트)서 기각**: 오탐 27(시스템물 diegetic '(오류:…)·(주의:…)' 본문 삭제=장르치명)+미탐 10 → 두더지잡기 재확인. 회귀 가드 테스트. 근본=T5 | `a05bdf9` |
 | **D-24** | 풍부함①: Obsession-Vector-first worldgen — 세계를 '균등 슬롯'이 아니라 '하나의 집착'(Egri 전제)에서 편중 파생해 mode collapse 차단. **A/B 실측 ON 5:0 OFF·블라인드 8.0 vs 5.0**(같은 SL 시드). config.world_obsession 토글, world.obsession_vector 영속. tools/ab_obsession_worldgen.py | `60a9c09` |
-| **D-25** | 풍부함③: 안티-클리셰 weirding 후처리 — 진부한 디폴트를 집착에 맞게 구체·감각·비자명 재작성(`WorldGenerator.weird`, surgical override·구조보존). **A/B WEIRD 5:0 BASE·9.0 vs 6.4**(obsession 위 +2.6). 누적 스택 ①+③: 5.0→6.4→9.0. config.world_weird 토글 | `a3131ba` |
+| **D-25** | 풍부함③: 안티-클리셰 weirding 후처리(`WorldGenerator.weird`, surgical override·구조보존). 세계 메타데이터 A/B 9.0 vs 6.4. config 토글 | `a3131ba` |
+| **D-26** | 풍부함①③ **적대리뷰 교정(78b1d90)** — code-critic 이 측정 순환성(생성어휘=심사루브릭, self-preference) + 메타↔프로즈 갭 적발. **중립 루브릭 프로즈 A/B = ON 3:OFF 3 무승부** → 세계풍부함이 본문엔 미도달 실측. **default OFF 강등**, weird 개명 제거. 핵심: 풍부한 worldgen 메타데이터 ≠ 풍부한 프로즈, 프로즈 레버=회차생성 | `78b1d90` |
 
 ---
 
