@@ -347,6 +347,9 @@ class CopilotService:
             _emit("obsession", vector=_obs["obsession_vector"], lens=_obs.get("sensory_lens", []))
         world = _gen.generate(seed, obs=(_obs or None))
         world.obsession_vector = _obs.get("obsession_vector", "")
+        if getattr(self.settings, "world_weird", True):   # 풍부함③(A/B 검증 +2.6): 진부한 디폴트를 집착에 맞게 구체·비자명하게 비틈
+            world = _gen.weird(world, _obs or None)
+            _emit("world_weird")
         if not seed.title:
             seed.title = world.title
         _emit("world_done", title=world.title,

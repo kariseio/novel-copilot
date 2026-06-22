@@ -123,6 +123,48 @@ class WorldGenerator:
             "클리셰 디폴트(게이트·E~S 등급·시스템창 같은 간판어)를 그대로 쓰지 말고, 이 집착의 그림자로 모든 설정을 구체화하라 — "
             "attributes·entities·world_rules·genre_contract 가 전부 이 한 집착에서 흘러나오게. 추상 대신 감각 렌즈의 구체물로 못박아라.\n\n")
 
+    def weird(self, world: WorldConfig, obs: dict | None = None) -> WorldConfig:
+        """R-3 안티-클리셰 적대 weirding(mode collapse 후처리 차단). 생성된 세계에서 '이 장르의 가장 전형적인
+        디폴트'(간판어·뻔한 인물·예측 규칙)를 짚어 작품 집착에 맞게 *구체·감각·비자명*하게 비튼다. 구조(인물 id·속성축)는
+        보존하고 프로즈 필드만 surgical override. NEVER throws(실패 시 원본 반환). 인물 *추가/삭제 안 함*(weird=재작성)."""
+        try:
+            ob = (obs or {}).get("obsession_vector") or world.obsession_vector
+            snap = {"synopsis": world.synopsis,
+                    "entities": [{"id": e.id, "name": e.name, "profile": e.profile} for e in world.entities],
+                    "world_rules": [r.text for r in world.world_rules],
+                    "genre_contract": (world.genre_contract.model_dump() if world.genre_contract else None)}
+            sys = ("너는 클리셰 사냥꾼 편집자다. 아래 세계관에서 '이 장르의 가장 전형적인 디폴트'(간판어·뻔한 인물 설정·예측 가능한 "
+                   "규칙·추상적 쾌감 서술)를 골라 작품의 집착에 맞게 *구체적·감각적·비자명*하게 다시 써라. 겉만 바꾸지 말고 "
+                   "디폴트를 비틀되 인물 id 와 속성 구조는 유지(인물 추가/삭제 금지). 수정한 필드만 같은 키로 반환 — "
+                   'synopsis(문자열), entities([{id, name?, profile}]), world_rules(문자열 배열 전체), genre_contract(객체). JSON만.')
+            usr = f"[작품의 집착]{ob}\n[현재 세계 — 진부한 부분을 비틀 대상]\n{json.dumps(snap, ensure_ascii=False)}"
+            d = self.provider.chat_json([{"role": "system", "content": sys},
+                                         {"role": "user", "content": usr}], temperature=0.8)
+            if (d.get("synopsis") or "").strip():
+                world.synopsis = d["synopsis"].strip()
+            patch = {x.get("id"): x for x in (d.get("entities") or []) if x.get("id")}
+            for e in world.entities:
+                p = patch.get(e.id)
+                if p:
+                    if (p.get("profile") or "").strip():
+                        e.profile = p["profile"].strip()
+                    if (p.get("name") or "").strip():
+                        e.name = p["name"].strip()
+            nr = [s.strip() for s in (d.get("world_rules") or []) if (s or "").strip()]
+            for i, r in enumerate(world.world_rules):
+                if i < len(nr):
+                    r.text = nr[i]
+            gc = d.get("genre_contract")
+            if gc and world.genre_contract:
+                for k in ("pleasure_engine", "vocabulary_tone", "premise_asset"):
+                    if (gc.get(k) or "").strip():
+                        setattr(world.genre_contract, k, gc[k].strip())
+                if gc.get("reader_expectations"):
+                    world.genre_contract.reader_expectations = [x for x in gc["reader_expectations"] if (x or "").strip()][:6]
+            return world
+        except Exception:
+            return world
+
     def _user(self, seed: ProjectSeed, obs: dict | None = None) -> str:
         return (self._obsession_block(obs) +
                 f"[시드]\n장르: {seed.genre}\n톤: {seed.tone or '(미지정 — 이 장르에 맞는 톤을 창작해 tone 으로 제시)'}\n전제: {seed.premise}\n"
