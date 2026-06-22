@@ -340,7 +340,13 @@ class CopilotService:
         seed.target_chapters = max(1, min(200, int(seed.target_chapters or 12)))   # 방어 클램프(API 외 직접호출 보호)
         before = self.wg_provider.usage.as_dict()
         _emit("world_start")
-        world = WorldGenerator(self.wg_provider).generate(seed)
+        _gen = WorldGenerator(self.wg_provider)
+        # 풍부함(검증됨, A/B ON 5:0): worldgen 전 '집착 벡터'를 먼저 추출해 세계를 균등 슬롯이 아니라 하나의 집착에서 편중 파생.
+        _obs = _gen.obsession(seed) if getattr(self.settings, "world_obsession", True) else {}
+        if _obs.get("obsession_vector"):
+            _emit("obsession", vector=_obs["obsession_vector"], lens=_obs.get("sensory_lens", []))
+        world = _gen.generate(seed, obs=(_obs or None))
+        world.obsession_vector = _obs.get("obsession_vector", "")
         if not seed.title:
             seed.title = world.title
         _emit("world_done", title=world.title,

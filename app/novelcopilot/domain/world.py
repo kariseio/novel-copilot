@@ -176,6 +176,7 @@ class WorldConfig(BaseModel):
     tone: str = ""
     premise: str = ""
     synopsis: str = ""
+    obsession_vector: str = ""                 # 풍부함 헌법: worldgen 이 편중 파생한 '하나의 집착'(Egri 전제). 설계·집필 컨텍스트로 재사용
     attributes: list[AttributeSpec] = Field(default_factory=list)
     entity_types: list[EntityTypeSpec] = Field(default_factory=list)   # 빈→BUILTIN 시드(하위호환)
     entities: list[EntitySpec] = Field(default_factory=list)

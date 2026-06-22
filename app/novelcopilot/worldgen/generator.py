@@ -87,14 +87,51 @@ class WorldGenerator:
             "회귀·부활·리젠·타임루프 세계면 allow_state_reversal:true. 설정은 시드에 맞게 신선하게. JSON 객체만 출력."
         )
 
-    def _user(self, seed: ProjectSeed) -> str:
-        return (f"[시드]\n장르: {seed.genre}\n톤: {seed.tone or '(미지정 — 이 장르에 맞는 톤을 창작해 tone 으로 제시)'}\n전제: {seed.premise}\n"
+    def obsession(self, seed: ProjectSeed) -> dict:
+        """집착 벡터 추출(prewrite 풍부함 연구 — 최상단 '헌법'). 세계를 '균등 슬롯 채우기'가 아니라
+        하나의 기이하고 불편한 주제적 집착에서 *편중되게* 파생시켜 평균회귀(mode collapse)를 깬다.
+        Egri 전제([지배형질→원인→귀결])+McKee counter_idea+감각렌즈(구체물)로 외화. NEVER throws."""
+        try:
+            sys = ("너는 웹소설의 '주제적 집착'을 짚는 날카로운 평론가다. 주어진 시드에서 이 이야기가 *정말로·내장으로* "
+                   "무엇에 대한 것인지 — 가장 비대칭적이고 가장 불편한 명제 하나를 뽑아라. 무난한 요약 금지. "
+                   "① obsession_vector: Egri 식 전제([지배 형질]→[원인]→[귀결])로 압축한 단 하나의 집착 명제. "
+                   "② counter_idea: 그것을 뒤집는 반대 사상(주인공이 이 집착과 싸우는 축). "
+                   "③ sensory_lens: 그 집착이 가장 날카롭게 드러나는 '감각 렌즈' 3~4개 — 추상 금지, 손에 잡히는 구체물만"
+                   "(예: 유족 보상 등급표·장례 견적서·암시장 환율·봉인 낙인·배급 줄·계약서 조항). "
+                   '{"obsession_vector":"...","counter_idea":"...","sensory_lens":["...","...","..."]} JSON만.')
+            usr = (f"[시드]\n장르: {seed.genre}\n톤: {seed.tone}\n전제: {seed.premise}\n"
+                   f"주인공 힌트: {seed.protagonist_hint}\n")
+            d = self.provider.chat_json([{"role": "system", "content": sys},
+                                         {"role": "user", "content": usr}], temperature=0.7)
+            ov = (d.get("obsession_vector") or "").strip()
+            if not ov:
+                return {}
+            return {"obsession_vector": ov, "counter_idea": (d.get("counter_idea") or "").strip(),
+                    "sensory_lens": [s for s in (d.get("sensory_lens") or []) if (s or "").strip()][:4]}
+        except Exception:
+            return {}
+
+    def _obsession_block(self, obs: dict | None) -> str:
+        if not obs or not obs.get("obsession_vector"):
+            return ""
+        return (
+            "[이 세계의 최상단 헌법 — 집착(여기서 모든 것을 편중되게 파생하라)]\n"
+            f"집착: {obs['obsession_vector']}\n"
+            f"반대 사상(주인공이 싸우는 축): {obs.get('counter_idea', '')}\n"
+            f"이 집착이 드러나는 감각 렌즈(구체물): {obs.get('sensory_lens', [])}\n"
+            "※ 균등하게 채우지 마라. 이 집착이 가장 날카롭게 드러나는 영역(감각 렌즈)을 비정상적으로 깊게 파고 나머지는 얇아도 된다. "
+            "클리셰 디폴트(게이트·E~S 등급·시스템창 같은 간판어)를 그대로 쓰지 말고, 이 집착의 그림자로 모든 설정을 구체화하라 — "
+            "attributes·entities·world_rules·genre_contract 가 전부 이 한 집착에서 흘러나오게. 추상 대신 감각 렌즈의 구체물로 못박아라.\n\n")
+
+    def _user(self, seed: ProjectSeed, obs: dict | None = None) -> str:
+        return (self._obsession_block(obs) +
+                f"[시드]\n장르: {seed.genre}\n톤: {seed.tone or '(미지정 — 이 장르에 맞는 톤을 창작해 tone 으로 제시)'}\n전제: {seed.premise}\n"
                 f"주인공 힌트: {seed.protagonist_hint or '(자유)'}\n목표 회차수: {seed.target_chapters}\n"
                 f"제목 힌트: {seed.title or '(자유 창작)'}\n\n스키마 예시(형식만 참고, 내용은 새로):\n{_SCHEMA_HINT}")
 
-    def generate(self, seed: ProjectSeed, _retry: bool = True) -> WorldConfig:
+    def generate(self, seed: ProjectSeed, _retry: bool = True, obs: dict | None = None) -> WorldConfig:
         msg = [{"role": "system", "content": self._system(seed.target_chapters)},
-               {"role": "user", "content": self._user(seed)}]
+               {"role": "user", "content": self._user(seed, obs)}]
         raw = self.provider.chat_json(msg, temperature=0.6, max_tokens=9000)
         try:
             world = WorldConfig.model_validate(raw)
@@ -108,7 +145,7 @@ class WorldGenerator:
                 world = WorldConfig.model_validate(fix)
             except (ValidationError, ValueError):
                 if _retry:                       # 교정 재시도도 실패 → 전체 1회 재생성(일시적 출력 불량 흡수)
-                    return self.generate(seed, _retry=False)
+                    return self.generate(seed, _retry=False, obs=obs)
                 raise
         return self._normalize(world, seed)
 
