@@ -44,6 +44,7 @@ class Settings(BaseSettings):
     #   → default OFF(프로즈 미검증). 코드·토글은 보존(작가용 세계 풍부화 보조·장기 아크 주제 일관 가능성, 미검).
     world_obsession: bool = False            # 집착 벡터 추출→편중 파생(+1콜/생성). 프로즈 효과 미검 → 기본 off
     world_weird: bool = False                # 안티-클리셰 weirding(+1콜/생성). 프로즈 효과 미검 → 기본 off
+    craft_progress: bool = True              # 회차 집필에 '전진강제·반복금지' craft 지시(SL 1순위 패딩 결함 직타). A/B 가독성 4:2 우세(약신호·콜0)
 
     data_dir: str = ""                       # 비우면 패키지 옆 data/
 

@@ -67,6 +67,13 @@ from .prompts import PromptAssembler, render_style, floor_only
 from .observability import EventBus
 
 
+# 페이싱/반복 craft 지시(회차 집필 프롬프트 말미) — '한 장면 늘려쓰기(패딩)·동일 비트 반복'을 전진 압력으로 차단.
+# 기존 스타일 규칙('같은 사건 두 번 금지')의 강화판. A/B 가독성 4:2(전개 빨라짐). 반복지표 개선은 미확인.
+_CRAFT_PROGRESS = ("\n\n[전개·반복 금지 강제] 이 회차는 직전 장면·상황을 반복하거나 심화하지 말고 새 국면으로 전진시켜라 — "
+                   "장소·관계·정보·판세 중 최소 하나가 회차 안에서 실제로 바뀌어야 한다. 같은 위협·대치·감정·이미지를 두 번 그리지 말고, "
+                   "같은 모티프(같은 적·같은 묘사·같은 회상 대사)를 반복하지 마라. 한 장면을 길게 늘여 분량을 채우지 말고 사건이 전진해 자연히 길어지게 하라.")
+
+
 class ChapterGenerator:
     def __init__(self, provider: LLMProvider, checker: Checker, style: StyleSpec,
                  event_bus: EventBus, settings: Settings):
@@ -80,6 +87,9 @@ class ChapterGenerator:
         #   세션을 evict→ 다음 요청에 generator 재구성하므로 캐시여도 스테일 없음(라이브 참조 불필요).
         self.floor_block = floor_only()          # B-10: 교정 패스(_rewrite)용 — 미학 오버레이 없이 바닥 제약만(재문체화 차단).
         self.obsession_block = ""                # 풍부함 다리(실험): 비면 회차 집필 프롬프트에 '집착 렌즈·감각물' 주입(프로즈 A/B 검증용). 기본 무동작
+        # 페이싱 craft(전진강제·반복금지) — SL비교 1순위 결함(4회차=단일던전 패딩) 직타. A/B 4:2 가독성 우세(모처럼 비null,
+        # 단 약한신호·반복지표 미개선·단일시드). config.craft_progress 토글(기본 ON·저위험 craft). 일반화 확인은 후속.
+        self.craft_block = _CRAFT_PROGRESS if getattr(settings, "craft_progress", True) else ""
 
     # ---- LLM 격리 지점 ----
     def plan_scenes(self, beat: dict, directives: list[AuthorDirective]) -> list[SceneSpec]:
@@ -135,7 +145,7 @@ class ChapterGenerator:
             mt = self.settings.gen_max_tokens
         return self.provider.chat(
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
-             {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr + self.obsession_block}],
+             {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr + self.obsession_block + self.craft_block}],
             temperature=0.85, max_tokens=mt)   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
 
     def _continue(self, board, sofar: str, closing=False, recent_tails=None, key_events=None) -> str:
@@ -159,7 +169,7 @@ class ChapterGenerator:
              {"role": "user", "content": self.assembler.assemble(cont_board, spec, sofar[-3500:]) + hook
               + "\n\n이어지는 본문만 출력(이미 쓴 부분 재출력 금지, 머리말·메타 금지). "
               "모순·인물/인원 불일치를 발견해도 '(…수정 필요)' 같은 메모·괄호 주석·TODO를 본문에 남기지 마라 — 한쪽으로 자연스럽게 확정해 서술하라."
-              + self.obsession_block}],
+              + self.obsession_block + self.craft_block}],
             temperature=0.85,   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
             max_tokens=self.settings.chapter_max_tokens)
 
