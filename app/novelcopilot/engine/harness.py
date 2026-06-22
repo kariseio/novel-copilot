@@ -79,6 +79,7 @@ class ChapterGenerator:
         self.style_block = render_style(style)   # rules+author_style 렌더. 정책 패치는 update_style_policy 가
         #   세션을 evict→ 다음 요청에 generator 재구성하므로 캐시여도 스테일 없음(라이브 참조 불필요).
         self.floor_block = floor_only()          # B-10: 교정 패스(_rewrite)용 — 미학 오버레이 없이 바닥 제약만(재문체화 차단).
+        self.obsession_block = ""                # 풍부함 다리(실험): 비면 회차 집필 프롬프트에 '집착 렌즈·감각물' 주입(프로즈 A/B 검증용). 기본 무동작
 
     # ---- LLM 격리 지점 ----
     def plan_scenes(self, beat: dict, directives: list[AuthorDirective]) -> list[SceneSpec]:
@@ -134,7 +135,7 @@ class ChapterGenerator:
             mt = self.settings.gen_max_tokens
         return self.provider.chat(
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
-             {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr}],
+             {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr + self.obsession_block}],
             temperature=0.85, max_tokens=mt)   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
 
     def _continue(self, board, sofar: str, closing=False, recent_tails=None, key_events=None) -> str:
@@ -157,7 +158,8 @@ class ChapterGenerator:
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
              {"role": "user", "content": self.assembler.assemble(cont_board, spec, sofar[-3500:]) + hook
               + "\n\n이어지는 본문만 출력(이미 쓴 부분 재출력 금지, 머리말·메타 금지). "
-              "모순·인물/인원 불일치를 발견해도 '(…수정 필요)' 같은 메모·괄호 주석·TODO를 본문에 남기지 마라 — 한쪽으로 자연스럽게 확정해 서술하라."}],
+              "모순·인물/인원 불일치를 발견해도 '(…수정 필요)' 같은 메모·괄호 주석·TODO를 본문에 남기지 마라 — 한쪽으로 자연스럽게 확정해 서술하라."
+              + self.obsession_block}],
             temperature=0.85,   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
             max_tokens=self.settings.chapter_max_tokens)
 
