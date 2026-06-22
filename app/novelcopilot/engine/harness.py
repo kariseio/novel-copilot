@@ -16,10 +16,16 @@ import re
 _META_LINE = re.compile(r"^\s*[\[【(#\-=*]{0,3}\s*(END|끝|다음\s*(화|회차|:)|계속|to\s*be\s*continued|장면\s*(종료|전환)|scene|chapter|메모|note|todo|작가\s*주)"
                         r".{0,80}$", re.IGNORECASE)
 _BRACKET_ONLY = re.compile(r"^\s*[\[【(].{0,100}[\]】)]\s*$")   # (괄호)/[대괄호] 단독행 — '(다음 회, …)' 본문 박힘 제거
+# 주의(B-24 적대검증 결론): '인라인 괄호 편집메모'를 어휘목록(수정필요·불일치·오류·참고:·주의: 등)으로 잡으려던 시도는
+# 두더지잡기로 기각됐다. 시스템물의 diegetic 괄호 '(오류: 접근 거부)·(주의: 함정)·(참고: 일일퀘스트)'와 서사 괄호
+# '(그건 모순이었다)'를 작가메모와 구분 못 해 오탐 27건(장르-치명)·미탐 10건(동의어 회피) 실측. 어휘 기반 의미판정 금지.
+# → 메타누출의 정공법은 (1) 생성 단계 지시(아래 out_instr/_continue 의 '메모·괄호주석 금지')와 (2) 근본 원인인
+#   엔티티 등록부(인물/인원 모순을 모델이 주석으로 때우게 만드는 상황 제거). 줄단위 안전 패턴만 유지한다.
 
 
 def sanitize_meta(text: str) -> str:
-    """생성물에서 메타텍스트([END…], 장면 표지, 작가 메모류) 라인 제거 — FINALIZED 본문 누출 차단(결정론)."""
+    """생성물에서 메타텍스트([END…], 장면 표지, 작가 메모류) 라인 제거 — FINALIZED 본문 누출 차단(결정론).
+    줄단위 안전 패턴만(인라인 어휘 매칭은 B-24 적대검증서 오탐 과다로 기각 — 서사/시스템 괄호 보존)."""
     out = []
     for ln in text.splitlines():
         s = ln.strip()
@@ -119,7 +125,9 @@ class ChapterGenerator:
         if chapter_mode:   # 회차 집필: 분량·장면 어휘는 모델 입력 금지(절단점은 글자 수가 아니라 극적 순간의 문제)
             out_instr = ("\n\n이번 회차 본문만 출력(머리말·설명·메타·예고문 금지). "
                          "분량을 채우기 위한 묘사 늘리기 금지 — 이야기가 자연스러운 절단점에 이르면 거기서 멈춰라. "
-                         "회차 전체에서 시제(과거형 기조)·따옴표 글리프를 일관되게 유지하고, 같은 사건·클라이맥스를 두 번 쓰지 마라.")
+                         "회차 전체에서 시제(과거형 기조)·따옴표 글리프를 일관되게 유지하고, 같은 사건·클라이맥스를 두 번 쓰지 마라. "
+                         "설정 모순·인물/인원 불일치를 발견해도 본문에 '(…수정 필요)'·'(참고:…)' 같은 메모·괄호 주석·TODO·편집 코멘트를 절대 남기지 마라 — "
+                         "한쪽으로 자연스럽게 확정해 서술하라(독자가 읽는 소설 본문에는 작가의 작업 메모가 있어선 안 된다).")
             mt = self.settings.chapter_max_tokens
         else:
             out_instr = "\n\n본문만 출력(머리말·설명·메타 금지)."
@@ -148,7 +156,8 @@ class ChapterGenerator:
         return self.provider.chat(
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
              {"role": "user", "content": self.assembler.assemble(cont_board, spec, sofar[-3500:]) + hook
-              + "\n\n이어지는 본문만 출력(이미 쓴 부분 재출력 금지, 머리말·메타 금지)."}],
+              + "\n\n이어지는 본문만 출력(이미 쓴 부분 재출력 금지, 머리말·메타 금지). "
+              "모순·인물/인원 불일치를 발견해도 '(…수정 필요)' 같은 메모·괄호 주석·TODO를 본문에 남기지 마라 — 한쪽으로 자연스럽게 확정해 서술하라."}],
             temperature=0.85,   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
             max_tokens=self.settings.chapter_max_tokens)
 
@@ -590,6 +599,7 @@ class ChapterGenerator:
             chapter_text = self._fix_tense(chapter_text)
             draft_ctx["corrections"].append("fix_tense")   # D-8
             _track("quality", _t)
+        chapter_text = sanitize_meta(chapter_text)   # 발행 경계 최종 보증: 어느 패스가 만든 메타든 published 본문엔 없게(구조 불변식)
         _t = self.provider.usage.chat_tokens
         final = self.checker.check_text(chapter_text, ontology, ch_no, involved)
         _track("check", _t)
