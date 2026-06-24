@@ -83,6 +83,15 @@ _SCENE_ANCHORS = {
     "respite": "[이 장면의 결: 완급] 숨을 돌려라 — 감각 디테일 한둘과 여백으로, 단 사건은 정체시키지 말고 한 뼘은 전진.",
 }
 _SCENE_DEFAULT = "[이 장면] 장면의 목적에 맞는 결로 — 균일하게 묘사를 깔지 말고 필요한 곳만 또렷이."
+# few-shot 예시 앵커(연구 #1 레버) — 지시(최대화→진자) 대신 '결·리듬'을 *모방*시킨다. 내용 복사(자기표절) 금지 프레이밍.
+_EX_PREFIX = "\n\n[이 장면의 결 — 아래는 호흡·리듬 '참고용'. 내용·인물·문장을 절대 베끼지 말고 이 *결*만 가져와라]\n"
+_SCENE_EXAMPLES = {
+    "escalation": "칼끝이 뺨을 스쳤다. 물러섰다. 한 걸음 더.\n“— 끝이야?”\n대답 대신 방패를 들었다. 쇳소리. 손목이 저렸다.",
+    "payoff": "문이 열렸다. 십 년을 기다린 문이.\n그가 안으로 들어섰다. 더는 떨지 않았다.",
+    "setup": "그는 식탁 밑으로 반지를 밀어 넣었다. 아무도 보지 못했다.\n어머니가 국그릇을 내려놓으며 물었다. “오늘은 늦니?”",
+    "relation": "“돈은?”\n“없어.”\n“그럼 왜 왔어.”\n“너 보러.”\n사내가 픽 웃었다. 여자는 웃지 않았다.",
+    "respite": "창밖으로 눈이 내렸다. 그는 식은 커피를 쥔 채 한참을 그렇게 있었다.\n멀리서 개가 짖었다. 다시 조용해졌다.",
+}
 # 블랭킷(대조군) — 전역 문체 지시(어디나 최대화돼 과적용되는 형태)
 _STYLE_BLANKET = ("\n\n[문체] 감각(소리·온도·무게)으로 보여주고, 한국어 입말로 능동·짧게 쓰고, "
                   "문장 길이와 종결어미를 변주하고, 거창한 추상 수식 대신 구체로 단언하라.")
@@ -112,10 +121,12 @@ class ChapterGenerator:
     def _style_inject(self, beat: dict) -> str:
         if self.style_mode == "blanket":
             return _STYLE_BLANKET
+        fn = (beat.get("chapter_function") or "").strip().lower()
         if self.style_mode == "scene":
-            fn = (beat.get("chapter_function") or "").strip().lower()
-            a = _SCENE_ANCHORS.get(fn, _SCENE_DEFAULT)
-            return "\n\n" + a
+            return "\n\n" + _SCENE_ANCHORS.get(fn, _SCENE_DEFAULT)
+        if self.style_mode == "example":
+            ex = _SCENE_EXAMPLES.get(fn)
+            return (_EX_PREFIX + ex) if ex else ("\n\n" + _SCENE_DEFAULT)
         return ""
 
     # ---- LLM 격리 지점 ----
