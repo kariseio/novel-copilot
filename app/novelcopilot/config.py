@@ -45,6 +45,7 @@ class Settings(BaseSettings):
     world_obsession: bool = False            # 집착 벡터 추출→편중 파생(+1콜/생성). 프로즈 효과 미검 → 기본 off
     world_weird: bool = False                # 안티-클리셰 weirding(+1콜/생성). 프로즈 효과 미검 → 기본 off
     craft_progress: bool = True              # 회차 집필에 '전진강제·반복금지' craft 지시(SL 1순위 패딩 결함 직타). A/B 가독성 4:2 우세(약신호·콜0)
+    scene_style_anchor: bool = False         # 비트 기능(chapter_function)별 장면형 스타일 앵커 *선택적* 주입(블랭킷 지시 과적용 회피). A/B scene>blanket 4:2·ai_tell 변주↑. scene>none 미검 → off
 
     data_dir: str = ""                       # 비우면 패키지 옆 data/
 
