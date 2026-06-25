@@ -45,7 +45,8 @@
 | **B-20** | 퇴고 기능 LOW 3건 + LLM e2e | 퇴고(caea390) 출하분의 LOW 미결 3건·LLM 왕복 e2e(단일프로세스라 무영향, 의도된 비차단) | M | webnovel-revision memory |
 | **B-21** | 블라인드 감사 b백로그 G4~G10 '채움' | 레이어는 옳고 채움 부족 — 다음 개선 루프 대상(G11=건드리지 말 것) | M~L | blind-audit memory |
 | ~~**B-22a**~~ | ✅ **기본모델 gpt-4.1→gpt-5.2-chat-latest 교체 완료** (`1103b1a`) | 공정 A/B: gpt-4.1=2세대 구형 "최약" → gpt-5.2-chat 프로즈 claude급·비용동급·레이트리밋無. 회귀 통과(전체스위트 1실패는 사전존재 테스트격리 순서오염, 무관) | S | model-routing memory |
-| ~~**B-22b**~~ | ✅ **역할 라우팅 구현 — A/B 실제 승자대로** | worldgen·bible=**claude**(worldgen_model, 1위), 아크/에피/비트 설계=**gpt-5.2**(planning_model, 1위), 프로즈=gpt-5.2-chat. create_role_provider(폴백·cross-vendor) + wg_provider/planning_provider 분리. e2e: claude worldgen(chat10·엔티티5·아크6)+gpt-5.2 spine+gpt-5.2-chat 회차. 테스트 52pass | M | model-routing memory |
+| ~~**B-22b**~~ | ✅ **역할 라우팅 구현(최종)** | worldgen·bible·**설계(아크/에피/비트)=claude**(장르맹목 방지), 본문=**gpt-5.5**(사용자 선호 품질). create_role_provider(폴백·cross-vendor)+wg_provider/planning_provider 분리. 5장르 e2e 검증 | M | model-routing·genre-fidelity memory |
+| ~~**B-23**~~ | ✅ **장르맹목 근본수정 — 프롬프트 39건 중립화** | 비전투 장르가 회귀/시스템/최종결전로 오염되던 계통 편향. 원인=gpt-5.5 mode-collapse+프롬프트 priming 둘 다(격리검증). 13파일 33곳 중립화(트로프 호명·예시·부정 제거→작품에서 도출)+설계 claude 라우팅. 논문근거(pink-elephant·few-shot). 5장르 충실 입증. 리포트 `tools/reports/prompt_*_2026-06.md` | L | genre-fidelity memory |
 | **B-22c** | 추출·윤문 라우팅 (선택·후속) | 추출/체커(증거중요)=claude·gpt5-mini(핫패스 비용↔품질 트레이드오프), 윤문=claude. build_engine에 역할 provider 분리 필요(현재 단일). 효과 대비 핫패스 비용 커서 보류 | M | model-routing memory |
 
 ### P3 — 조건부·인프라·기술부채·위생
@@ -55,6 +56,8 @@
 | **B-12** | B2 영속 — ProjectState 통짜 JSON 분리 | 회차 append-only+임베딩 사이드카(RAG 샤딩은 완료) | 장편(100화+) | blind-audit |
 | **B-13** | M6 EventBus per-stream 분리 | 단일 PoC라 sess.lock 직렬화로 무해 | 멀티워커/멀티클라 | core-review |
 | **B-14** | world.py 재설계 회귀 스모크 | 8규칙 재작성 영향 측정. 저ROI(precedence가 이미 정상산출 입증) | (필요 시) | workflow |
+| **B-25** | 회차 생성 타임아웃 시 카운터 정합 | 5장르 재생성서 발견: 본문 LLM 타임아웃이 current_chapter↔chapters 리스트 불일치 유발(무협: current=1인데 chapters=2). 부분실패 트랜잭션 정합 필요. timeout 300초로 빈도↓하나 근본은 별개 | M | 장르 재생성 2026-06 |
+| **B-26** | build_spine 빈-폴백 retry | claude spine 호출 1회 실패(동시부하 transient) 시 빈 NarrativeSpine 폴백→아크0 flat모드. 1회 retry 또는 가시 경고. 5장르 동시생성서 판타지 1건 발생 | S | 장르 재생성 2026-06 |
 | **B-15** | POS·띄어쓰기 축 / xlm-roberta 보조 | 형태소분석기·레퍼런스 의존이라 의존성0 원칙상 제외 | (의존성 허용 시) | ai-style §5 |
 | **B-16** | author_style 회차별 중복 영속 참조화 | draft_ctx 240자 반복 저장(B2 동근원) | (B2와 함께) | code-critic(UI) |
 | **B-17** | 8규칙 하드/소프트 물리 분할 | 현재 precedence 텍스트로만 선언. 규칙 외과 재작성=회귀위험 | (보류) | style-layering §5 |
