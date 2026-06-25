@@ -17,10 +17,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOVEL_", env_file=".env", extra="ignore")
 
     llm_provider: str = "openai"
-    gen_model: str = "gpt-5.5"   # 프로즈/핫패스/기본(사용자 지정 2026-06: 최신 플래그십). 검증 A/B 병행 중. ※프로즈용 chat 변형 최신은 gpt-5.3-chat-latest
+    gen_model: str = "gpt-5.3-chat-latest"   # 프로즈/핫패스/기본. 최신 chat(빠름) — gpt-5.5(추론)는 회차마다 느려 부적합
     # 역할 라우팅(B-22b) — "provider:model" cross-vendor, 빈값→gen_model, 키없으면 안전폴백(create_role_provider).
-    worldgen_model: str = "anthropic:claude-opus-4-8"   # worldgen·bible(창의·구조): A/B 1위 claude(다양성 유지). 1회성이라 비용 무시
-    planning_model: str = "gpt-5.5"                      # 아크·에피·비트 설계(추론): 최신 추론 플래그십(5.2 1위 → 5.5 승계)
+    worldgen_model: str = "anthropic:claude-opus-4-8"   # worldgen·bible(창의·구조): A/B 1위 claude(장르 충실)
+    planning_model: str = "anthropic:claude-opus-4-8"   # 아크·에피·비트 설계: gpt-5.5는 장르 무시(회귀/시스템 mode-collapse) 입증 → claude로(장르 충실)
     embed_model: str = "text-embedding-3-small"
 
     # 컨텍스트 예산 — '기아 해소' 재배분(docs/context-redesign.md): 입력 ~40k토큰 목표, 헤드룸 60% 유지.
