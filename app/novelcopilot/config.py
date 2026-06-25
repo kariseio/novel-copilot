@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOVEL_", env_file=".env", extra="ignore")
 
     llm_provider: str = "openai"
-    gen_model: str = "gpt-4.1"
+    gen_model: str = "gpt-5.2-chat-latest"   # 공정 A/B(2026-06): gpt-4.1=2세대 구형·최약 → gpt-5.2-chat 프로즈 claude급·비용동급·레이트리밋無
     embed_model: str = "text-embedding-3-small"
 
     # 컨텍스트 예산 — '기아 해소' 재배분(docs/context-redesign.md): 입력 ~40k토큰 목표, 헤드룸 60% 유지.
