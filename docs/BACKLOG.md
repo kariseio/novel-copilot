@@ -45,7 +45,7 @@
 | **B-20** | 퇴고 기능 LOW 3건 + LLM e2e | 퇴고(caea390) 출하분의 LOW 미결 3건·LLM 왕복 e2e(단일프로세스라 무영향, 의도된 비차단) | M | webnovel-revision memory |
 | **B-21** | 블라인드 감사 b백로그 G4~G10 '채움' | 레이어는 옳고 채움 부족 — 다음 개선 루프 대상(G11=건드리지 말 것) | M~L | blind-audit memory |
 | ~~**B-22a**~~ | ✅ **기본모델 gpt-4.1→gpt-5.2-chat-latest 교체 완료** (`1103b1a`) | 공정 A/B: gpt-4.1=2세대 구형 "최약" → gpt-5.2-chat 프로즈 claude급·비용동급·레이트리밋無. 회귀 통과(전체스위트 1실패는 사전존재 테스트격리 순서오염, 무관) | S | model-routing memory |
-| ~~**B-22b**~~ | ✅ **역할 라우팅 구현(worldgen/bible/설계→structure_model=gpt-5.2)** | config.structure_model + create_role_provider(폴백·cross-vendor). wg_provider가 worldgen/bible/spine/재설계/비트 담당, gpt-5.2(추론)으로 분리. 프로즈·핫패스는 기본 유지. e2e: gpt-5.2 worldgen 엔티티6·아크6(chat 3·2). 검증 통과 | M | model-routing memory |
+| ~~**B-22b**~~ | ✅ **역할 라우팅 구현 — A/B 실제 승자대로** | worldgen·bible=**claude**(worldgen_model, 1위), 아크/에피/비트 설계=**gpt-5.2**(planning_model, 1위), 프로즈=gpt-5.2-chat. create_role_provider(폴백·cross-vendor) + wg_provider/planning_provider 분리. e2e: claude worldgen(chat10·엔티티5·아크6)+gpt-5.2 spine+gpt-5.2-chat 회차. 테스트 52pass | M | model-routing memory |
 | **B-22c** | 추출·윤문 라우팅 (선택·후속) | 추출/체커(증거중요)=claude·gpt5-mini(핫패스 비용↔품질 트레이드오프), 윤문=claude. build_engine에 역할 provider 분리 필요(현재 단일). 효과 대비 핫패스 비용 커서 보류 | M | model-routing memory |
 
 ### P3 — 조건부·인프라·기술부채·위생
