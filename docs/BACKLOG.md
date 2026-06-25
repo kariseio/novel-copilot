@@ -44,7 +44,8 @@
 | **B-09** | ai_tell 분위수/z-score·최근 N화 윈도우 | 현재 중앙값 상대. 코퍼스 쌓이면 분위수 띠·윈도우(50화+ 가독) | M | ai-style §5 |
 | **B-20** | 퇴고 기능 LOW 3건 + LLM e2e | 퇴고(caea390) 출하분의 LOW 미결 3건·LLM 왕복 e2e(단일프로세스라 무영향, 의도된 비차단) | M | webnovel-revision memory |
 | **B-21** | 블라인드 감사 b백로그 G4~G10 '채움' | 레이어는 옳고 채움 부족 — 다음 개선 루프 대상(G11=건드리지 말 것) | M~L | blind-audit memory |
-| **B-22** | 역할별 모델 라우팅 (**승인 대기**) | A/B 실증: 프롬프트 문체지시 5번 null인데 **모델 교체는 프로즈를 실제로 움직임**(Claude opus-4-8>gemini>gpt-4.1, 삼각검증 일치). draft/윤문은 Claude, 거버넌스(checker·ledger)·임베딩은 싸게 분리하는 config 노출. Anthropic/Gemini provider 구현 완료(adaptive-temp·thinking추출). **비용·레이트리밋(Claude opus) 영향 → 구현 전 사용자 승인** | M | model-routing memory |
+| **B-22a** | **기본모델 gpt-4.1→gpt-5.2-chat-latest 교체 (승인 대기·최대 가성비)** | 공정 A/B: gpt-4.1은 2세대 구형이라 "최약"이었을 뿐, **현행 gpt-5.2 ≈ claude**(근소 claude). 기본값 교체만으로 프로즈 대폭↑·비용 동급·레이트리밋 무. config.gen_model 한 줄 + 회귀확인. **production 기본 변경 → 승인** | S | model-routing memory |
+| **B-22b** | 역할별 모델 라우팅 (조건부) | draft=gpt-5.2-chat/claude, 윤문·프리미엄=claude-opus(비쌈·하루한도), 거버넌스·임베딩=싸게 분리하는 config. gemini는 draft서 설정시트 덤프 전패 → 회피 또는 교정 프롬프트 선행. Anthropic/Gemini provider·gpt-5 파라미터 자동적응 既구현. 22a 효과 본 뒤 판단 | M | model-routing memory |
 
 ### P3 — 조건부·인프라·기술부채·위생
 | ID | 제목 | 설명 | 트리거 | 출처 |
