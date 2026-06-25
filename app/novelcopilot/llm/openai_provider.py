@@ -8,9 +8,9 @@ from .base import LLMProvider
 
 class OpenAIProvider(LLMProvider):
     def __init__(self, gen_model: str, embed_model: str, client: OpenAI | None = None,
-                 timeout: float = 90.0):
+                 timeout: float = 300.0):
         super().__init__()
-        self._client = client or OpenAI(timeout=timeout)   # 기본 read=600s 대신 유한 타임아웃(워커 장시간 점유 방지)
+        self._client = client or OpenAI(timeout=timeout)   # 추론 모델(gpt-5.5 등)은 1콜 >90s — 300s 로(워커 점유 vs 회차 절단 트레이드오프)
         self.gen_model = gen_model
         self.embed_model = embed_model
 
