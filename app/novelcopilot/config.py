@@ -18,10 +18,9 @@ class Settings(BaseSettings):
 
     llm_provider: str = "openai"
     gen_model: str = "gpt-5.2-chat-latest"   # 프로즈/핫패스/기본. 공정 A/B(2026-06): gpt-4.1=구형·최약 → gpt-5.2-chat 프로즈 claude급
-    # 역할 라우팅(B-22b): worldgen·bible·아크/에피/비트 설계는 추론·구조 역할 — 프로즈 챔피언 gpt-5.2-chat이 *최약*(A/B 실증).
-    # gpt-5.2(추론)이 구조/설계 1위·worldgen 2위라 같은 OpenAI 키로 큰 승리. "provider:model"로 cross-vendor(예: anthropic:claude-opus-4-8),
-    # 빈값이면 gen_model 사용. 키 없으면 기본 provider 로 안전 폴백(create_role_provider).
-    structure_model: str = "gpt-5.2"
+    # 역할 라우팅(B-22b) — A/B 실제 승자대로(역할마다 1위 다름). "provider:model" cross-vendor, 빈값→gen_model, 키없으면 안전폴백(create_role_provider).
+    worldgen_model: str = "anthropic:claude-opus-4-8"   # worldgen·bible(창의·구조): A/B 1위 claude(>gpt5.2>gpt5.2-chat 최약). 1회성이라 비용 무시
+    planning_model: str = "gpt-5.2"                      # 아크·에피·비트 설계(추론): A/B 1위 gpt-5.2(추론). gemini 퇴화
     embed_model: str = "text-embedding-3-small"
 
     # 컨텍스트 예산 — '기아 해소' 재배분(docs/context-redesign.md): 입력 ~40k토큰 목표, 헤드룸 60% 유지.
