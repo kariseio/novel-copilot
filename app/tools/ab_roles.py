@@ -27,10 +27,9 @@ def prov(prov_name, model):
     return GeminiProvider(model, _emb)
 
 
-ARMS = {"gpt5.2-chat": ("openai", "gpt-5.2-chat-latest"),
-        "gpt5.2": ("openai", "gpt-5.2"),
-        "claude": ("anthropic", "claude-opus-4-8"),
-        "gemini": ("gemini", "gemini-3.1-pro-preview")}
+ARMS = {"gpt5.5": ("openai", "gpt-5.5"),                # 최신 플래그십(추론) — worldgen/설계 후보
+        "gpt5.2": ("openai", "gpt-5.2"),                # 직전 1위(baseline)
+        "claude": ("anthropic", "claude-opus-4-8")}     # worldgen 현행 1위
 
 JUDGES_SPEC = [("J-gpt", "openai", "gpt-4.1"),
                ("J-claude", "anthropic", "claude-sonnet-4-6"),

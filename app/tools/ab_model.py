@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """A/B — 모델 라우팅(공정판): 같은 세계·동일 프롬프트로 *본문 생성 모델만* 변주.
 arm: gpt-5.2-chat-latest / gpt-5.2(추론) / claude-opus-4-8 / gemini-3.1-pro-preview.
-1차 지표=객관(ai_tell + 번역투, '그녀' 제거). 2차=pairwise LLM 심사 3-family 판정단(양순서 일치만 인정→자기선호·위치편향 상쇄).
+1차 지표=객관(ai_tell). 2차=pairwise LLM 심사 3-family 판정단(양순서 일치만 인정→자기선호·위치편향 상쇄).
 실행: PYTHONPATH=. PYTHONIOENCODING=utf-8 python tools/ab_model.py
 """
 from __future__ import annotations
@@ -18,17 +18,10 @@ from novelcopilot.engine.quality_gates import ai_tell_profile
 from tools.ab_obsession_worldgen import SEED
 
 OUT = r"C:\Users\owner\AppData\Local\Temp\sl_compare"
-ARMS = {"gpt5.2-chat": ("openai", "gpt-5.2-chat-latest"),
-        "gpt5.2": ("openai", "gpt-5.2"),
-        "claude": ("anthropic", "claude-opus-4-8"),
-        "gemini": ("gemini", "gemini-3.1-pro-preview")}
-# 번역투(영한 직역체) — '그녀'는 오염원(맥락상 정상 사용 많음)이라 제외.
-_TRANS = [r"를?\s*통해", r"에\s*의해", r"되어지", r"지게\s*되", r"에\s*대(한|해)", r"에\s*있어", r"가지고\s*있", r"것으로\s*보였", r"에\s*다름\s*아니"]
-
-
-def trans_per_1k(text: str) -> float:
-    n = sum(len(re.findall(p, text)) for p in _TRANS)
-    return round(n / max(1, len(text)) * 1000, 2)
+ARMS = {"gpt5.2-chat(cur)": ("openai", "gpt-5.2-chat-latest"),   # 현행 기본(baseline)
+        "gpt5.3-chat": ("openai", "gpt-5.3-chat-latest"),         # 최신 chat
+        "gpt5.5": ("openai", "gpt-5.5"),                          # 최신 플래그십(추론)
+        "claude": ("anthropic", "claude-opus-4-8")}               # 프로즈 공동1위 기준
 
 
 def two_ch(svc, pid):
@@ -64,13 +57,13 @@ def main():
         print(f"  {name} {len(texts[name])}자", flush=True)
 
     print("\n[객관 지표 — 1차]")
-    print(f"  {'arm':14}{'번역투/1k':>10}  comma/sentCV/어미다양/직유")
+    print(f"  {'arm':16}  comma/sentCV/어미다양/직유")
     for name in ARMS:
         t = texts[name]
         if not t:
-            print(f"  {name:14}{'(실패)':>10}"); continue
+            print(f"  {name:16}(실패)"); continue
         p = ai_tell_profile(t, roster)
-        print(f"  {name:14}{trans_per_1k(t):>10}  {p['comma_per_100']:.2f} / {p['sent_len_cv']:.2f} / {p['ending_diversity']:.2f} / {p['simile_per_1k']:.2f}")
+        print(f"  {name:16}{p['comma_per_100']:.2f} / {p['sent_len_cv']:.2f} / {p['ending_diversity']:.2f} / {p['simile_per_1k']:.2f}")
 
     avail = [n for n in ARMS if texts.get(n)]
     if len(avail) < 2:
@@ -116,7 +109,7 @@ def main():
     print(f"\n=== 양순서일치 승 합계(판정단 전체): {wins} ===")
     for jn in per_judge:
         print(f"    {jn}: {per_judge[jn]}")
-    print("(1차=객관 번역투/comma/sentCV. 2차=판정단 — 같은-family 미세 자기선호 잔존 가능)")
+    print("(1차=객관 comma/sentCV/어미다양. 2차=판정단 — 같은-family 미세 자기선호 잔존 가능)")
     return 0
 
 
