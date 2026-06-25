@@ -4,7 +4,3 @@ __pycache__/
 .env
 app/data/
 app/.env
-
-# API 키(로컬, 커밋 금지)
-app/.apikeys
-.apikeys
