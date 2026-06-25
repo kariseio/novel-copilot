@@ -114,8 +114,8 @@ def mark_paid(ledger: PromiseLedger, paid_ids: list[str], chapter: int) -> int:
 def reconcile_ledger_from_prose(provider, text: str, open_promises: list[Promise], chapter: int) -> dict:
     """G1-P3+P2: 본문을 한 번 읽고 (a) 기존 약속 중 지불된 것 (b) 이 회차가 '새로 연' 약속을 함께 추출.
 
-    원장을 '설계 라벨(plant)'이 아니라 '본문이 실제로 독자에게 한 약속'으로 채운다 — 클리프행어·미해결 질문·
-    예고된 위협·떡밥. 증거 스팬 강제(지불은 본문 인용 검증→환각 폐기). 추가 LLM 콜 0(상환 검출과 같은 콜).
+    원장을 '설계 라벨(plant)'이 아니라 '본문이 실제로 독자에게 한 약속'으로 채운다 — 이 회차가 열어둔,
+    독자가 다음을 궁금해하게 만든 미해결 기대. 증거 스팬 강제(지불은 본문 인용 검증→환각 폐기). 추가 LLM 콜 0(상환 검출과 같은 콜).
     반환 {"paid": [id...], "opened": [{"text","kind"}...]}. narrative_inferred — 원장은 비구속 회계.
     """
     if not (text or "").strip():
@@ -128,8 +128,8 @@ def reconcile_ledger_from_prose(provider, text: str, open_promises: list[Promise
               "웹소설 편집자. 이 회차 본문을 읽고 두 가지를 뽑아라:\n"
               "① paid: 아래 '기존 약속' 중 이번 회차에서 '실제로 지불(회수·공개·달성·해소)된 것'. 각 항목에 "
               "evidence(본문에서 그대로 복사한 구절) 필수. 추측·예고는 제외.\n"
-              "② opened: 이번 회차가 '새로 연 약속' 0~5개 — 독자가 다음을 궁금해하게 만든 미해결 질문·예고된 위협·"
-              "심은 떡밥. text(한 줄)와 kind(질문/위협/떡밥/관계/정보 중)로. 이미 있던 약속의 재언급은 제외.\n"
+              "② opened: 이번 회차가 '새로 연 약속' 0~5개 — 이 회차가 열어두어 독자가 다음을 궁금해하게 만든 미해결 기대. "
+              "text(한 줄)와 kind(이 작품의 톤·상황에 맞게, 그 약속이 어떤 종류의 기대인지 짧은 한 단어로 직접 명명)로. 이미 있던 약속의 재언급은 제외.\n"
               '없으면 빈 배열. JSON: {"paid":[{"id":"","evidence":""}],"opened":[{"text":"","kind":""}]}'},
              {"role": "user", "content": f"[기존 약속]{json.dumps(items, ensure_ascii=False)}\n[이번 회차 본문]\n{text[:9000]}"}],
             temperature=0.0, max_tokens=1500)

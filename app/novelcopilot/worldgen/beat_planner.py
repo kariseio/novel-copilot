@@ -28,7 +28,7 @@ class BeatPlanner:
         msg = [
             {"role": "system", "content":
              "웹소설 다음 회차 비트(beat) 1개를 설계. 직전 흐름을 이어 이야기를 의미 있게 전진시키되"
-             "(긴장 고조·감정 심화·단서 축적 등 이 작품 장르·톤에 맞는 추진력으로) 기존 설정과 모순 금지. "
+             "(이 작품의 장르·톤·직전 상황이 요구하는 고유한 추진력을 그 맥락에서 도출해 적용) 기존 설정과 모순 금지. "
              'JSON: {"title":"","summary":"","key_events":["",""],"entities":["인물 id"]}'},
             {"role": "user", "content":
              f"[작품]{world.title} / {world.genre} / {world.tone}\n[인물 id]{char_ids}\n"

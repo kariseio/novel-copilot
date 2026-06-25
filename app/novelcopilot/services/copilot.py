@@ -310,8 +310,9 @@ class CopilotService:
         if getattr(brief, "keywords", None):
             parts.append(
                 "[키워드·트로프] " + ", ".join(brief.keywords)
-                + " — 이 트로프 관습을 세계·인물·전개에 반영하라. 단 관계형 트로프(후회·복수 등)는 대상(가해자·연적 등)을 "
-                "초반에 깔되 회수(후회·복수 실행)는 한참 뒤로 미루는 장기 자산으로 설계하라(매 회차 반복 금지).")
+                + " — 이 키워드가 가리키는 관습을 작품의 톤·전제에 맞게 세계·인물·전개로 구현하라. "
+                "장기 회수가 필요한 키워드라면 그 단서를 초반에 심어 두되, 정산 시점은 이 작품의 페이싱이 정하게 하라"
+                "(매 회차로 소진하지 말고 자산으로 운용).")
         hint = next((f"{c.name}: {c.want}".strip(" :") for c in brief.characters
                      if c.role and ("주인공" in c.role or "주연" in c.role)), "")
         return ProjectSeed(
@@ -881,7 +882,7 @@ class CopilotService:
                 pv = prior[-1]
                 summaries.append(f"{pv.chapter}화(직전) 상세: {getattr(pv, 'detail_synopsis', '') or pv.summary or pv.text[:300]}")
                 if pv.text:
-                    summaries.append(f"직전 화 말미(이번 화 도입에서 즉시 이어받아 회수할 것): …{pv.text[-280:]}")
+                    summaries.append(f"직전 화 말미(이번 화 도입이 이 흐름을 자연스럽게 이어받도록 — 연결 방식은 작품 톤이 정한다): …{pv.text[-280:]}")
 
             arc = ep = None
             is_finale = False
@@ -932,8 +933,8 @@ class CopilotService:
                     policy = getattr(state.world, "plant_reminder", "off")
                     outstanding = _outstanding_plants(spine)
                     if outstanding and policy != "off":
-                        plant_notes = (f"{outstanding[:self.settings.plant_inject_cap]} — 회수는 절정과 자연스럽게 맞물릴 때만. "
-                                       "억지 회수 금지(슬로우번은 정당한 기법)")
+                        plant_notes = (f"{outstanding[:self.settings.plant_inject_cap]} — 회수는 절정과 자연스럽게 맞물릴 때 다루고, "
+                                       "아직 무르익지 않았다면 자산으로 그대로 둔다(천천히 쌓는 전개도 정당한 기법)")
                         if policy == "active" and is_finale:
                             plant_notes += ". finale: 자연스럽다면 이번 회차 회수를 고려"
                     # G6: 설계 콜에 인물 스토리 컨텍스트(이름·프로필·현재 상태·관계) 주입.
@@ -1017,8 +1018,8 @@ class CopilotService:
                         e = espec.get(eid)
                         if e is not None and not getattr(e, "introduced", False) and getattr(e, "profile", ""):
                             anchors.append(RetrievedItem(source="cast_debut", ref=eid,
-                                           text=f"[신규 등장 인물 — 이번 화 첫 도입. 첫 등장 시 정체·관계를 알 수 있는 "
-                                                f"소개 앵커 1문장 의무, 기지 인물처럼 다루지 마라] {e.name}: {e.profile[:300]}"))
+                                           text=f"[신규 등장 인물 — 이번 화 첫 도입. 첫 등장 시 정체·관계를 독자가 알 수 있도록 "
+                                                f"소개 앵커 1문장을 두어 새 인물로 자리잡게 하라] {e.name}: {e.profile[:300]}"))
                             sess.bus.emit("cast_plan", "debut", chapter=next_ch, entity=e.name)
                     story_so_far, dropped = _build_story_so_far_hier(state, next_ch, self.settings.story_so_far_chars)
                 else:                      # 평면 모드(하위호환)

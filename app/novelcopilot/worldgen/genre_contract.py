@@ -16,7 +16,7 @@ def infer_genre_contract(provider, world) -> GenreContract | None:
         r = provider.chat_json(
             [{"role": "system", "content":
               "너는 한국 웹소설 편집자다. 아래 작품의 '장르 정체성'을 뽑아라(서술 정보 — 규칙 강제 아님). JSON: "
-              '{"pleasure_engine":"이 장르 독자가 결제하는 핵심 쾌감 한 줄",'
+              '{"pleasure_engine":"이 작품이 독자에게 주려는 핵심 만족·재미를 한 줄로(전제·톤에서 도출)",'
               '"reader_expectations":["독자 기대 3~5개"],'
               '"vocabulary_tone":"이 장르다운 어휘·톤 한 줄",'
               '"premise_asset":"이 작품의 핵심 동력 전제와 그 역할(장기 자산이면 그렇게)"}'},
