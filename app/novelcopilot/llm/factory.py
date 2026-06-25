@@ -19,6 +19,20 @@ def create_provider(settings: Settings) -> LLMProvider:
     return _REGISTRY[name](settings)
 
 
+def create_role_provider(settings: Settings, model_spec: str) -> LLMProvider:
+    """역할별 provider(B-22b 라우팅). model_spec='gpt-5.2'(settings.llm_provider 사용) 또는
+    'anthropic:claude-opus-4-8'(provider 명시). 빈값이면 기본 provider. 빌드 실패(키 없음 등)면
+    기본 provider 로 안전 폴백 — 라우팅이 하드브레이크를 내지 않게(다른 env 호환)."""
+    spec = (model_spec or "").strip()
+    if not spec:
+        return create_provider(settings)
+    prov, model = spec.split(":", 1) if ":" in spec else (settings.llm_provider, spec)
+    try:
+        return create_provider(settings.model_copy(update={"llm_provider": prov, "gen_model": model}))
+    except Exception:
+        return create_provider(settings)   # 키 부재/미등록 → 기본으로 폴백
+
+
 def _build_openai(settings: Settings) -> LLMProvider:
     from .openai_provider import OpenAIProvider
     return OpenAIProvider(gen_model=settings.gen_model, embed_model=settings.embed_model)

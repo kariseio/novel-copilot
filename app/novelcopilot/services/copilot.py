@@ -19,7 +19,7 @@ from ..domain.types import (AuthorDirective, ChapterStatus, WikiPage, RelationEd
                             RuleSpec, SignalGrade, ChapterRevision, Violation)
 from ..domain.bible import StoryBible, BibleEntry, CATEGORY_LABEL, template_for, normalize_category
 from ..llm.base import LLMProvider
-from ..llm.factory import create_provider
+from ..llm.factory import create_provider, create_role_provider
 from ..repository.base import ProjectRepository
 from ..worldgen import WorldGenerator, BeatPlanner, ArcPlanner, BibleGenerator, WorldgenChat, ConceptChat
 from ..engine.drift import episode_drift_signals
@@ -190,8 +190,9 @@ class CopilotService:
 
     @property
     def wg_provider(self) -> LLMProvider:
+        # B-22b 라우팅: worldgen·아크/에피/비트 설계(추론·구조) — gpt-5.2-chat(프로즈챔피언)이 *최약*이라 structure_model 로 분리.
         if self._wg_provider is None:
-            self._wg_provider = create_provider(self.settings)
+            self._wg_provider = create_role_provider(self.settings, self.settings.structure_model)
         return self._wg_provider
 
     # ---- 컨셉 드래프트(대화로 빚는 세계관) ----
@@ -895,7 +896,7 @@ class CopilotService:
                     # B: 커서/spine 변이를 트랜잭션으로 — FINALIZED 아니면 롤백(재시도 결정성·orphan/조기 arc.done 방지)
                     prog_snap = state.narrative_progress.model_copy(deep=True)
                     spine_snap = spine.model_copy(deep=True)
-                    planner = ArcPlanner(sess.provider)
+                    planner = ArcPlanner(self.wg_provider)   # B-22b: 설계=structure_model(추론) 라우팅
                     ep = planner.current_episode(state.world, state.narrative_progress, summaries,
                                                  remaining=max(2, (state.seed.target_chapters or 12) - next_ch + 1))
                     for _e in state.world.entities:   # 캐스트 플랜 레이어 동기화 — lazy 아크 설계가 낳은 인물(등장 전 설계)
@@ -1014,7 +1015,7 @@ class CopilotService:
                             sess.bus.emit("cast_plan", "debut", chapter=next_ch, entity=e.name)
                     story_so_far, dropped = _build_story_so_far_hier(state, next_ch, self.settings.story_so_far_chars)
                 else:                      # 평면 모드(하위호환)
-                    beat = BeatPlanner(sess.provider).beat_for(
+                    beat = BeatPlanner(self.wg_provider).beat_for(   # B-22b: 비트 설계=structure_model(추론) 라우팅
                         state.world, next_ch, summaries, [d.text for d in active])
                     anchors, bible_dropped = bible_digest(state.bible, self.settings.bible_digest_chars,
                                                           f"{beat.title} {beat.summary}")
