@@ -31,7 +31,18 @@ class GeminiProvider(LLMProvider):
                 um = getattr(r, "usage_metadata", None)
                 if um:
                     self.usage.chat_tokens += int(getattr(um, "total_token_count", 0) or 0)
-                return (r.text or "")
+                try:
+                    txt = r.text or ""
+                except Exception:
+                    txt = ""
+                if not txt:   # thinking 모델이 text part 안 냈을 때 candidates 에서 직접 추출
+                    for c in (getattr(r, "candidates", None) or []):
+                        cont = getattr(c, "content", None)
+                        for p in (getattr(cont, "parts", None) or []):
+                            t = getattr(p, "text", None)
+                            if t:
+                                txt += t
+                return txt
             except Exception as e:
                 last = e
                 time.sleep(2 * (attempt + 1))
