@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOVEL_", env_file=".env", extra="ignore")
 
     llm_provider: str = "openai"
-    gen_model: str = "gpt-5.3-chat-latest"   # 프로즈/핫패스/기본. 최신 chat(빠름) — gpt-5.5(추론)는 회차마다 느려 부적합
+    gen_model: str = "gpt-5.5"   # 프로즈/핫패스/기본(사용자 선호: 품질 우위, 느림 감수). 본문은 spine 따라 써서 5.5 배틀prior 무관
     # 역할 라우팅(B-22b) — "provider:model" cross-vendor, 빈값→gen_model, 키없으면 안전폴백(create_role_provider).
     worldgen_model: str = "anthropic:claude-opus-4-8"   # worldgen·bible(창의·구조): A/B 1위 claude(장르 충실)
     planning_model: str = "anthropic:claude-opus-4-8"   # 아크·에피·비트 설계: gpt-5.5는 장르 무시(회귀/시스템 mode-collapse) 입증 → claude로(장르 충실)
