@@ -216,8 +216,10 @@ class ChapterGenerator:
         gt = "\n".join(f"- {f.entity}: {f.attr_label}={f.value}" for f in board.ground_truth)
         out = self.provider.chat(
             [{"role": "system", "content":
-              "교정 작가. 지적된 설정 위반만 고치고 문체·줄바꿈·분량은 보존. 확정 설정·세계규칙이 비트보다 우선. "
-              "'제거 상태'(사망·소멸 등) 인물의 현재 행동은 회상/환영/삭제로, 속성·관계는 캐논값으로 교정. 본문만.\n"
+              "교정 작가. **출력은 정정된 '소설 본문 전문' 그것 하나뿐이다 — 첫 글자부터 소설 산문으로 시작하고, "
+              "위반 분석·점검·판단·설명·머리말·체크리스트·메모를 절대 붙이지 마라(그런 사고 과정은 머릿속에서만).** "
+              "지적된 설정 위반만 고치고 문체·줄바꿈·분량은 보존. 확정 설정·세계규칙이 비트보다 우선. "
+              "'제거 상태'(사망·소멸 등) 인물의 현재 행동은 회상/환영/삭제로, 속성·관계는 캐논값으로 교정.\n"
               + self.floor_block},   # B-10: 미학 오버레이(작가 문체) 주입 제거 — 최소 교정이 재문체화로 번지는 것 차단
              {"role": "user", "content": f"[확정 설정]\n{gt}\n[설정 위반]\n{vlist}\n[원본 본문]\n{scene_text}"}],
             temperature=0.4, max_tokens=max_tokens or self.settings.gen_max_tokens)
