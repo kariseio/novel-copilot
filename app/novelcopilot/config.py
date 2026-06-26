@@ -16,11 +16,11 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="NOVEL_", env_file=".env", extra="ignore")
 
-    llm_provider: str = "openai"
-    gen_model: str = "gpt-5.5"   # 프로즈/핫패스/기본(사용자 선호: 품질 우위, 느림 감수). 본문은 spine 따라 써서 5.5 배틀prior 무관
+    llm_provider: str = "anthropic"   # 기본=Anthropic(집필/핫패스). 임베딩은 OpenAI 위임(create_role_provider/_openai_embed)
+    gen_model: str = "claude-opus-4-6"   # 집필(프로즈)/핫패스. 사용자 결정(2026-06): opus-4.8과 동급 품질·동일단가($5/$25)지만 토크나이저 인플레(+0~35%) 없어 4.6이 가성비 / gpt-5.5의 udar·타임아웃 해소
     # 역할 라우팅(B-22b) — "provider:model" cross-vendor, 빈값→gen_model, 키없으면 안전폴백(create_role_provider).
-    worldgen_model: str = "anthropic:claude-opus-4-8"   # worldgen·bible(창의·구조): A/B 1위 claude(장르 충실)
-    planning_model: str = "anthropic:claude-opus-4-8"   # 아크·에피·비트 설계: gpt-5.5는 장르 무시(회귀/시스템 mode-collapse) 입증 → claude로(장르 충실)
+    worldgen_model: str = "anthropic:claude-opus-4-8"   # 세계관·bible: 최신 4.8(사용자 결정 — 세계관은 4.8)
+    planning_model: str = "anthropic:claude-opus-4-8"   # 아크·에피·비트 설계: 4.8(세계관 설계 측이라 동일). gpt-5.5는 장르 mode-collapse라 claude 필수
     embed_model: str = "text-embedding-3-small"
 
     # 컨텍스트 예산 — '기아 해소' 재배분(docs/context-redesign.md): 입력 ~40k토큰 목표, 헤드룸 60% 유지.
