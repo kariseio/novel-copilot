@@ -9,6 +9,7 @@ from .types import AuthorDirective, WikiPage, ChapterRecord, RelationEdge
 from .narrative import NarrativeProgress
 from .ledger import PromiseLedger
 from .bible import StoryBible
+from .skill import Skill
 
 
 class ProjectSeed(BaseModel):
@@ -45,6 +46,9 @@ class ProjectState(BaseModel):
     bible_migrated: bool = False                            # 기존 프로젝트 1회 부트스트랩 완료 표식
     worldgen_chat: list[dict] = Field(default_factory=list)  # R3 월드빌딩 대화 로그 [{role,text}]
     usage_total: dict = Field(default_factory=dict)   # 누적 LLM 사용량(비용 계측)
+    skills: list[Skill] = Field(default_factory=list)   # (레거시) 인라인 스킬 — 전역 라이브러리로 1회 이관 후 비활성(skills_migrated)
+    injected_skills: list[str] = Field(default_factory=list)   # 전역 라이브러리에서 이 작품에 *주입한* 스킬 id(순서=합성 우선순위; 참조형 live SSOT)
+    skills_migrated: bool = False                              # 인라인 skills→전역 라이브러리 1회 이관 완료 표식
 
     # 동적으로 누적되는 SSOT 변경분(시드 world 와 분리 보관 → 출처 추적)
     runtime_entities: list[EntitySpec] = Field(default_factory=list)   # 신규 커밋 인물(동적/작가)

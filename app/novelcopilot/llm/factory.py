@@ -45,7 +45,8 @@ def _openai_embed(settings: Settings) -> LLMProvider:
 
 def _build_anthropic(settings: Settings) -> LLMProvider:
     from .anthropic_provider import AnthropicProvider
-    return AnthropicProvider(gen_model=settings.gen_model, embed_provider=_openai_embed(settings))
+    return AnthropicProvider(gen_model=settings.gen_model, embed_provider=_openai_embed(settings),
+                             max_output_cap=settings.max_output_cap)
 
 
 def _build_gemini(settings: Settings) -> LLMProvider:

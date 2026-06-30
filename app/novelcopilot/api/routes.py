@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import StreamingResponse, JSONResponse, Response
 
 from ..domain.project import ProjectSeed
+from ..engine.textfmt import md_to_plain, collapse_dashes
 from .schemas import (CreateProjectRequest, DirectiveRequest, EntityRequest,
                       RelationRequest, EndRelationRequest, BibleEntryRequest, BibleUpdateRequest,
                       WorldgenTurnRequest, StylePolicyRequest,
@@ -55,15 +56,16 @@ def get_draft(did: str, request: Request):
 
 
 @router.get("/drafts/{did}/finalize")
-async def finalize_draft(did: str, request: Request, target_chapters: int = 0, genre: str = "", tone: str = "", keywords: str = ""):
+async def finalize_draft(did: str, request: Request, target_chapters: int = 0, genre: str = "", tone: str = "", keywords: str = "", world_skills: str = ""):
     """SSE: 누적 브리프로 세계 생성(세계관→이야기 구조→설정집) 실시간 진행.
-    작가가 컨트롤로 정한 파라미터(target_chapters/genre/tone/keywords)를 최종 반영."""
+    작가가 컨트롤로 정한 파라미터(target_chapters/genre/tone/keywords)와 세계관 스킬(world_skills)을 최종 반영."""
     from ..engine.observability import EventBus
     svc = _svc(request)
     if not svc.get_draft(did):
         raise HTTPException(404, "draft not found")
     params = {k: v for k, v in {"target_chapters": target_chapters, "genre": genre, "tone": tone}.items() if v}
     params["keywords"] = [k.strip() for k in keywords.split("|") if k.strip()]   # 트로프 칩(B1: finalize 채널 — 빈 리스트면 _merge_locks 가 잠금 해제)
+    params["world_skills"] = [s.strip() for s in world_skills.split("|") if s.strip()]   # 라이브러리에서 고른 세계관 스킬 id(잠금 아님)
     loop = asyncio.get_event_loop()
     q: "queue.Queue" = queue.Queue()
     bus = EventBus()
@@ -265,6 +267,108 @@ def update_style(pid: str, req: StylePolicyRequest, request: Request):
     return res
 
 
+# ---- 스킬(파이프라인 지점에 꽂는 토글 증강) ----
+@router.get("/projects/{pid}/skills")
+def list_skills(pid: str, request: Request):
+    res = _svc(request).list_skills(pid)
+    if res is None:
+        raise HTTPException(404, "project not found")
+    return res
+
+
+@router.put("/projects/{pid}/skills/{sid}")
+def toggle_skill(pid: str, sid: str, body: dict, request: Request):
+    try:
+        res = _svc(request).set_skill_enabled(pid, sid, bool(body.get("enabled")))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res is None:
+        raise HTTPException(404, "project not found")
+    if res is False:
+        raise HTTPException(423, "회차 생성 중입니다 — 잠시 후 다시 시도하세요")
+    return res
+
+
+@router.post("/projects/{pid}/skills")
+def add_skill(pid: str, body: dict, request: Request):
+    try:
+        res = _svc(request).create_skill(pid, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res is None:
+        raise HTTPException(404, "project not found")
+    if res is False:
+        raise HTTPException(423, "회차 생성 중입니다")
+    return res
+
+
+@router.delete("/projects/{pid}/skills/{sid}")
+def remove_skill(pid: str, sid: str, request: Request):
+    try:
+        res = _svc(request).delete_skill(pid, sid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res is None:
+        raise HTTPException(404, "project not found")
+    if res is False:
+        raise HTTPException(423, "회차 생성 중입니다")
+    return res
+
+
+# ---- 작품에 주입/해제(체크박스 대신 '주입' — injected_skills membership) ----
+@router.post("/projects/{pid}/skills/{sid}/inject")
+def inject_skill(pid: str, sid: str, request: Request):
+    try:
+        res = _svc(request).inject_skill(pid, sid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    if res is None:
+        raise HTTPException(404, "project not found")
+    if res is False:
+        raise HTTPException(423, "회차 생성 중입니다 — 잠시 후 다시 시도하세요")
+    return res
+
+
+@router.delete("/projects/{pid}/skills/{sid}/inject")
+def eject_skill(pid: str, sid: str, request: Request):
+    res = _svc(request).eject_skill(pid, sid)
+    if res is None:
+        raise HTTPException(404, "project not found")
+    if res is False:
+        raise HTTPException(423, "회차 생성 중입니다 — 잠시 후 다시 시도하세요")
+    return res
+
+
+# ---- 전역 스킬 라이브러리(메인 화면 — 작품 간 공유 카탈로그) ----
+@router.get("/skills")
+def library_skills(request: Request):
+    return _svc(request).library_list()
+
+
+@router.post("/skills")
+def library_add(body: dict, request: Request):
+    try:
+        return _svc(request).library_create(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.put("/skills/{sid}")
+def library_edit(sid: str, body: dict, request: Request):
+    try:
+        return _svc(request).library_update(sid, body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/skills/{sid}")
+def library_remove(sid: str, request: Request):
+    try:
+        return _svc(request).library_delete(sid)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
 @router.get("/projects/{pid}/spine")
 def get_spine(pid: str, request: Request):
     snap = _svc(request).spine_snapshot(pid)
@@ -401,7 +505,7 @@ def export_project(pid: str, request: Request, fmt: str = "txt"):
         if state.world.premise:
             parts += [f"> {state.world.premise}", ""]
         for c in chs:
-            parts += [f"## {c.chapter}화 · {c.title or ''}".rstrip(" ·"), "", c.text.strip(), ""]
+            parts += [f"## {c.chapter}화 · {c.title or ''}".rstrip(" ·"), "", collapse_dashes(c.text).strip(), ""]   # .md 는 마크다운 유효 — 줄표 런만 정규화
         body, ext, mime = "\n".join(parts), "md", "text/markdown"
     else:   # txt
         parts = [title, "=" * max(4, len(title) * 2)]
@@ -409,57 +513,73 @@ def export_project(pid: str, request: Request, fmt: str = "txt"):
             parts += ["", state.world.premise]
         for c in chs:
             head = f"{c.chapter}화 · {c.title or ''}".rstrip(" ·")
-            parts += ["", "", head, "-" * 24, "", c.text.strip()]
+            parts += ["", "", head, "-" * 24, "", md_to_plain(c.text).strip()]   # .txt 경계: 마크다운→평문(&nbsp;·#·**·--- 누수 차단)
         body, ext, mime = "\n".join(parts), "txt", "text/plain"
     fname = quote(f"{title}.{ext}")
     return Response(content=body, media_type=f"{mime}; charset=utf-8",
                     headers={"Content-Disposition": f"attachment; filename=\"export.{ext}\"; filename*=UTF-8''{fname}"})
 
 
+def _stream_job(job, note: str | None = None) -> StreamingResponse:
+    """진행 중(또는 갓 끝난) 생성 잡을 SSE 로 — 버퍼를 처음부터 리플레이(재접속 복원)한 뒤
+    라이브 테일하고, 종료 시 complete/failed 를 보낸다. 클라이언트 연결이 끊겨도(아래 stream 취소)
+    생성 스레드는 잡에서 계속 돈다 — 다음 접속이 같은 잡에 다시 붙는다.
+    note: 기존 진행 잡에 '합류'한 경우(이번 directive 미반영) 작가에게 알릴 한 줄."""
+    async def gen():
+        yield _sse("start", {"chapter": job.chapter, **({"note": note} if note else {})})
+        cursor = 0
+        while True:
+            new, status, result, error = job.snapshot_from(cursor)
+            cursor += len(new)
+            for e in new:
+                yield _sse("event", e)
+            if status == "running":
+                await asyncio.sleep(0.12)
+                continue
+            # 종료: snapshot 에서 status 가 종료면 잔여 이벤트는 위에서 모두 흘렸다(생산자는 unsub 후 종료 설정).
+            if status == "done":
+                yield _sse("complete", result or {})
+            else:
+                yield _sse("failed", error or {"message": "생성에 실패했습니다"})
+            break
+    return StreamingResponse(gen(), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
 @router.get("/projects/{pid}/generate")
 async def generate_chapter(pid: str, request: Request, directive: str = ""):
-    """SSE: 하네스 루프 이벤트를 실시간 방출하고, 마지막에 회차 결과를 보낸다."""
-    svc = _svc(request)
-    sess, state = svc.get_session(pid)
-    if not sess:
+    """SSE: 회차 생성을 백그라운드 잡으로 '시작 또는 재접속'(멱등)하고 진행을 스트리밍.
+    이미 진행 중이면 새로 만들지 않고 그 잡에 붙는다(중복 회차 방지). 연결이 끊겨도 생성은 계속된다."""
+    res = _svc(request).start_generation(pid, directive or None)
+    if res is None:
         raise HTTPException(404, "project not found")
+    job, created = res
+    note = None
+    req_dir = (directive or "").strip()
+    if not created and req_dir and req_dir != job.directive:   # 다른 탭이 이미 진행 중 — 이번 지시는 묻힌다(정직하게 통지)
+        note = "이미 진행 중인 생성에 합류했어요 — 입력하신 지시는 이번 회차엔 반영되지 않아요(다음 회차에 다시 적어 주세요)."
+    return _stream_job(job, note)
 
-    loop = asyncio.get_event_loop()
-    q: "queue.Queue" = queue.Queue()
-    unsub = sess.bus.subscribe(lambda e: q.put(("event", e)))
 
-    def work():
-        try:
-            result = svc.generate_next_chapter(pid, directive or None)
-            if result.get("completed"):          # R4: 엔딩 도달/하드캡 → 완결(회차 미생성)
-                q.put(("complete", {"completed": True, "reason": result.get("reason"),
-                                    "current_chapter": result.get("current_chapter"),
-                                    "total_beats": result.get("total_beats")}))
-            else:
-                q.put(("complete", {"record": result["record"].model_dump(),
-                                    "usage_delta": result["usage_delta"], "usage_total": result["usage_total"],
-                                    "failures": result["failures"], "current_chapter": result["current_chapter"],
-                                    "total_beats": result["total_beats"], "completed": False}))
-        except Exception as e:  # noqa
-            q.put(("failed", {"message": str(e)}))
+@router.get("/projects/{pid}/generation")
+def generation_status(pid: str, request: Request):
+    """페이지 로드/폴링 — 진행 중 생성 유무(+끝났으면 결과). status: idle|running|done|failed."""
+    return _svc(request).generation_status(pid)
 
-    async def stream():
-        fut = loop.run_in_executor(None, work)
-        try:
-            yield _sse("start", {"chapter": state.current_chapter + 1})
-            while True:
-                try:
-                    kind, data = q.get_nowait()
-                except queue.Empty:
-                    if fut.done() and q.empty():
-                        break
-                    await asyncio.sleep(0.12)
-                    continue
-                yield _sse(kind, data)
-                if kind in ("complete", "failed"):
-                    break
-        finally:
-            unsub()
 
-    return StreamingResponse(stream(), media_type="text/event-stream",
+@router.get("/projects/{pid}/generation/stream")
+async def generation_stream(pid: str, request: Request):
+    """진행 중 잡에만 '재접속'(시작 안 함) — 새로고침 복원 전용. 잡이 없으면 즉시 종료 이벤트로 닫는다."""
+    job = _svc(request).get_generation_job(pid)
+    if job is not None and job.status == "running":
+        return _stream_job(job)
+
+    async def once():
+        if job is not None and job.status == "done":
+            yield _sse("complete", job.result or {})
+        elif job is not None and job.status == "failed":
+            yield _sse("failed", job.error or {"message": "생성에 실패했습니다"})
+        else:
+            yield _sse("idle", {})
+    return StreamingResponse(once(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

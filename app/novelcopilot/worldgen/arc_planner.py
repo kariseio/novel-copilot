@@ -11,6 +11,7 @@ import json
 import re as _re
 
 from ..domain.world import WorldConfig, Beat, EntitySpec
+from ..domain.types import TimeDelta
 from ..domain.narrative import NarrativeSpine, Arc, Episode, EndingSpec, NarrativeProgress
 from ..llm.base import LLMProvider
 
@@ -372,7 +373,11 @@ class ArcPlanner:
                "끝으로 설계한 이 회차를 자기 기술하라(내용을 바꾸지 말고 있는 그대로 짧은 라벨만 — 분석용 메타데이터라 한 단어로) — "
                "chapter_function(독자에게 주는 것: payoff/setup/escalation/relation/respite 중 하나), "
                "hook_type(회차말 끊는 방식 한 단어: action/reveal/emotion/decision/threat/question/twist/cliffhanger 중 가장 가까운 것), "
-               "time_advance(직전 화 대비 시간 경과 짧게: 예 '없음'/'몇 분'/'다음날'/'사흘 후'), place(주요 장소 짧게). "
+               "time_advance(직전 화 대비 시간 경과 짧게: 예 '없음'/'몇 분'/'다음날'/'사흘 후'), "
+               "time_delta(같은 경과를 구조화 — amount(숫자)·unit(minute|hour|day|week|month|year)·mode(보통 advance, "
+               "이 회차가 과거 회상이면 flashback, 같은 시각 다른 장소면 parallel). 예 '사흘 후'→{\"amount\":3,\"unit\":\"day\",\"mode\":\"advance\"}, "
+               "'없음'→{\"amount\":0,\"unit\":\"minute\",\"mode\":\"advance\"}, '몇 시간 뒤'→{\"amount\":3,\"unit\":\"hour\",\"mode\":\"advance\"}), "
+               "place(주요 장소 짧게). "
                "title 은 회차 제목만(시리즈명·화수 붙이지 마라). JSON만.")
         # plant_notes 는 시스템 '참고' 정보 — 작가 지시(authority)와 분리된 슬롯(시스템 개입의 지시 위장 금지, 모드 계약 §1)
         notes_block = f"\n[미회수 복선 — 참고용]{plant_notes}" if plant_notes else ""
@@ -393,7 +398,8 @@ class ArcPlanner:
                f"\n[작가 지시]{json.dumps(directives, ensure_ascii=False)}{notes_block}\n"
                f"[회차]{chapter} (에피소드 내 finale={is_finale})\n"
                '{"title":"","summary":"","key_events":["구체 사건1","구체 사건2","구체 사건3","(분량 채울 만큼 더)"],"entities":["인물 id"],'
-               '"chapter_function":"","hook_type":"","time_advance":"","place":""}')
+               '"chapter_function":"","hook_type":"","time_advance":"",'
+               '"time_delta":{"amount":0,"unit":"minute","mode":"advance"},"place":""}')
         try:
             d = self.provider.chat_json([{"role": "system", "content": sys},
                                          {"role": "user", "content": usr}], temperature=0.5)
@@ -405,6 +411,7 @@ class ArcPlanner:
                         chapter_function=(d.get("chapter_function") or "").strip(),
                         hook_type=(d.get("hook_type") or "").strip(),
                         time_advance=(d.get("time_advance") or "").strip(),
+                        time_delta=TimeDelta.parse(d.get("time_delta")),
                         place=(d.get("place") or "").strip())
         except Exception:
             # T1+T3 폴백: 필수 사건을 앞에 두고 적시 메뉴로 보강(빈약 회차 방지) → dedup·cap 8.

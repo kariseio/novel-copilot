@@ -39,6 +39,7 @@ class OpenAIProvider(LLMProvider):
                 self.usage.chat_calls += 1
                 if r.usage:
                     self.usage.chat_tokens += r.usage.total_tokens
+                self.last_truncated = (getattr(r.choices[0], "finish_reason", None) == "length")   # 절단 신호(harness 재생성용)
                 return r.choices[0].message.content or ""   # None(거부/빈응답) → "" (json.loads(None) TypeError 방지)
             except Exception as e:
                 last = e

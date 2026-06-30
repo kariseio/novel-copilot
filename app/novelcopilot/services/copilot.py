@@ -23,8 +23,10 @@ from ..llm.factory import create_provider, create_role_provider
 from ..repository.base import ProjectRepository
 from ..worldgen import WorldGenerator, BeatPlanner, ArcPlanner, BibleGenerator, WorldgenChat, ConceptChat
 from ..engine.drift import episode_drift_signals
+from ..engine.skills import apply_skills, SKILL_COMPOSE_CAP
 from ..engine.bible_compiler import bible_digest, entry_to_world_rule, migrate_world_to_bible
 from .session import SessionManager
+from .jobs import GenerationJobManager, GenerationJob
 
 
 def _usage_delta(before: dict, after: dict) -> dict:
@@ -35,6 +37,21 @@ def _accumulate(total: dict, delta: dict) -> dict:
     out = dict(total)
     for k, v in delta.items():
         out[k] = out.get(k, 0) + v
+    return out
+
+
+def _dedup_timeline(entries: list) -> list:
+    """영속 runtime_timeline 을 (entity_id,attr,eff_from,trust_tier) 키로 last-writer-wins 정리.
+    재생성/작가오버라이드가 같은 시점에 다른 값을 *누적*해 ssot_ambiguous 영구 봉인을 만들던 결함 차단
+    (ontology.set_state 의 in-memory dedup 과 짝 — 영속 파일도 한 시점 한 값으로). 순서(최근=뒤) 보존."""
+    seen, out = {}, []
+    for e in entries:
+        key = (e.entity_id, e.attr, e.eff_from, getattr(e, "trust_tier", "ground_truth"))
+        if key in seen:
+            out[seen[key]] = e          # 같은 키 → 최신으로 교체(자리 유지)
+        else:
+            seen[key] = len(out)
+            out.append(e)
     return out
 
 
@@ -175,10 +192,18 @@ def _slug(name: str, existing: set[str]) -> str:
 
 
 class CopilotService:
-    def __init__(self, settings: Settings, repo: ProjectRepository):
+    def __init__(self, settings: Settings, repo: ProjectRepository, registry=None):
         self.settings = settings
         self.repo = repo
+        # 앱-전역 스킬 라이브러리(작품 간 공유 카탈로그). 미주입 시(테스트·직접 생성) 기본 구현 지연 생성.
+        if registry is None:
+            from ..repository import FilesystemSkillRegistry
+            registry = FilesystemSkillRegistry(settings.resolved_data_dir())
+        self.registry = registry
         self.sessions = SessionManager(settings)
+        # 회차 생성 잡 — 요청(SSE) 수명과 생성 수명 분리: 연결이 끊겨도 백그라운드로 끝까지 진행,
+        # 새로고침/재접속 시 진행 중 잡에 다시 붙는다(멱등 시작 → 중복 회차 방지).
+        self.gen_jobs = GenerationJobManager(getattr(settings, "gen_job_retain_sec", 1800))
         self._wg_provider: LLMProvider | None = None
         self._esc: dict = {}          # (pid,chapter)→연속 ESCALATED 횟수(무한 갇힘 경보용, 휘발)
         self._drafts: dict = {}       # 생성 전 컨셉 드래프트(휘발 — finalize 시 ProjectState 로 승격)
@@ -332,32 +357,42 @@ class CopilotService:
                 raise ValueError("already finalizing")
             self._finalizing.add(did)
         try:
+            world_skill_ids = list((params or {}).get("world_skills") or [])   # 라이브러리에서 고른 세계관 스킬(잠금 아님 — 별도 전달)
             d.locks = self._merge_locks(d.locks, params)
             self._apply_locks(d.brief, d.locks)
-            state, delta = self.create_project(self._brief_to_seed(d.brief), bus=bus, brief=d.brief)
+            state, delta = self.create_project(self._brief_to_seed(d.brief), bus=bus, brief=d.brief,
+                                               world_skill_ids=world_skill_ids)
             self._drafts.pop(did, None)
             return state, delta
         finally:
             self._finalizing.discard(did)
 
     # ---- 프로젝트 ----
-    def create_project(self, seed: ProjectSeed, bus=None, brief=None) -> tuple[ProjectState, dict]:
+    def create_project(self, seed: ProjectSeed, bus=None, brief=None, world_skill_ids=None) -> tuple[ProjectState, dict]:
         # bus: 선택적 EventBus(SSE). brief: 선택적 ConceptBrief — 첫 설계(build_spine)에 대화 핵심을 충실 주입(컨텍스트 보강).
+        # world_skill_ids: 작가가 라이브러리에서 *이 세계 생성에* 적용하기로 고른 worldgen 스킬 id(참조형 — 생성 시점 해소·주입).
         def _emit(ev, **kw):
             if bus is not None:
                 bus.emit("worldgen", ev, **kw)
         seed.target_chapters = max(1, min(200, int(seed.target_chapters or 12)))   # 방어 클램프(API 외 직접호출 보호)
+        world_skill_ids = list(world_skill_ids or [])
+        _wskills = [s.model_copy(update={"enabled": True}) for s in self.registry.resolve(world_skill_ids)]
+        _weff = apply_skills(_wskills, "worldgen")     # 상한(SKILL_COMPOSE_CAP) 적용된 *실제 반영분*
+        _wg_inject = _weff.prompt_inject               # 어댑터로 주입된 세계관 스킬(결·접근)
+        _applied_wids = [s.id for s in _wskills if s.point == "worldgen"][:SKILL_COMPOSE_CAP]   # 실제 적용된 id만(상한 초과분 제외)
+        if _wg_inject:
+            _emit("world_skills", applied=_weff.applied)   # 캡 적용된 이름만 보고(초과분을 '적용됨'으로 거짓보고 금지)
         before = self.wg_provider.usage.as_dict()
         _emit("world_start")
         _gen = WorldGenerator(self.wg_provider)
         # 풍부함(검증됨, A/B ON 5:0): worldgen 전 '집착 벡터'를 먼저 추출해 세계를 균등 슬롯이 아니라 하나의 집착에서 편중 파생.
-        _obs = _gen.obsession(seed) if getattr(self.settings, "world_obsession", True) else {}
+        _obs = _gen.obsession(seed, skills_inject=_wg_inject) if getattr(self.settings, "world_obsession", True) else {}
         if _obs.get("obsession_vector"):
             _emit("obsession", vector=_obs["obsession_vector"], lens=_obs.get("sensory_lens", []))
-        world = _gen.generate(seed, obs=(_obs or None))
+        world = _gen.generate(seed, obs=(_obs or None), skills_inject=_wg_inject, brief=brief)   # 브리프 명명 인물 바인딩(이름 발명 방지)
         world.obsession_vector = _obs.get("obsession_vector", "")
         if getattr(self.settings, "world_weird", True):   # 풍부함③(A/B 검증 +2.6): 진부한 디폴트를 집착에 맞게 구체·비자명하게 비틈
-            world = _gen.weird(world, _obs or None)
+            world = _gen.weird(world, _obs or None, skills_inject=_wg_inject)
             _emit("world_weird")
         if not seed.title:
             seed.title = world.title
@@ -385,7 +420,9 @@ class CopilotService:
         _emit("saving")
         pid = uuid.uuid4().hex[:12]
         state = ProjectState(id=pid, seed=seed, world=world, bible=bible,
-                             created_at=time.strftime("%Y-%m-%dT%H:%M:%S"))
+                             created_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+                             injected_skills=_applied_wids,   # 생성에 *실제 반영된* worldgen 스킬만 기록(상한 초과분 제외 — 정직한 동결)
+                             skills_migrated=True)              # 신규 작품은 인라인 레거시 없음 → 이관 불필요
         sess = self.sessions.get_or_create(state)
         sess.snapshot_into(state)            # 시드 위키 등 초기 메모리 영속
         delta = _usage_delta(before, self.wg_provider.usage.as_dict())
@@ -546,7 +583,8 @@ class CopilotService:
         #     sess.lock 을 보유하지 않으므로 동시에 'generate_next_chapter' 가 진행 가능.
         before_res = checker.check_text(before_text, ont, chapter_no, ids)   # before 1회 계산(캐시)
         after_text = generator.revise_prose(
-            directive, before_text, span_text, passes, ids, ont, chapter_no)
+            directive, before_text, span_text, passes, ids, ont, chapter_no,
+            skills_inject=apply_skills(self._effective_skills(state), "revise").prompt_inject)   # 라이브러리에서 주입된 퇴고 스킬
         guardrail, _after_res = self._guardrail(before_text, after_text, before_res,
                                                 ids, ont, checker, chapter_no)
         # ── (2.5) 무변경 감지(이슈: revise_prose 가 LLM 실패·길이가드·빈 살균 시 before_text 그대로 폴백).
@@ -844,6 +882,50 @@ class CopilotService:
             return None, None
         return self.sessions.get_or_create(state), state
 
+    # ---- 회차 생성 잡(연결 끊겨도 백그라운드 진행 · 재접속 리플레이) ----
+    def start_generation(self, pid: str, directive_text: str | None = None) -> tuple[GenerationJob, bool] | None:
+        """진행 중 잡이 있으면 그대로 반환(멱등 — 새로고침/중복요청이 회차를 두 번 만들지 않음).
+        없으면 새 잡을 띄워 백그라운드 데몬 스레드에서 generate_next_chapter 를 끝까지 수행한다.
+        반환=(job, created) — created=False 면 기존 진행 잡에 '합류'(이번 요청의 directive 는 반영 안 됨)."""
+        sess, state = self.get_session(pid)
+        if not sess:
+            return None
+        chapter = state.current_chapter + 1
+        directive = (directive_text or "").strip()
+
+        def runner(job: GenerationJob) -> None:
+            unsub = sess.bus.subscribe(lambda e: job.append_event(e))   # 하네스 이벤트 → 잡 버퍼(리플레이용)
+            try:
+                result = self.generate_next_chapter(pid, directive or None)
+            finally:
+                unsub()     # 종료 설정 '전에' 구독 해제 — 종료 후 늦은 이벤트가 끼어들 창 자체를 없앤다(불변식: status!=running ⇒ events 최종)
+            job.set_done(self._gen_payload(result))   # unsub 이후에만 종료 설정(예외 시 _thread_main 이 set_failed)
+
+        return self.gen_jobs.start_or_get(pid, chapter, directive, runner)
+
+    def get_generation_job(self, pid: str) -> GenerationJob | None:
+        return self.gen_jobs.get(pid)
+
+    def generation_status(self, pid: str) -> dict:
+        """페이지 로드/폴링용 — 진행 중인 생성이 있는지, 끝났으면 결과까지."""
+        job = self.gen_jobs.get(pid)
+        if job is None:
+            return {"status": "idle"}
+        return job.status_view()
+
+    @staticmethod
+    def _gen_payload(result: dict) -> dict:
+        """generate_next_chapter 결과 → SSE 'complete' 페이로드(기존 라우트와 동일 스키마)."""
+        if result.get("completed"):
+            return {"completed": True, "reason": result.get("reason"),
+                    "current_chapter": result.get("current_chapter"),
+                    "total_beats": result.get("total_beats")}
+        return {"completed": False, "record": result["record"].model_dump(),
+                "usage_delta": result["usage_delta"], "usage_total": result["usage_total"],
+                "failures": result["failures"], "current_chapter": result["current_chapter"],
+                "total_beats": result["total_beats"],
+                "events": result.get("events", [])}   # 아크완결 회고 nudge 등 onComplete 전용 배너용(스키마 보존)
+
     # ---- 회차 생성(핵심 유스케이스) ----
     def generate_next_chapter(self, pid: str, directive_text: str | None = None) -> dict:
         state = self.repo.get(pid)
@@ -1070,11 +1152,21 @@ class CopilotService:
                 if prior:   # 틱 모방-증폭 루프 차단(재설계): 직전 화 원문 주입이 말버릇을 '문체'로 학습시키는 고리를 명시 절제로 끊는다
                     restraint += [w for w, _ in _wt(prior[-1].text or "", roster_names, cap=3)]
                     restraint = list(dict.fromkeys(restraint))[:10]
+                chapter_eff = apply_skills(self._effective_skills(state), "chapter")   # 라이브러리에서 주입된 회차 스킬 해소·적용
+                # CN-1 스토리 시계: 이전 회차들의 구조화 델타 + 이번 비트 델타를 *코드*가 결정론 누적 → 절대시점(모델은 읽기만, 산수 0).
+                from ..engine.story_clock import story_time_for
+                _clock_deltas = [c.time_delta for c in sorted(prior, key=lambda c: c.chapter)
+                                 if c.status == ChapterStatus.FINALIZED] + [beat.time_delta]
+                story_time = story_time_for(_clock_deltas)
                 record = sess.bundle.generator.generate(
                     next_ch, beat.model_dump(), sess.bundle.ontology, sess.bundle.rag,
                     sess.bundle.wiki, directives=active, prev_chapter_text=prev_text,
                     story_so_far=story_so_far, anchors=anchors, closing=closing,
-                    recent_tails=recent_tails, restraint=restraint)
+                    recent_tails=recent_tails, restraint=restraint,
+                    skills_inject=chapter_eff.prompt_inject, story_time=story_time)
+                # 감사 스냅샷: 라이브러리(live SSOT) 후속 편집이 *과거* 회차를 되쓰지 않도록 이 회차에 실제 적용된 스킬을 동결.
+                if isinstance(record.gen_context, dict) and (chapter_eff.applied or chapter_eff.prompt_inject):
+                    record.gen_context["skills"] = {"applied": chapter_eff.applied, "inject": chapter_eff.prompt_inject}
 
                 # 디버그: 계획(설계) 입력을 회차 컨텍스트에 합침 — '어떤 정보로 설계·집필했는지' 추적
                 if spine and spine.arcs and isinstance(record.gen_context, dict):
@@ -1107,7 +1199,7 @@ class CopilotService:
                         proposal, sess.bundle.ontology, next_ch)
                     record.ontology_changes = changes
                     state.runtime_entities += new_specs
-                    state.runtime_timeline += new_tl
+                    state.runtime_timeline = _dedup_timeline(state.runtime_timeline + new_tl)   # 동시점 중복 누적 차단(재생성)
                     state.runtime_edges += new_edges          # 자동추출 관계(narrative_inferred) 영속
                     # 설정집 연재 증분: 회차에서 드러난 세계 설정 → 미승인 초안으로만 append(작가 promote 게이트 보존)
                     existing_titles = {b.title.strip() for b in state.bible.entries}
@@ -1552,12 +1644,145 @@ class CopilotService:
             ont.entities[entity_id].attrs.setdefault(attr, None)   # 주입집합=게이트집합
             ont.set_state(entity_id, attr, sval, eff, reason=reason, trust_tier="ground_truth")
             from ..domain.world import TimelineEntry
-            st.runtime_timeline.append(TimelineEntry(entity_id=entity_id, attr=attr, value=sval,
-                                                     eff_from=eff, reason=reason, trust_tier="ground_truth"))
+            st.runtime_timeline = _dedup_timeline(st.runtime_timeline + [TimelineEntry(
+                entity_id=entity_id, attr=attr, value=sval, eff_from=eff, reason=reason,
+                trust_tier="ground_truth")])   # 작가 정정이 같은 시점 충돌값을 *교체*(추가 아님) → ssot 봉인 복구 가능
             sess.snapshot_into(st)
             self.repo.save(st)
             return {"updated": True, "entity": ont.name(entity_id), "attr": attr,
                     "value": sval, "eff_from": eff}
+
+    # ==== 스킬 — 전역 라이브러리(메인 화면 등록) + 작품별 주입(참조형 live SSOT) ====
+    # 라이브러리(self.registry)에 정의가 살고, 작품은 ProjectState.injected_skills(id 목록)로 *주입*만 한다.
+    # 라이브러리 편집 → 주입한 모든 작품의 다음 회차부터 반영. 과거 회차는 gen_context['skills'] 에 동결(감사).
+
+    def _effective_skills(self, state) -> list:
+        """이 작품에 주입된 스킬을 라이브러리에서 해소 → enabled 사본 목록(끊긴 참조는 건너뜀).
+        미이관(legacy) 작품은 인라인 enabled 스킬도 폴백 포함 → 이관 전에도 주입이 누락되지 않음."""
+        out = [s.model_copy(update={"enabled": True})
+               for s in self.registry.resolve(getattr(state, "injected_skills", None) or [])]
+        if not getattr(state, "skills_migrated", False):
+            have = {s.id for s in out}
+            for s in (getattr(state, "skills", None) or []):
+                if getattr(s, "enabled", False) and s.id not in have:
+                    out.append(s)
+        return out
+
+    def _migrate_skills(self, st) -> bool:
+        """인라인 skills → 전역 라이브러리 1회 이관(멱등). 커스텀은 라이브러리로 승격, 내장은 이미 id로 존재.
+        enabled 였던 것은 injected_skills 로 보존(원래 순서 유지 → apply 의 [:CAP] 선택이 이관 전후 동일). 변경 여부."""
+        if getattr(st, "skills_migrated", False):
+            return False
+        promoted = [s.id for s in (st.skills or []) if getattr(s, "enabled", False)]   # 원래 순서 보존
+        for s in (st.skills or []):
+            if not getattr(s, "builtin", False):
+                self.registry.add_existing(s)        # 커스텀 정의를 라이브러리로 승격(id 충돌 시 기존 유지)
+        st.injected_skills = list(dict.fromkeys((st.injected_skills or []) + promoted))
+        st.skills_migrated = True
+        return True
+
+    def list_skills(self, pid: str) -> dict | None:
+        """이 작품의 주입 화면용 — 라이브러리 전체 + 작품별 injected 플래그/슬롯순서."""
+        st = self.repo.get(pid)
+        if not st:
+            return None
+        if not getattr(st, "skills_migrated", False):
+            self._skills_write(pid, lambda s: None)   # 락 안에서 1회 이관(생성 중이면 False — 다음 진입에 이관)
+            st = self.repo.get(pid) or st
+        injected = list(getattr(st, "injected_skills", None) or [])
+        order = {sid: i for i, sid in enumerate(injected)}
+        out = []
+        for s in self.registry.list():
+            d = s.model_dump()
+            d["injected"] = s.id in order
+            d["slot"] = order.get(s.id, -1)
+            out.append(d)
+        return {"skills": out, "injected": injected}
+
+    def _skills_write(self, pid: str, mutate):
+        """작품별 주입 상태 변경 — 생성 중(sess.lock 보유)이면 False(라우트 423). lost-update 방지(revise 패턴)."""
+        st = self.repo.get(pid)
+        if not st:
+            return None
+        sess = self.sessions.get_or_create(st)
+        if not sess.lock.acquire(blocking=False):
+            return False
+        try:
+            st = self.repo.get(pid)
+            if not st:
+                return None
+            self._migrate_skills(st)          # 락 안에서 멱등 이관(공유 라이브러리 승격은 registry 자체 락이 보호)
+            out = mutate(st)
+            self.repo.save(st)
+            return out
+        finally:
+            sess.lock.release()
+
+    def inject_skill(self, pid: str, sid: str):
+        """라이브러리 스킬을 이 작품에 주입(=membership). 합성 상한은 apply 시점 advisory(여기서 하드차단 안 함)."""
+        if not self.registry.get(sid):
+            raise ValueError("존재하지 않는 스킬")
+        def m(st):
+            if sid not in (st.injected_skills or []):
+                st.injected_skills = list(st.injected_skills or []) + [sid]
+            return {"id": sid, "injected": True, "injected_skills": st.injected_skills}
+        return self._skills_write(pid, m)
+
+    def eject_skill(self, pid: str, sid: str):
+        def m(st):
+            st.injected_skills = [x for x in (st.injected_skills or []) if x != sid]
+            return {"id": sid, "injected": False, "injected_skills": st.injected_skills}
+        return self._skills_write(pid, m)
+
+    # ---- 전역 라이브러리 CRUD(작품 무관 — registry 자체 락, 회차 생성 423에 막히지 않음) ----
+    def library_list(self) -> dict:
+        return {"skills": [s.model_dump() for s in self.registry.list()]}
+
+    def library_create(self, data: dict) -> dict:
+        return self.registry.create(data).model_dump()
+
+    def library_update(self, sid: str, data: dict) -> dict:
+        return self.registry.update(sid, data).model_dump()
+
+    def library_delete(self, sid: str) -> dict:
+        res = self.registry.delete(sid)       # 내장/미존재면 ValueError
+        self._cascade_eject(sid)              # 주입돼 있던 작품에서 제거(끊긴 참조 정리 — resolve 가 이미 dangling-safe라 best-effort)
+        return res
+
+    def _cascade_eject(self, sid: str) -> int:
+        """삭제된 라이브러리 스킬을 주입했던 작품들에서 제거 — *반드시* 작품 세션 락 경유(_skills_write).
+        bare get/save 로 하면 생성 중 작품의 진행본(회차·원장·온톨로지)을 덮어쓰는 lost-update(적대검증 high).
+        생성 중이면 _skills_write 가 False(스킵) → dangling id 가 남지만 resolve/_effective_skills 가 건너뛰므로 안전(정리는 best-effort)."""
+        n = 0
+        def _drop(st):
+            if sid in (st.injected_skills or []):
+                st.injected_skills = [x for x in st.injected_skills if x != sid]
+                return True
+            return False
+        for summ in self.repo.list_summaries():
+            try:
+                st = self.repo.get(summ["id"])
+                if not (st and sid in (getattr(st, "injected_skills", None) or [])):
+                    continue                              # 영향 없는 작품은 건드리지 않음(불필요 저장·이관 회피)
+                if self._skills_write(summ["id"], _drop) is True:   # 락 안 재읽기·생성 중이면 False
+                    n += 1
+            except Exception:
+                continue
+        return n
+
+    # ---- 레거시 호환(구 프론트/엔드포인트) — 전역 라이브러리 모델로 위임 ----
+    def set_skill_enabled(self, pid: str, sid: str, enabled: bool):
+        return self.inject_skill(pid, sid) if enabled else self.eject_skill(pid, sid)
+
+    def create_skill(self, pid: str, data: dict):
+        sk = self.registry.create(data)       # 라이브러리에 등록 후
+        res = self.inject_skill(pid, sk.id)   # 이 작품에 주입(생성 중이면 False — 라이브러리엔 남음)
+        if res in (None, False):
+            return res
+        return {**sk.model_dump(), "injected": True}
+
+    def delete_skill(self, pid: str, sid: str):
+        return self.eject_skill(pid, sid)     # 작품에서 빼기(라이브러리 삭제는 /api/skills DELETE)
 
     # ---- 문체/생성 정책 편집(③ 작가 입력 전용 — 시스템 스티어링 제어 경로) ----
     def update_style_policy(self, pid: str, patch: dict) -> dict | None:

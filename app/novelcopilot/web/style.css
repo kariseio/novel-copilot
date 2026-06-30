@@ -155,6 +155,58 @@ label input,label textarea{color:var(--ink);font-weight:400}
 .geninfo>summary{cursor:pointer;color:var(--muted);font-size:.84rem;font-weight:600;list-style:none;user-select:none}
 .geninfo>summary::-webkit-details-marker{display:none}
 .geninfo>summary::before{content:"▸ ";color:var(--muted)}
+/* 집필 화면 상단 스킬 힌트 */
+.write-skill-hint{margin:.4em 0 .2em;font-size:.84rem}
+/* 스킬 관리 화면 */
+.skills-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1em;margin-bottom:1em;flex-wrap:wrap}
+.skill-group{margin-bottom:1.4em}
+.skill-group>h4{margin:0 0 .5em;font-size:.95rem}
+.skill-card{border:1px solid var(--line);border-radius:10px;padding:.7em .9em;margin-bottom:.5em;background:var(--surface)}
+.skill-card.on{border-color:var(--accent);box-shadow:inset 3px 0 0 var(--accent)}
+.skill-toggle{display:flex;align-items:center;gap:.5em;cursor:pointer;font-size:.92rem}
+.skill-toggle input[type=checkbox]{width:16px;height:16px;flex:none;margin:0;cursor:pointer;accent-color:var(--accent)}
+.skill-name{font-weight:600;color:var(--ink)}
+.skill-badge{font-size:.68rem;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:.05em .4em}
+.skill-badge.model{color:var(--accent);border-color:var(--accent)}
+.skill-card-desc{margin:.35em 0 .2em;margin-left:1.7em}
+.skill-card-act{margin-left:1.7em;font-size:.82rem}
+.skill-card-top{display:flex;align-items:center;gap:.5em}
+/* 주입 패널(체크박스 대신 '주입' — 카트리지/슬롯) */
+.btn-ghost{font-size:.86rem;color:var(--accent);border:1px solid var(--line);border-radius:8px;padding:.35em .7em;background:var(--surface);cursor:pointer;text-decoration:none}
+.btn-ghost:hover{border-color:var(--accent)}
+.inject-rack{display:flex;flex-wrap:wrap;gap:.5em;margin:.3em 0 .7em}
+.slot{display:flex;align-items:center;gap:.45em;min-width:140px;min-height:38px;border-radius:9px;padding:.4em .65em;font-size:.9rem}
+.slot.empty{border:1.5px dashed var(--line);color:var(--muted);justify-content:center;background:repeating-linear-gradient(45deg,transparent,transparent 7px,rgba(0,0,0,.018) 7px,rgba(0,0,0,.018) 14px)}
+.slot.filled{border:1px solid var(--accent);background:var(--surface);box-shadow:inset 3px 0 0 var(--accent)}
+.slot.filled.over{border-color:var(--line);box-shadow:none;opacity:.55}
+.slot.filled.frozen{border-color:var(--line);box-shadow:inset 3px 0 0 var(--line)}
+.slot-name{font-weight:600;color:var(--ink)}
+.slot-eject{margin-left:auto;color:var(--muted);font-weight:700;cursor:pointer;text-decoration:none;line-height:1;padding:0 .2em}
+.slot-eject:hover{color:#d33}
+.shelf-label{margin:.2em 0 .35em;text-transform:none}
+.shelf{display:flex;flex-direction:column;gap:.4em}
+.shelf-card{display:flex;align-items:center;gap:.8em;border:1px solid var(--line);border-radius:9px;padding:.5em .75em;background:var(--bg)}
+.shelf-main{flex:1;min-width:0}
+.btn-inject{flex:none;font-size:.84rem;color:#fff;background:var(--accent);border:none;border-radius:8px;padding:.4em .8em;cursor:pointer}
+.btn-inject:hover{filter:brightness(1.05)}
+/* 전역 스킬 라이브러리 화면 */
+.skills-library{max-width:880px;margin:1.5em auto;padding:0 1em}
+.lib-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1em;margin-bottom:1.2em;flex-wrap:wrap}
+.lib-head-act{display:flex;gap:.5em;flex:none}
+/* 상단 내비(스킬 라이브러리 진입) */
+.top-nav{display:flex;gap:.6em;align-items:center;margin-left:auto;margin-right:1em}
+.top-link{font-size:.86rem;color:var(--accent);text-decoration:none;border:1px solid var(--line);border-radius:8px;padding:.32em .7em;cursor:pointer;white-space:nowrap}
+.top-link:hover{border-color:var(--accent)}
+/* 새 작품 — 세계관 스킬 선택 */
+.world-skill-picker{display:flex;flex-direction:column;gap:.3em;margin:.6em 0;padding:.6em .75em;border:1px solid var(--line);border-radius:9px;background:var(--surface)}
+.wsp-label{font-weight:600;font-size:.86rem;color:var(--ink)}
+.wsp-item{display:flex;align-items:center;gap:.45em;font-size:.9rem;cursor:pointer}
+.wsp-item input[type=checkbox]{width:16px;height:16px;flex:none;margin:0;cursor:pointer;accent-color:var(--accent)}
+/* 스킬 편집 모달 필드 */
+.fld{display:flex;flex-direction:column;gap:.3em;font-size:.86rem;font-weight:600;color:var(--ink)}
+.fld input,.fld select,.fld textarea{font-weight:400;font-size:.92rem;padding:.45em .6em;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-family:inherit}
+.fld textarea{resize:vertical;line-height:1.6}
+.modal-act{display:flex;gap:.5em;justify-content:flex-end;margin-top:1.2em}
 .geninfo[open]>summary::before{content:"▾ "}
 .geninfo .inspect-body{max-height:none;margin-top:.6em}
 /* 개요(허브) */
@@ -438,6 +490,17 @@ label input,label textarea{color:var(--ink);font-weight:400}
   color:#1A1B1F;word-break:keep-all}
 .viewer-body p{margin:0 0 1.45em}
 .viewer-body .dlg{display:block}
+/* 본문 마크다운 렌더 — 모델 산출(제목·강조·구분선·&nbsp;)을 그대로 표시(스트리핑 없음) */
+.md-body{white-space:normal}
+.md-body p{margin:0 0 1.05em}
+.md-body .dlg{display:block}
+.md-body h1,.md-body h2,.md-body h3,.md-body h4,.viewer-body h1,.viewer-body h2,.viewer-body h3,.viewer-body h4{
+  font-family:var(--font-sans);font-weight:700;line-height:1.4;margin:.1em 0 .9em;color:var(--ink)}
+.md-body h1,.viewer-body h1{font-size:1.2rem}
+.md-body h2,.viewer-body h2{font-size:1.08rem}
+.md-body h3,.md-body h4,.viewer-body h3,.viewer-body h4{font-size:1rem;color:var(--muted)}
+.md-body hr,.viewer-body hr{border:0;border-top:1px solid var(--line);width:42%;margin:1.8em auto;opacity:.7}
+.md-body em,.viewer-body em{font-style:italic}
 .viewer-nav{display:flex;align-items:center;justify-content:space-between;gap:1em;
   margin-top:3.5em;padding-top:1.6em;border-top:1px solid var(--line)}
 .viewer-nav button{padding:.7em 1.3em;font-size:.95rem;background:var(--ink);color:var(--paper);border-color:var(--ink)}

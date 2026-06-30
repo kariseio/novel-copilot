@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from .config import get_settings
-from .repository import FilesystemProjectRepository
+from .repository import FilesystemProjectRepository, FilesystemSkillRegistry
 from .services import CopilotService
 from .api.routes import router
 
@@ -20,7 +20,8 @@ _WEB_DIR = Path(__file__).resolve().parent / "web"
 def create_app() -> FastAPI:
     settings = get_settings()
     repo = FilesystemProjectRepository(settings.resolved_data_dir())
-    service = CopilotService(settings, repo)
+    registry = FilesystemSkillRegistry(settings.resolved_data_dir())   # 앱-전역 스킬 라이브러리(작품 간 공유)
+    service = CopilotService(settings, repo, registry)
 
     app = FastAPI(title="AI 웹소설 코파일럿", version="1.0.0")
     app.state.settings = settings

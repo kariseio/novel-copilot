@@ -50,6 +50,12 @@ class Ontology:
             pass
 
     def set_state(self, eid, attr, value, eff_from, reason="", trust_tier="ground_truth") -> None:
+        # upsert(last-writer-wins) by (eid,attr,eff,tier): 같은 시점에 *다른* ground_truth 값이 쌓이면
+        # ontology_internal_check 가 ssot_ambiguous(DETERMINISTIC)를 영구 점등해 이후 모든 회차가 ESCALATED 로
+        # 봉인되고 복구도 불가했다(재생성·작가오버라이드 — 적대검증). 한 시점 한 값으로 강제: 중복 제거 후 추가.
+        # 재수화 시에도 동일 dedup 이 적용돼 *이미 봉인된 작품이 다음 로드에 자동 치유*된다.
+        self.timeline = [t for t in self.timeline
+                         if not (t[0] == eid and t[1] == attr and t[3] == eff_from and t[5] == trust_tier)]
         self.timeline.append((eid, attr, value, eff_from, reason, trust_tier))
 
     # ---- 조회 ----
@@ -59,10 +65,13 @@ class Ontology:
         if not ent:
             return None
         val = ent.base_status if attr == "status" else ent.attrs.get(attr)
-        best = -1
-        for (e, a, v, f, _r, _t) in self.timeline:
-            if e == eid and a == attr and f <= chapter and f > best:
-                val, best = v, f
+        best, best_gt = -1, False
+        for (e, a, v, f, _r, t) in self.timeline:
+            if e == eid and a == attr and f <= chapter:
+                gt = (t == "ground_truth")
+                # 더 늦은 eff 우선 — 동률이면 ground_truth 우선(삽입순서 의존 제거: 같은 시점 gt/ni 공존 시 binding 값 채택)
+                if f > best or (f == best and gt and not best_gt):
+                    val, best, best_gt = v, f, gt
         return val
 
     def binding_state_as_of(self, eid, attr, chapter):

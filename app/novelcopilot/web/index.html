@@ -16,6 +16,10 @@
 <body>
 <header class="topbar">
   <div class="brand" onclick="goHome()">웹소설 <b>코파일럿</b> <span class="tag">AI가 쓰고, 작가가 이끕니다</span></div>
+  <nav class="top-nav">
+    <a class="top-link" role="button" tabindex="0" onclick="go('#/skills')"
+       onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('#/skills')}">✨ 스킬 라이브러리</a>
+  </nav>
   <div id="health" class="health" title="서버 연결 상태"></div>
 </header>
 
@@ -45,6 +49,11 @@
       <div id="start-status" class="status"></div>
     </section>
   </div>
+</main>
+
+<!-- ===== SKILLS LIBRARY (전역 — 작품 무관) ===== -->
+<main id="view-skills" class="view hidden">
+  <div id="skills-library" class="skills-library"></div>
 </main>
 
 <!-- ===== CREATE (대화로 세계관 빚기) ===== -->
@@ -98,6 +107,7 @@
         </div>
       </div>
       <div id="brief-body" class="brief-body"></div>
+      <div id="world-skill-picker" class="world-skill-picker hidden"></div>
       <button class="primary brief-generate" id="brief-gen" onclick="finalizeDraft()">세계 생성 →</button>
       <div class="muted small brief-gen-hint" id="brief-gen-hint">원할 때 언제든 생성할 수 있어요</div>
       <div id="brief-confirm" class="brief-confirm hidden">
@@ -152,6 +162,7 @@
         <a class="side-link" data-sec="world" role="button" tabindex="0" onclick="goSection('world')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('world')}">세계관 만들기</a>
         <div class="side-div"></div>
         <a class="side-link" data-sec="serial" role="button" tabindex="0" onclick="goSection('serial')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('serial')}">연재 관리</a>
+        <a class="side-link" data-sec="skills" role="button" tabindex="0" onclick="goSection('skills')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();goSection('skills')}">✨ 스킬</a>
       </nav>
     </aside>
 
@@ -172,6 +183,7 @@
               <textarea id="directive" rows="2" placeholder="예: 강도현은 이미 죽었다(직접 등장 금지). 주인공의 트라우마를 부각."></textarea>
             </label>
             <label class="dir-keep"><input type="checkbox" id="dir-keep" /> 계속 적용 <span class="muted small">— 체크하면 다음 회차에도 이 지시를 유지(아크 내내 지킬 제약)</span></label>
+            <div id="write-skill-hint" class="write-skill-hint"></div>
             <button id="gen-btn" class="primary" onclick="generateNext()">다음 회차 쓰기</button>
             <div id="harness-log" class="harness-log"></div>
             <div id="gen-result" class="gen-result"></div>
@@ -233,6 +245,9 @@
         </div>
         <div id="serial-status"></div>
         <div id="serial-structure" class="hidden"></div>
+      </section>
+      <section id="sec-skills" class="proj-sec panel hidden">
+        <div id="skills-manager"></div>
       </section>
     </div>
   </div>

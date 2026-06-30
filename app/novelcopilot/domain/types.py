@@ -56,6 +56,8 @@ class AuthorDirective(BaseModel):
 class ContextBoard(BaseModel):
     chapter: int
     ground_truth: list[OntologyFact] = Field(default_factory=list)
+    world_rules: list[str] = Field(default_factory=list)   # 세계 불변 규칙 — 고신뢰(확정 설정과 동급, 낮은 신뢰 narrative 아님)
+    story_time: str = ""                                   # CN-1: 결정론 누적 절대시점(고신뢰 — 모델은 읽기만, 시간 역행/모순 금지)
     narrative: list[RetrievedItem] = Field(default_factory=list)
     authority: list[AuthorDirective] = Field(default_factory=list)
     prev_chapter: str = ""            # 서사 흐름: 직전 회차 원문(연속성)
@@ -116,6 +118,29 @@ class ChapterRevision(BaseModel):
     created_at: str = ""                              # 서버 time.strftime — 클라이언트 생성 금지
 
 
+class TimeDelta(BaseModel):
+    """구조화 시간 경과(CN-1) — 플래너가 *자기 회차의* 시간 점프를 라벨링한다(LLM 산수 0; 누적은 story_clock 코드).
+    mode=advance 만 메인 시계를 전진시킨다(flashback/parallel 은 전진 안 함). unit 미상 → story_clock 이 null degrade.
+    unit/mode 는 Literal 이 아니라 str — LLM 오타('days')가 델타 전체를 탈락(검증실패)시키지 않게, 미상은 누적서 건너뜀.
+    허용값: unit ∈ {minute,hour,day,week,month,year}, mode ∈ {advance,flashback,parallel,unknown}."""
+    amount: float = 0.0
+    unit: str = ""
+    mode: str = "advance"
+
+    @classmethod
+    def parse(cls, raw) -> "Optional[TimeDelta]":
+        """LLM dict → TimeDelta(관대한 코어션). dict 아니면 None(null degrade). 의미 검증은 story_clock 가."""
+        if not isinstance(raw, dict):
+            return None
+        try:
+            amt = float(raw.get("amount", 0) or 0)
+        except (TypeError, ValueError):
+            amt = 0.0
+        return cls(amount=amt,
+                   unit=str(raw.get("unit") or "").strip().lower(),
+                   mode=str(raw.get("mode") or "advance").strip().lower() or "advance")
+
+
 class ChapterRecord(BaseModel):
     chapter: int
     title: str = ""
@@ -132,9 +157,11 @@ class ChapterRecord(BaseModel):
     # G4: 비트의 기능 차원을 회차 기록에 영속 — 다음 회차 설계가 '최근 훅 유형 이력'을 결정론 비교(반복 차단)
     chapter_function: str = ""
     hook_type: str = ""
-    time_advance: str = ""
+    time_advance: str = ""                                    # 자유텍스트 라벨(작가 가시화·pacing — 코드 분류 안 함)
+    time_delta: Optional[TimeDelta] = None                    # CN-1: 구조화 델타(story_clock 결정론 누적용 영속). 없으면 null degrade
     place: str = ""
     drift_signals: list[str] = Field(default_factory=list)   # 결정론 드리프트 advisory
+    claim_audit: list = Field(default_factory=list)          # CN-2: 자유형 사실 모순(과거 회차 대조) advisory — 비구속·작가 가시화
     reader_feedback: dict = Field(default_factory=dict)       # G2: 블라인드 독자 행동 예측(advisory — 작가 가시화, 비구속)
     ai_tell: dict = Field(default_factory=dict)               # 한국어 AI티 분포 신호(결정론·LLM 0콜·advisory 추세, KatFishNet 자질)
     gen_context: dict = Field(default_factory=dict)           # 디버그: 이 회차를 '어떤 정보로' 생성했는가(계획 비트 + 집필 입력 슬롯, 트림)

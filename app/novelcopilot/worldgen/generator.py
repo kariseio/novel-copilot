@@ -31,10 +31,10 @@ _SCHEMA_HINT = """{
   "entities": [
     {"id":"hero","name":"주인공이름","etype":"character","aliases":["약칭"],
      "attrs":{"affiliation":"A"},"base_status":"alive",
-     "profile":"인물 설계서: 배경·성격·욕망(원하는 것/두려운 것)·다른 핵심 인물과의 관계. 말투 지정 금지 — 말투는 이 설정에서 창발한다"}
+     "profile":"인물 설계서: 배경·성격·욕망(원하는 것/두려운 것)·다른 핵심 인물과의 관계 — *지금 이미 그런 사이*는 물론 *앞으로 어떤 관계로 발전할 의도*까지 여기 서술(아직 형성 안 된 관계는 seed_edges 가 아니라 여기). 말투 지정 금지 — 말투는 이 설정에서 창발한다"}
   ],
   "relations": [],                      // 선택: 작품별 관계 타입(RelationSpec). rel_id 자유
-  "seed_edges": [],                     // 선택: 시작 시점 관계 엣지
+  "seed_edges": [],                     // 선택: '시작 시점에 이미 사실인' 관계만(배경·기존 사이). eff_from=참이 된 회차. 형성될 관계는 profile 로(엔진이 본문서 캐논 승격)
   "world_rules": [                      // 선택(비워도 됨). 넣을 땐 반드시 이 형태(flag 영문 필수):
     {"rule_id":"no_reawaken","text":"각성은 일생에 한 번뿐.","flag":"reawakening","keywords":["재각성"],"extract_hint":"두 번째 각성 사건"}
   ],
@@ -66,7 +66,9 @@ class WorldGenerator:
             "너는 한국 웹소설 세계관 설계자다. 장르 불문, 주어진 시드로 '일관성 추적이 가능한' 설정집을 JSON으로 설계한다.\n"
             "이 작품의 전제·갈등·진전 방식에서 '실제로 변화를 추적할 가치가 있는' 축만 도출해 신선하게 설계하라:\n"
             "1) attributes: 변하면 안 되거나 변화를 추적해야 할 축 2개 이상. 종류 자유(key 는 영문 snake_case):\n"
-            "   - categorical(통제어휘 vocab + mutable): 눈색·소속·진영·신분 등\n"
+            "   - categorical(통제어휘 vocab): *변하지 않는 사실*(눈색·종족·성별 등)은 mutable 생략(기본 false=불변 캐논). "
+            "*실제로 변할 수 있는 것*(소속·진영·신분 등)만 mutable:true. "
+            "관계단계·호감처럼 *한 방향으로 깊어지는* 순서형 축은 vocab 을 진행 순서대로 나열하고 ordered:true 도 함께(회상·오추출이 캐논을 되감지 않게).\n"
             "   - numeric(monotonic 은 '정말 단조일 때만'; 오르내리면 생략): 등급·내공·호감 등\n"
             "   - state(생애주기): 사망·각성·정체발각·결혼 등 상태 전이. states + irreversible(되돌릴 수 없는 값) "
             "+ terminal(등장불가='서사에서 영구히 제거됨' — 인물이 다시 등장할 수 없게 되는 값만; 초기값·기본값·평범한 진행 상태는 terminal 이 아니다) 지정.\n"
@@ -74,10 +76,15 @@ class WorldGenerator:
             "(관계·신분·지식·자원·내적 상태·역량 등 무엇이든)를 보고, 그 변화를 가장 잘 추적할 축을 골라라.\n"
             "2) entities: '주인공과 핵심 관계 인물 2~3명만'(character). attrs 는 위 attribute key 로. id 는 영문. "
             "조연·적대·조력 캐스트는 여기서 만들지 마라 — 아크 설계 단계에서 그 시점의 이야기 상태로부터 태어난다. "
-            "말투(voice) 지정 금지 — 말투는 인물 설정에서 창발한다. 대신 각 인물의 profile(배경·성격·욕망·관계)을 충실히.\n"
+            "말투(voice) 지정 금지 — 말투는 인물 설정에서 창발한다. 대신 각 인물의 profile(배경·성격·욕망·관계)을 충실히. "
+            "작가가 인물 이름을 준 경우(아래 '[작가가 이미 지은 인물]')엔 그 이름을 entities 의 name 으로 *정확히 그대로* 쓰고 발명·개명하지 마라(이름 없는 조연만 새로 만든다).\n"
             "3) world_rules(선택): 이 세계 핵심 규칙(있으면 flag 영문, keywords 한국어).\n"
             "4) timeline(선택): 예정된 상태 전이가 있으면 eff_from 으로(없으면 빈 배열).\n"
-            "5) relations/seed_edges(선택): 시작 관계·작품별 관계 타입(rel_id 자유 라벨).\n"
+            "5) seed_edges(선택): **이야기 시작 시점에 이미 사실인 관계만**(전부터 알던 사이·가족·기존 구도 등 — 인물들이 이미 아는 관계). "
+            "앞으로 *전개되며 형성될* 관계(만난 적 없는 둘이 나중에 동맹·연인·라이벌이 되는 등)는 seed_edges 에 넣지 마라 — "
+            "그건 이야기로 펼쳐지고, 본문이 그 관계를 실제로 성립시키면 엔진이 그때 캐논으로 잡는다(미리 박지 않는다). "
+            "그런 '의도된 관계 방향'은 해당 인물의 profile 에 서술하라. seed_edge 의 eff_from 은 그 관계가 *참이 되는* 회차다(시작부터 참이면 1). "
+            "relations 는 작품별 관계 타입(rel_id 자유 라벨).\n"
             "6) beats: 초반 전개의 핵심 비트 3~5개만(chapter 1부터 순서대로). 나머지 회차는 연재하며 자동 설계되니 "
             "여기서 전부 나열하지 마라. 각 비트는 entities 에 인물 id.\n"
             "7) wiki_seeds(선택): 회수할 복선 plot_thread.\n"
@@ -88,7 +95,7 @@ class WorldGenerator:
             "회귀·부활·리젠·타임루프 세계면 allow_state_reversal:true. 설정은 시드에 맞게 신선하게. JSON 객체만 출력."
         )
 
-    def obsession(self, seed: ProjectSeed) -> dict:
+    def obsession(self, seed: ProjectSeed, skills_inject: str = "") -> dict:
         """집착 벡터 추출(prewrite 풍부함 연구 — 최상단 '헌법'). 세계를 '균등 슬롯 채우기'가 아니라
         하나의 기이하고 불편한 주제적 집착에서 *편중되게* 파생시켜 평균회귀(mode collapse)를 깬다.
         Egri 전제([지배형질→원인→귀결])+McKee counter_idea+감각렌즈(구체물)로 외화. NEVER throws."""
@@ -100,7 +107,7 @@ class WorldGenerator:
                    "③ sensory_lens: 그 집착이 가장 날카롭게 드러나는 '감각 렌즈' 3~4개 — 추상 금지, 이 작품의 세계와 톤에 어울리는 손에 잡히는 구체물만. "
                    '{"obsession_vector":"...","counter_idea":"...","sensory_lens":["...","...","..."]} JSON만.')
             usr = (f"[시드]\n장르: {seed.genre}\n톤: {seed.tone}\n전제: {seed.premise}\n"
-                   f"주인공 힌트: {seed.protagonist_hint}\n")
+                   f"주인공 힌트: {seed.protagonist_hint}\n") + (skills_inject or "")
             d = self.provider.chat_json([{"role": "system", "content": sys},
                                          {"role": "user", "content": usr}], temperature=0.7)
             ov = (d.get("obsession_vector") or "").strip()
@@ -123,7 +130,7 @@ class WorldGenerator:
             "기성 장르의 간판어·관용 설정에 기대지 말고, 이 작품 집착의 고유한 어휘와 구체물로 모든 설정을 직접 빚어내라 — "
             "attributes·entities·world_rules·genre_contract 가 전부 이 한 집착에서 흘러나오게. 추상 대신 감각 렌즈의 구체물로 못박아라.\n\n")
 
-    def weird(self, world: WorldConfig, obs: dict | None = None) -> WorldConfig:
+    def weird(self, world: WorldConfig, obs: dict | None = None, skills_inject: str = "") -> WorldConfig:
         """R-3 안티-클리셰 적대 weirding(mode collapse 후처리 차단). 생성된 세계에서 '이 장르의 가장 전형적인
         디폴트'(간판어·뻔한 인물·예측 규칙)를 짚어 작품 집착에 맞게 *구체·감각·비자명*하게 비튼다. 구조(인물 id·속성축)는
         보존하고 프로즈 필드만 surgical override. NEVER throws(실패 시 원본 반환). 인물 *추가/삭제 안 함*(weird=재작성)."""
@@ -137,7 +144,8 @@ class WorldGenerator:
                    "규칙·추상적 쾌감 서술)를 골라 작품의 집착에 맞게 *구체적·감각적·비자명*하게 다시 써라. 겉만 바꾸지 말고 "
                    "디폴트를 비틀되 인물 id·이름·속성 구조는 유지(인물 추가/삭제/개명 금지 — profile 내용만 비튼다). 수정한 필드만 같은 키로 반환 — "
                    'synopsis(문자열), entities([{id, profile}]), world_rules(문자열 배열 전체), genre_contract(객체). JSON만.')
-            usr = f"[작품의 집착]{ob}\n[현재 세계 — 진부한 부분을 비틀 대상]\n{json.dumps(snap, ensure_ascii=False)}"
+            usr = (f"[작품의 집착]{ob}\n[현재 세계 — 진부한 부분을 비틀 대상]\n"
+                   f"{json.dumps(snap, ensure_ascii=False)}") + (skills_inject or "")
             d = self.provider.chat_json([{"role": "system", "content": sys},
                                          {"role": "user", "content": usr}], temperature=0.8)
             if (d.get("synopsis") or "").strip():
@@ -162,15 +170,27 @@ class WorldGenerator:
         except Exception:
             return world
 
-    def _user(self, seed: ProjectSeed, obs: dict | None = None) -> str:
-        return (self._obsession_block(obs) +
+    def _user(self, seed: ProjectSeed, obs: dict | None = None, skills_inject: str = "", brief=None) -> str:
+        cast = ""
+        if brief is not None and getattr(brief, "characters", None):
+            _ph = {"소년", "소녀", "그녀", "그", "주인공", "주연", "미정", "이름", "주인공이름"}
+            named = [c for c in brief.characters
+                     if (getattr(c, "name", "") or "").strip() and (c.name or "").strip() not in _ph][:5]
+            if named:
+                cast = ("\n[작가가 이미 지은 인물 — entities[].name 에 이 이름을 *정확히 그대로* 쓰고 발명·개명 금지]\n"
+                        + "\n".join("- " + c.name
+                                    + (f" ({c.role})" if (getattr(c, "role", "") or "").strip() else "")
+                                    + (f": {c.want}" if (getattr(c, "want", "") or "").strip() else "")
+                                    for c in named) + "\n")
+        return (self._obsession_block(obs) + cast +
                 f"[시드]\n장르: {seed.genre}\n톤: {seed.tone or '(미지정 — 이 장르에 맞는 톤을 창작해 tone 으로 제시)'}\n전제: {seed.premise}\n"
                 f"주인공 힌트: {seed.protagonist_hint or '(자유)'}\n목표 회차수: {seed.target_chapters}\n"
-                f"제목 힌트: {seed.title or '(자유 창작)'}\n\n스키마 예시(형식만 참고, 내용은 새로):\n{_SCHEMA_HINT}")
+                f"제목 힌트: {seed.title or '(자유 창작)'}\n\n스키마 예시(형식만 참고, 내용은 새로):\n{_SCHEMA_HINT}") + (skills_inject or "")
 
-    def generate(self, seed: ProjectSeed, _retry: bool = True, obs: dict | None = None) -> WorldConfig:
+    def generate(self, seed: ProjectSeed, _retry: bool = True, obs: dict | None = None,
+                 skills_inject: str = "", brief=None) -> WorldConfig:
         msg = [{"role": "system", "content": self._system(seed.target_chapters)},
-               {"role": "user", "content": self._user(seed, obs)}]
+               {"role": "user", "content": self._user(seed, obs, skills_inject, brief)}]
         raw = self.provider.chat_json(msg, temperature=0.6, max_tokens=9000)
         try:
             world = WorldConfig.model_validate(raw)
@@ -184,7 +204,7 @@ class WorldGenerator:
                 world = WorldConfig.model_validate(fix)
             except (ValidationError, ValueError):
                 if _retry:                       # 교정 재시도도 실패 → 전체 1회 재생성(일시적 출력 불량 흡수)
-                    return self.generate(seed, _retry=False, obs=obs)
+                    return self.generate(seed, _retry=False, obs=obs, skills_inject=skills_inject, brief=brief)
                 raise
         return self._normalize(world, seed)
 

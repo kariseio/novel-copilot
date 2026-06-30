@@ -34,9 +34,15 @@ def entry_to_world_rule(entry: BibleEntry, existing_ids: set[str]) -> WorldRuleS
 
 def bible_digest(bible: StoryBible, budget: int = 1500,
                  context_hint: str = "") -> tuple[list[RetrievedItem], int]:
-    """설정집 요약을 narrative 앵커로. promoted 상시 + 이번 화 맥락(키워드/제목 매칭) 관련 카드 우선
-    — 로어북식 조건 주입(예산 컷 나열 → 관련도 선별). 반환=(items, dropped)."""
-    live = [e for e in bible.entries if e.status != "deprecated"]
+    """설정집 요약을 narrative 앵커로. 이번 화 맥락(키워드/제목 매칭) 관련 카드 우선
+    — 로어북식 조건 주입(예산 컷 나열 → 관련도 선별). 반환=(items, dropped).
+
+    M-1 dedup: promoted 세계규칙은 고신뢰 [확정 설정] 블록에 ontology.rules→world_rules 슬롯으로 주입된다.
+    그 텍스트(=promote 원본 prose)를 저신뢰 [참조 맥락] digest 에도 내보내면 같은 규칙이 한 프롬프트에
+    '절대 위반(고신뢰)' vs '낮은 신뢰' 모순 권위로 두 번 박힌다 → promote_target=='world_rule' 항목은 여기서 제외.
+    (promote/migrate 가 world.world_rules 에 영속 → factory 가 ontology.rules 재주입하므로 손실 0.)"""
+    live = [e for e in bible.entries if e.status != "deprecated"
+            and not (e.promoted and getattr(e, "promote_target", "") == "world_rule")]
 
     def score(e):
         s = 100 if e.promoted else 0

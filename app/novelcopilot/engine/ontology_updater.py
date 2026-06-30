@@ -65,6 +65,14 @@ class OntologyUpdater:
         # 통제어휘를 상류에서 고지(미고지 → 표면 변이 보고 → 하류 escalation 소음의 소스 차단). raw vocab 사용(게이트와 동일 기준)
         cat_hint = "; ".join(f"{a.key}:{a.vocab}" for a in self.vocab.values()
                              if a.kind == "categorical" and a.vocab)
+        # OV-1: 통제어휘를 모델에 고지 → 같은 값의 '표기 변형'을 선언값으로 정규화하게 해 허위 '통제어휘 밖 값'
+        #       escalation 소음 차단. 단 게이트(apply, 'val not in vocab')는 단방향이라 force-fit(의미적 새 값을
+        #       기존 vocab 로 억지 매핑)을 못 잡으므로, 가이드를 '표기 변형만 정규화, 의미적 새 값은 그대로 보고(escalate)'로
+        #       기울여 escalation recall 을 모델 판단에 의존시키지 않는다(검출기 추가 아님 — 기존 어휘 상류 고지).
+        cat_guidance = ("\n※ categorical 속성(등급·소속 등 아래 [통제어휘]에 허용값이 선언된 속성)을 보고할 때: 본문 표현이 "
+                        "통제어휘의 한 값과 '같은 대상'을 가리키는 표기 변형(띄어쓰기·접미사·약칭 — 예: 'A급'·'에이급'→통제어휘 'A')이면 "
+                        "그 통제어휘 값으로 표기를 맞춰 보고하라. 그러나 통제어휘 어디에도 없는 '다른' 값을 본문이 분명히 확정하면, "
+                        "기존 값과 비슷해 보여도 억지로 끼워 맞추지 말고 본문 값 그대로 보고하라(작가 검수 대상).") if cat_hint else ""
         msg = [
             {"role": "system", "content":
              "너는 작품 설정 관리자다. 이번 회차 본문에서 '명시적으로' 드러난 구조적 사실만 보고하라. 추측 금지.\n"
@@ -77,10 +85,13 @@ class OntologyUpdater:
              "JSON: {\"new_entities\":[{\"name\":\"\",\"etype\":\"\",\"aliases\":[],\"role\":\"\"}],"
              "\"state_changes\":[{\"id\":\"명부 id\",\"attr\":\"속성키\",\"value\":\"새 값\",\"note\":\"\"}],"
              "\"relations\":[{\"src\":\"명부 id 또는 새 이름\",\"dst\":\"명부 id 또는 새 이름\",\"rel_id\":\"관계키 또는 자유 라벨\",\"state\":\"\",\"note\":\"\"}],"
-             "\"new_settings\":[{\"category\":\"\",\"title\":\"\",\"prose\":\"3~5문장\",\"keywords\":[\"\"]}]}"},
+             "\"new_settings\":[{\"category\":\"\",\"title\":\"\",\"prose\":\"3~5문장\",\"keywords\":[\"\"]}]}"
+             + cat_guidance},
             {"role": "user", "content":
              f"[기존 명부]\n{json.dumps(roster, ensure_ascii=False)}\n"
-             f"[엔티티 타입]{ent_types}\n[추적 속성키]{attr_keys}\n[생애주기 상태값]{state_hint}\n[관계키(자유 라벨 가능)]{rel_keys}\n"
+             f"[엔티티 타입]{ent_types}\n[추적 속성키]{attr_keys}\n[생애주기 상태값]{state_hint}\n"
+             + (f"[통제어휘(categorical 허용값 — 같은 대상의 표기 변형만 이 값으로 맞춤)]{cat_hint}\n" if cat_hint else "")
+             + f"[관계키(자유 라벨 가능)]{rel_keys}\n"
              f"[{chapter}화 본문]\n{text}"},
         ]
         try:
@@ -226,12 +237,35 @@ class OntologyUpdater:
                 # M1: 캐논 주입집합 = 게이트집합. 신규 추적 속성 키를 엔티티에 등록해
                 #     canon_facts(ground_truth 주입)가 이 속성을 빠뜨리지 않게(게이트만 걸고 미주입되는 비대칭 제거).
                 ent.attrs.setdefault(attr, None)
-                # 비-status 전진은 기존 '추가/전진만' 정책 유지(ground_truth). 단조/불변/사망복귀는 위에서 escalation.
-                ontology.set_state(eid, attr, val, eff, reason=f"{chapter}화 동적 감지")
+                # 순서형(ordered) 가변축의 '후진' 전이(vocab 인덱스 감소 — 회상·오추출)는 binding 캐논을 *되감지* 않게
+                #   비구속(narrative_inferred)으로만 기록. 비교 기준은 보호 대상인 *binding 캐논*(ground_truth)이다
+                #   — all-tier cur 가 아니라 binding_state_as_of(적대검증: cur 베이스라인은 비구속값을 끼워 오판).
+                tier, back = "ground_truth", False
+                bcur = ontology.binding_state_as_of(eid, attr, chapter)
+                if getattr(spec, "ordered", False) and spec.vocab and bcur is not None:
+                    try:
+                        if spec.vocab.index(str(val).strip()) < spec.vocab.index(str(bcur).strip()):
+                            tier, back = "narrative_inferred", True
+                    except ValueError:
+                        pass
+                # ground_truth 커밋이 같은 시점 *다른* ground_truth(작가/시드 예약·직전 재생성)와 충돌하면 침묵
+                #   덮어쓰기 금지 — status 분기(위)와 대칭으로 escalation 노출. set_state upsert(FIX1)가 작가 확정
+                #   캐논을 신호 없이 갈아엎던 결함 차단(적대검증). 커밋 안 함 → 중복 0 → ssot_ambiguous 재점등 없음.
+                if tier == "ground_truth" and any(
+                        t2[0] == eid and t2[1] == attr and t2[3] == eff and t2[5] == "ground_truth"
+                        and str(t2[2]).strip() != str(val).strip() for t2 in ontology.timeline):
+                    _act = f"공식 설정에서 {self.vocab.label(attr)}의 {eff}화 시점 값을 하나로 확정하세요(예약과 자동 감지 충돌)."
+                    changes.append(OntologyChange(op="contradiction", entity=ent.name,
+                                                  detail=f"{self.vocab.label(attr)} {eff}화 시점 상충(예약 vs 감지 '{val}')",
+                                                  applied=False, reason=f"동시점 충돌 — {_act}"))
+                    self.bus.emit("ontology_update", "escalation", chapter=chapter, entity=ent.name, attr=attr, action=_act)
+                    continue
+                ontology.set_state(eid, attr, val, eff, reason=f"{chapter}화 동적 감지", trust_tier=tier)
                 new_tl.append(TimelineEntry(entity_id=eid, attr=attr, value=val, eff_from=eff,
-                                            reason=f"{chapter}화 동적 감지"))
+                                            reason=f"{chapter}화 동적 감지", trust_tier=tier))
                 changes.append(OntologyChange(op="state_change", entity=ent.name,
-                                              detail=f"{self.vocab.label(attr)}: {cur}→{val}({eff}화부터)",
+                                              detail=f"{self.vocab.label(attr)}: {cur}→{val}({eff}화부터)"
+                                                     + (" · 후진(비구속)" if back else ""),
                                               applied=True))
             else:
                 _act = f"{self.vocab.label(attr)}이(가) 실제로 변할 수 있는 속성이면 설정집에서 가변으로 바꾸세요. 본문 오류라면 교정해 재생성하세요."

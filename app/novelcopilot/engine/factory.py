@@ -40,6 +40,12 @@ def build_rules(world: WorldConfig) -> list[RuleSpec]:
                                           "forbidden_appearance": "present_acting"}))
     for a in world.attributes:
         if a.kind == "categorical":
+            # 가변(mutable) categorical = '진행형 상태'(관계단계·소속·적응 등): 값 변화는 *진전*이지 모순이 아니다.
+            # OntologyUpdater 가 이를 timeline 진전으로 반영·가시화(state_change)한다 — 같은 변화를 체커가
+            # 하드 동등성(categorical_eq QUASI)으로 또 잡으면 '자연스런 전개 = 매 회차 설정충돌 → 비수렴 → ESCALATED'.
+            # 잔잔 로맨스/일상물(관계가 변하는 게 본질)에 치명. mutable=False(눈색 등 불변 사실)만 하드 캐논으로 강제.
+            if a.mutable:
+                continue
             rules.append(RuleSpec(rule_id=a.key, layer=a.key, predicate_kind="categorical_eq",
                                   grade=SignalGrade.QUASI, params={"attr": a.key}))
         elif a.kind == "numeric" and a.monotonic:

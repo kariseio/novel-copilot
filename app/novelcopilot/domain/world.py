@@ -10,7 +10,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
 from .relations import RelationSpec
-from .types import RelationEdge
+from .types import RelationEdge, TimeDelta
 from .narrative import NarrativeSpine
 
 
@@ -51,6 +51,8 @@ class AttributeSpec(BaseModel):
     terminal: list[str] = Field(default_factory=list)     # '제거' 상태(등장-불가 + 새 객관관계 차단; 예:[dead])
     monotonic: Optional[Literal["non_decreasing", "non_increasing"]] = None  # numeric
     mutable: bool = False                     # 동적 업데이트가 변경을 progress로 허용할지(False=모순→escalation)
+    ordered: bool = False                     # categorical 가변축이 vocab 순서대로 '한 방향 진행'(관계단계·호감 등). True면
+    #   vocab 인덱스가 *낮아지는* 후진 전이(회상·오추출)는 binding 캐논으로 커밋 안 하고 비구속(narrative_inferred)으로 — 되감김 방지
     extract_hint: str = ""                    # 추출기 가이드(선택)
 
 
@@ -112,7 +114,8 @@ class Beat(BaseModel):
     # G4: 회차의 '기능' 차원(설계 단계에 명시 — 사건 요약만으로는 보상/페이싱이 안 보임). 자유 라벨, 강제 아님.
     chapter_function: str = ""                # payoff(지불)/setup(약속)/escalation(격상)/relation(관계)/respite(완급) …
     hook_type: str = ""                       # 회차말 훅 유형: question/action/reveal/emotion/new_threat/decision …
-    time_advance: str = ""                    # 직전 화 대비 시간 경과(예: '몇 분'/'다음날'/'사흘 후'/'없음')
+    time_advance: str = ""                    # 직전 화 대비 시간 경과 라벨(자유텍스트: '몇 분'/'다음날'/'사흘 후'/'없음')
+    time_delta: Optional[TimeDelta] = None    # CN-1: 같은 경과를 구조화(amount,unit,mode) — story_clock 결정론 누적용(없으면 null degrade)
     place: str = ""                           # 주요 장소(장소 체류 단조 감지 재료)
 
 

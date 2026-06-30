@@ -7,6 +7,8 @@
 from __future__ import annotations
 from ..domain.types import ContextBoard, SceneSpec
 from ..domain.world import StyleSpec
+from .textfmt import collapse_dashes
+from .fact_sheet import build_brief
 
 
 # 바닥(floor) 제약 — 미학과 무관한 비협상 조판/시장 제약. 미학 오버레이가 못 덮고, 교정 패스도 이것만 유지(단일 출처).
@@ -46,9 +48,16 @@ class PromptAssembler:
 
     def assemble(self, board: ContextBoard, scene: SceneSpec, prev_scenes: str) -> str:
         gt = "\n".join(f"- {f.entity}: {f.attr_label}={f.value}" for f in board.ground_truth) or "(없음)"
+        # 세계 규칙은 '낮은 신뢰 참조 맥락'이 아니라 '확정 설정'과 동급 고신뢰 — 헤더가 약속한 위치(세계규칙)에 직렬화(M-1).
+        wr = ("\n[세계 규칙 — 이 작품의 불변 규칙. 어기지 마라]\n"
+              + "\n".join(f"- {r}" for r in board.world_rules)) if board.world_rules else ""
+        # CN-3: 집필 직전 초점화 브리프(시점+이번 사건)를 최상단에 재표면화(key_events 는 원래 20k 덤프 뒤에야 등장 —
+        #       lost-in-the-middle 대응). 캐논은 바로 아래 [확정 설정]에 이미 있어 복제 않고 가리킨다. story_time(CN-1)은 여기로 통합.
+        brief = build_brief(board.story_time, scene.key_events)
+        brief_block = (brief + "\n\n") if brief else ""
         auth = "\n".join(f"- {d.text}" for d in board.authority) or "(없음)"
         narr = "\n".join(f"- [{r.source}:{r.ref}] {r.text}" for r in board.narrative) or "(이전 맥락 없음)"
-        prev_ch = board.prev_chapter[-self.prev_chapter_chars:] if board.prev_chapter else ""
+        prev_ch = collapse_dashes(board.prev_chapter[-self.prev_chapter_chars:]) if board.prev_chapter else ""   # 재주입 시 줄표 런 정규화 → 모델이 자기 틱을 교재로 안 봄(소스 루프 차단)
         sofar_block = (f"[지금까지 줄거리(누적 요약 — 전체 흐름·미결 사건을 잊지 말 것)]\n{board.story_so_far}\n\n"
                        if board.story_so_far else "")
         flow_block = (f"[직전 회차 원문(이어쓰기 기준 — 어조·문체·상황을 매끄럽게 이어라)]\n{prev_ch}\n\n"
@@ -58,7 +67,8 @@ class PromptAssembler:
         voice_block = (f"[인물 보이스 — 서로 구분되는 말투. 단 시그니처(어미·감탄사)는 대사 서너 개 중 한 번 정도만, "
                        f"모든 대사에 도배 금지(자기 패러디화 방지)]\n{board.voice_cards}\n\n" if board.voice_cards else "")
         return (
-            f"[확정 설정 — 절대 위반 금지(눈색·소속·생사·등급·관계·세계규칙)]\n{gt}\n\n"
+            f"{brief_block}"
+            f"[확정 설정 — 절대 위반 금지(눈색·소속·생사·등급·관계·세계규칙)]\n{gt}{wr}\n\n"
             f"[작가 지시 — 우선]\n{auth}\n\n"
             f"{voice_block}"
             f"{sofar_block}"

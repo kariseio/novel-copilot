@@ -26,7 +26,14 @@ class Settings(BaseSettings):
     # 컨텍스트 예산 — '기아 해소' 재배분(docs/context-redesign.md): 입력 ~40k토큰 목표, 헤드룸 60% 유지.
     gen_max_tokens: int = 3000
     chapter_max_tokens: int = 9000          # 단일 패스 회차 집필 출력 예산(장면 이어붙이기 폐기 — 재설계)
+    max_output_cap: int = 16000             # provider 출력 토큰 하드캡(모델 실한도 근사). 구형 8192 가 chapter 예산을
+    #                                         silently 8192 로 클램프해 회차가 비트 아니라 토큰예산에서 잘리던 결함 교정 — chapter_max_tokens 보다 커야 함
     max_rewrite_rounds: int = 3
+    # 생성→검증→실패분류→라우팅(근본 아키텍처): 전역 파손(절단·빈응답·미완결)은 보존할 base 가 없으니 '재생성',
+    # 국소 위반은 '국소 교정'(diff 한도 게이트로 본문파괴 차단). 둘 다 두더지잡기(검출기/사전) 0 — 일반 구조 신호만.
+    max_regen_attempts: int = 1             # 초안이 '빈 응답'이면 재생성 횟수(0=끔). 절단은 trim 으로 흡수(재생성 아님)
+    correction_max_drift: float = 0.5       # _rewrite 가 base 대비 이 비율 초과로 바뀌면 거부→base 유지(본문파괴 차단).
+    #   거친 안전망(실제 교정 diff 분포로 추후 보정 — 적대검증 F9). 너무 다름=거부→ESCALATED 노출이지 silent 출고 아님
     prev_chapter_context_chars: int = 8000   # 직전 회차 '전문' 수준(실전 1순위 관행 — 기존 4,000자는 56%만 전달)
     story_so_far_chars: int = 12000          # 누적 줄거리(현재 에피소드=상세 시놉시스 1,500자/화 + 과거=한줄·롤업)
     bible_digest_chars: int = 3500           # 설정집 카드(키워드 선별 — 심층 설정집 41+항목 대응)
@@ -36,10 +43,12 @@ class Settings(BaseSettings):
     max_live_sessions: int = 32              # 동시 캐시 세션 수(LRU)
     draft_ttl_sec: int = 6 * 3600            # 미접촉 컨셉 드래프트 폐기 기준(초)
     max_drafts: int = 200                    # 드래프트 하드캡(TTL 내 폭주 방어)
+    gen_job_retain_sec: int = 21600          # 끝난 회차생성 잡 보존(초, 6h) — 회차 1편 10분+ 자리비움 고려: 자리 떠도 결과 패널 재접속 복원(본문은 디스크 영속이라 더 길어도 무손실)
     continuity_polish: bool = True           # 회차 내부(수치·소지품) 연속성 교정 패스(+1콜/화)
     plant_backlog_threshold: int = 3         # 미회수 복선 적체 경보 임계(advisory)
     plant_inject_cap: int = 5                # 비트 설계에 참고로 노출할 미회수 복선 최대 수(plant_reminder opt-in 시)
     reader_desk: bool = True                 # G2: 블라인드 독자 행동 예측(advisory, +1콜/화). 비용 절감 시 off
+    claim_audit: bool = True                 # CN-2: 자유형 사실 모순 RAG-grounded advisory(+0~1콜/화, ch>1·검색결과 있을 때만). 비차단·non-hard. 비용 절감 시 off
     event_menu: bool = True                  # T3: 에피소드 활성 시 '적시 사건 메뉴' 생성(+1콜/에피소드 ≈ +0.1~0.3콜/화). off=결정론 폴백
     event_menu_refresh_every: int = 0        # T4: >0 이면 에피소드 중반 N회차마다 메뉴 재생성(긴 EP stale 해소, +비용·비결정성). 0=off(T3 1회 캐시)
     # 풍부함①③: worldgen 메타데이터는 풍부해지나(집착 편중·안티클리셰), **중립 프로즈 A/B 는 3:3 무승부** —

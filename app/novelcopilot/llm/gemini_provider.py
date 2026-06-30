@@ -31,6 +31,8 @@ class GeminiProvider(LLMProvider):
                 um = getattr(r, "usage_metadata", None)
                 if um:
                     self.usage.chat_tokens += int(getattr(um, "total_token_count", 0) or 0)
+                _cands = getattr(r, "candidates", None) or []
+                self.last_truncated = bool(_cands) and "MAX_TOKENS" in str(getattr(_cands[0], "finish_reason", "")).upper()
                 try:
                     txt = r.text or ""
                 except Exception:

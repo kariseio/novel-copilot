@@ -59,12 +59,13 @@ def short_line_ratio(text: str) -> float:
 
 from ..config import Settings
 from ..domain.types import (ContextBoard, SceneSpec, ChapterRecord, ChapterStatus,
-                            RoundTrace, AuthorDirective, SignalGrade, RetrievedItem)
+                            RoundTrace, AuthorDirective, SignalGrade)
 from ..domain.world import StyleSpec
 from ..llm.base import LLMProvider
 from .checker import Checker
 from .prompts import PromptAssembler, render_style, floor_only
 from .observability import EventBus
+from .correction import trim_dangling, within_correction_bounds, drift_ratio
 
 
 # 페이싱/반복 craft 지시(회차 집필 프롬프트 말미) — '한 장면 늘려쓰기(패딩)·동일 비트 반복'을 전진 압력으로 차단.
@@ -117,6 +118,7 @@ class ChapterGenerator:
         # A/B: scene > blanket 4:2 + ai_tell 변주 0.59 vs 0.49(블랭킷 '변주하라'가 역설적으로 변주↓=과적용 입증). scene>none·craft스택 미검 → 기본 off.
         self.style_mode = "scene" if getattr(settings, "scene_style_anchor", False) else "none"  # none/blanket/scene(A/B는 인스턴스 오버라이드)
         self._cur_scene_inject = ""              # generate()가 비트 기능으로 채우는 장면 앵커(_draft/_continue 주입)
+        self._cur_skill_inject = ""              # 켜진 회차 스킬(문체 등)의 주입 텍스트 — generate()가 회차마다 채움
 
     def _style_inject(self, beat: dict) -> str:
         if self.style_mode == "blanket":
@@ -173,9 +175,11 @@ class ChapterGenerator:
                 hook += "\n(끝을 예고하는 서술('앞으로 이런 일이 벌어질 것이다' 류) 대신, 장면 '안'의 구체 사건·대사로 끊어라.)"
         if chapter_mode:   # 회차 집필: 분량·장면 어휘는 모델 입력 금지(절단점은 글자 수가 아니라 극적 순간의 문제)
             out_instr = ("\n\n이번 회차 본문만 출력(머리말·설명·메타·예고문 금지). "
-                         "분량을 채우기 위한 묘사 늘리기 금지 — 이야기가 자연스러운 절단점에 이르면 거기서 멈춰라. "
+                         "분량을 채우기 위한 묘사 늘리기 금지. 이야기가 자연스러운 절단점에 이르면 거기서 멈춰라. "
                          "회차 전체에서 시제(과거형 기조)·따옴표 글리프를 일관되게 유지하고, 같은 사건·클라이맥스를 두 번 쓰지 마라. "
-                         "설정 모순·인물/인원 불일치를 발견하면 한쪽으로 자연스럽게 확정해 서술하라 — "
+                         "문장부호는 한국어 관습만 쓴다. 끊어 읽기·삽입구·여운은 쉼표·마침표·말줄임표(…)로 처리하고, "
+                         "긴 줄표(—)나 세미콜론(;) 같은 영어식 부호는 본문에 쓰지 마라(번역투 금지). "
+                         "설정 모순·인물/인원 불일치를 발견하면 한쪽으로 자연스럽게 확정해 서술하라. "
                          "본문은 독자가 그대로 읽는 완성된 소설이며, 작가의 작업 메모·괄호 주석·편집 코멘트가 끼어들 자리는 없다.")
             mt = self.settings.chapter_max_tokens
         else:
@@ -183,7 +187,7 @@ class ChapterGenerator:
             mt = self.settings.gen_max_tokens
         return self.provider.chat(
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
-             {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr + self.obsession_block + self.craft_block + self._cur_scene_inject}],
+             {"role": "user", "content": self.assembler.assemble(board, scene, prev_scenes) + hook + out_instr + self.obsession_block + self.craft_block + self._cur_scene_inject + self._cur_skill_inject}],
             temperature=0.85, max_tokens=mt)   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
 
     def _continue(self, board, sofar: str, closing=False, recent_tails=None, key_events=None) -> str:
@@ -206,8 +210,9 @@ class ChapterGenerator:
             [{"role": "system", "content": f"{self.style.system_persona} 확정 설정 절대 위반 금지.\n{self.style_block}"},
              {"role": "user", "content": self.assembler.assemble(cont_board, spec, sofar[-3500:]) + hook
               + "\n\n이어지는 본문만 출력(이미 쓴 부분 재출력 금지, 머리말·메타 금지). "
-              "모순·인물/인원 불일치를 발견하면 한쪽으로 자연스럽게 확정해 서술하라 — 본문에는 작업 메모·괄호 주석이 끼어들 자리가 없다."
-              + self.obsession_block + self.craft_block + self._cur_scene_inject}],
+              "문장부호는 한국어 관습만 쓴다(긴 줄표(—)·세미콜론(;) 등 영어식 부호 대신 쉼표·마침표·말줄임표). "
+              "모순·인물/인원 불일치를 발견하면 한쪽으로 자연스럽게 확정해 서술하라. 본문에는 작업 메모·괄호 주석이 끼어들 자리가 없다."
+              + self.obsession_block + self.craft_block + self._cur_scene_inject + self._cur_skill_inject}],
             temperature=0.85,   # 온도↓는 클리셰(고확률 토큰)를 오히려 늘릴 수 있어 보류 — 측정 후 재검토
             max_tokens=self.settings.chapter_max_tokens)
 
@@ -223,8 +228,15 @@ class ChapterGenerator:
               + self.floor_block},   # B-10: 미학 오버레이(작가 문체) 주입 제거 — 최소 교정이 재문체화로 번지는 것 차단
              {"role": "user", "content": f"[확정 설정]\n{gt}\n[설정 위반]\n{vlist}\n[원본 본문]\n{scene_text}"}],
             temperature=0.4, max_tokens=max_tokens or self.settings.gen_max_tokens)
-        # 길이 보존 가드: 절단/메타응답이 본문을 갉아먹는 회귀 차단(R2 본문 파괴 교훈 — 전량 재작성 채널의 안전망)
-        return out if len(out or "") >= len(scene_text) * 0.6 else scene_text
+        # diff 한도 게이트(R2 '본문파괴' 교훈을 코드 게이트로): 절단/메타응답(너무 짧음)뿐 아니라
+        # 지정 위반 범위를 넘어 좋은 본문까지 갈아엎는 과잉 재작성(너무 다름)도 거부 → 원본 유지.
+        if within_correction_bounds(scene_text, out or "",
+                                    max_drift=getattr(self.settings, "correction_max_drift", 0.6)):
+            return out
+        self.bus.emit("partial_rewrite", "correction_rejected", chapter=getattr(board, "chapter", 0),
+                      drift=round(drift_ratio(scene_text, out or ""), 2),
+                      in_chars=len(scene_text), out_chars=len(out or ""))
+        return scene_text
 
     def _reformat(self, text: str) -> str:
         """토막 행갈이 붕괴 복구 — 내용 불변, 조판만 정상 산문으로(문체 드리프트 루프 차단).
@@ -302,7 +314,7 @@ class ChapterGenerator:
     # ---- 퇴고(작가지시 프로즈 다듬기 — 사실 불변) ----
     def revise_prose(self, directive: str, before_text: str, span_text: str = "",
                      passes: list[str] | None = None, ids: list[str] | None = None,
-                     ontology=None, chapter_no: int = 0) -> str:
+                     ontology=None, chapter_no: int = 0, skills_inject: str = "") -> str:
         """작가 지시에 따라 회차 본문(또는 구간)의 *산문*만 다듬는다 — 사실 불변.
 
         설정·사건·수치·관계·캐논은 단 하나도 바꾸지 않고 표현·문체·가독성·대사 톤·반복·조판만 개선한다.
@@ -348,7 +360,7 @@ class ChapterGenerator:
             sys += " 제공된 앞뒤 문맥은 톤·연결을 맞추기 위한 참고일 뿐, 출력에 포함하지 마라."
         user = (f"[작가 지시] {directive}\n"
                 + (f"[앞 문맥(참고)]\n…{ctx_prefix}\n[뒤 문맥(참고)]\n{ctx_suffix}…\n" if span_text else "")
-                + f"[원문]\n{target_text}")
+                + f"[원문]\n{target_text}" + (skills_inject or ""))   # 켠 퇴고 스킬(어댑터) — 사실불변 sys 가드는 유지
         try:
             out = self.provider.chat(
                 [{"role": "system", "content": sys},
@@ -475,8 +487,10 @@ class ChapterGenerator:
 
     def generate(self, ch_no, beat, ontology, rag, wiki, directives=None,
                  prev_chapter_text: str = "", story_so_far: str = "", anchors=None,
-                 closing: bool = False, recent_tails=None, restraint=None) -> ChapterRecord:
+                 closing: bool = False, recent_tails=None, restraint=None, skills_inject: str = "",
+                 story_time: str = "") -> ChapterRecord:
         directives = directives or []
+        self._cur_skill_inject = skills_inject or ""   # 켜진 회차 스킬(opt-in) → draft/continue 프롬프트 말미 주입
         involved = beat.get("entities") or list(ontology.entities.keys())
         self.bus.emit("plan_chapter", "start", chapter=ch_no, title=beat.get("title", ""))
         # 단계별 토큰 계측(단위경제 — 일관성 오버헤드율 재료)
@@ -505,19 +519,17 @@ class ChapterGenerator:
                             + ", ".join(prov_names[:30]))
 
         narrative = list(anchors or [])   # 엔딩/아크 앵커(narrative, ground_truth 아님) 상단
-        # M-1: 세계 규칙 텍스트 주입(사장돼 있던 ontology.rules) — 헤더는 '세계규칙 위반 금지'라 약속하나 본문이 한 번도 못 보던 결함 해소(advisory).
+        # M-1: 세계 규칙 텍스트 주입(사장돼 있던 ontology.rules). 헤더가 '확정 설정'에 세계규칙을 약속하므로
+        #      낮은 신뢰 narrative 가 아니라 고신뢰 world_rules 슬롯으로(확정 설정 블록에 직렬화 — 권위 일치).
         world_rules = list(getattr(ontology, "rules", None) or [])
-        if world_rules:
-            narrative.insert(0, RetrievedItem(source="worldrule", ref="rules",
-                text="[세계 규칙 — 이 작품의 불변 규칙. 어기지 마라]\n" + "\n".join(f"- {r}" for r in world_rules[:12])))
         if ch_no > 1:
             # N-1: RAG 후보에서 '직전 회차' 제외(as_of=ch_no-2) — prev_chapter 전문이 직전을 전담하므로 검색 슬롯은 먼 회차 복선 회수에 쓴다.
             narrative += rag.search(beat.get("summary", ""), max(0, ch_no - 2), k=self.settings.rag_k)
             narrative += wiki.retrieve(beat.get("summary", ""), ch_no - 1, k=self.settings.wiki_k)
         ground_truth = (ontology.canon_facts(involved, ch_no)
                         + ontology.canon_relations(involved, ch_no))   # 확정 관계도 '박기'(ground_truth)
-        board = ContextBoard(chapter=ch_no, ground_truth=ground_truth,
-                             narrative=narrative, authority=directives,
+        board = ContextBoard(chapter=ch_no, ground_truth=ground_truth, world_rules=world_rules[:12],
+                             story_time=story_time, narrative=narrative, authority=directives,
                              prev_chapter=prev_chapter_text, story_so_far=story_so_far,
                              voice_cards=voice_cards)
         self.bus.emit("assemble_memory", "done", chapter=ch_no,
@@ -529,6 +541,7 @@ class ChapterGenerator:
             "style_rules": list(self.style.rules),                       # D-1: 매 draft 의 system 헤더 문체 규칙(상수)
             "author_style": (self.style.author_style or "")[:240],       # Layer 2 작가 문체 오버레이(설정 시만)
             "world_rules": world_rules,                                  # D-6/M-1: 실제 주입되는 세계 규칙
+            "story_time": story_time,                                    # CN-1: 결정론 누적 절대시점(고신뢰 주입)
             "ending_hook_mode": self.style.ending_hook,                  # D-3: 끝맺음 정책
             "recent_tails": [(t or "")[-80:] for t in (recent_tails or [])],
             "ground_truth": [f"{f.entity}: {f.attr_label}={f.value}" for f in board.ground_truth],
@@ -557,24 +570,41 @@ class ChapterGenerator:
         initial_caught = None
         self.bus.emit("draft_chapter", "start", chapter=ch_no)
         _t = self.provider.usage.chat_tokens
-        text = sanitize_meta(self._draft(board, spec, "", last=True, closing=closing,
-                                         recent_tails=recent_tails, chapter_mode=True))
         norm = int(self.style.target_chars_per_chapter * 0.85)   # 출고 규범(코드 판정 — 모델은 분량을 모른다)
         draft_ctx["length_norm"] = norm                          # D-2: 출고 규범(문체규칙의 '5천자' 지시와 대조 가능)
-        ext = 0
-        # 보강 상한 2→4: 건조한 author_style(또는 짧은 비트)은 세그먼트가 짧아 2회로 norm(5천자) 미달(페르소나 실측 3,618자).
-        # '이야기 전진'으로만 채우는 원칙은 유지 — 아래 진행 가드(<200자 중단)가 '진짜 더 쓸 게 없으면' 알아서 멈춰 물타기·낭비를 막는다.
-        # 정상 문체는 0~2회로 norm 도달해 루프를 빠져나가므로 추가 비용 없음(짧게 나오는 회차만 3~4회 사용).
-        while len(text) < norm and ext < 4:
-            ext += 1
-            self.bus.emit("draft_chapter", "extend", chapter=ch_no, chars=len(text), round=ext)
-            # G9: 이어쓰기에 '이 회차의 계획 사건'을 컨텍스트로(아직 못 다룬 쪽으로 전진하게 — 정보 제공, 분량 지시 아님)
-            more = sanitize_meta(self._continue(board, text, closing=closing, recent_tails=recent_tails,
-                                                key_events=beat.get("key_events") or []))
-            if len(more.strip()) < 200:      # 무의미 연장 → 중단(짧은 회차로 출고가 낫다)
+        ext_total = 0
+        # 생성→검증→실패분류→라우팅(적대검증 반영):
+        #  · 절단(max_tokens): 좋은 본문 + 잘린 꼬리 → 세그먼트별로 호출 직후 last_truncated 를 즉시 읽어 trim_dangling
+        #    으로 '잘린 꼬리만' 제거(전량 폐기=본문파괴 R2 위반, 빈/짧은 재추첨 위험 → 안 함). 깨끗한 종결에서 이어쓰기.
+        #  · 빈 응답: 보존할 게 없는 유일한 전역 파손 → 재생성(bounded). 절단은 여기로 안 옴(위에서 trim 처리됨).
+        _regen_cap = max(0, getattr(self.settings, "max_regen_attempts", 1))
+        for _regen in range(_regen_cap + 1):
+            self.provider.last_truncated = False
+            text = sanitize_meta(self._draft(board, spec, "", last=True, closing=closing,
+                                             recent_tails=recent_tails, chapter_mode=True))
+            if self.provider.last_truncated:        # 절단 → 잘린 꼬리만 제거(본문 보존), 깨끗한 종결에서 이어쓰기
+                text = trim_dangling(text)
+            ext = 0
+            # 보강 상한 2→4: 건조한 author_style(또는 짧은 비트)은 세그먼트가 짧아 2회로 norm(5천자) 미달(페르소나 실측 3,618자).
+            # '이야기 전진'으로만 채우는 원칙은 유지 — 아래 진행 가드(<200자 중단)가 '진짜 더 쓸 게 없으면' 알아서 멈춰 물타기·낭비를 막는다.
+            # 정상 문체는 0~2회로 norm 도달해 루프를 빠져나가므로 추가 비용 없음(짧게 나오는 회차만 3~4회 사용).
+            while text.strip() and len(text) < norm and ext < 4:   # 빈 초안은 이어쓰기 말고 재생성으로(아래)
+                ext += 1
+                self.bus.emit("draft_chapter", "extend", chapter=ch_no, chars=len(text), round=ext)
+                self.provider.last_truncated = False
+                # G9: 이어쓰기에 '이 회차의 계획 사건'을 컨텍스트로(아직 못 다룬 쪽으로 전진하게 — 정보 제공, 분량 지시 아님)
+                more = sanitize_meta(self._continue(board, text, closing=closing, recent_tails=recent_tails,
+                                                    key_events=beat.get("key_events") or []))
+                if self.provider.last_truncated:    # 이어쓰기도 절단되면 꼬리만 제거(seam 방지)
+                    more = trim_dangling(more)
+                if len(more.strip()) < 200:      # 무의미 연장 → 중단(짧은 회차로 출고가 낫다)
+                    break
+                text = text.rstrip() + "\n\n" + more.strip()
+            ext_total += ext
+            if text.strip() or _regen == _regen_cap:   # 본문 있으면 채택(절단은 trim 으로 처리됨). 빈 응답만 재생성
                 break
-            text = text.rstrip() + "\n\n" + more.strip()
-        draft_ctx["continuations"] = ext   # D-4: 이어쓰기 콜 수(이 회차 후반부가 '다른 컨텍스트'로 쓰였는지 가시화)
+            self.bus.emit("draft_chapter", "regenerated", chapter=ch_no, attempt=_regen + 1, reason="empty")
+        draft_ctx["continuations"] = ext_total   # D-4: 이어쓰기 콜 수(재생성 시 누적) — 후반부가 '다른 컨텍스트'로 쓰였는지 가시화
         if len(text) < norm:   # G9: 규범 미달 출고 가시화(silent 금지) — 작가·G3 회고 입력(차단 아님)
             self.bus.emit("draft_chapter", "under_norm", chapter=ch_no, chars=len(text), norm=norm)
         tail_seg = "\n".join(text.splitlines()[-15:])
@@ -657,10 +687,14 @@ class ChapterGenerator:
         final = self.checker.check_text(chapter_text, ontology, ch_no, involved)
         _track("check", _t)
         hard_remaining = final.hard
-        status = ChapterStatus.FINALIZED if not hard_remaining else ChapterStatus.ESCALATED
+        # 빈 본문(이중 빈응답·거부 등)을 FINALIZED 로 발행하면 rag 색인·요약이 story_so_far 를 영구 오염하고
+        # current_chapter 가 전진해 발행본에 빈 구멍이 남는다(적대검증). '조용한 정지 불가' 불변식대로 ESCALATED 로.
+        _empty = not (chapter_text or "").strip()
+        status = ChapterStatus.FINALIZED if (not hard_remaining and not _empty) else ChapterStatus.ESCALATED
 
         indexed = pages = 0
         summary = detail_synopsis = ""
+        claim_findings: list = []
         if status == ChapterStatus.FINALIZED:
             indexed = rag.index_chapter(ch_no, chapter_text)
             _t = self.provider.usage.chat_tokens
@@ -673,20 +707,37 @@ class ChapterGenerator:
             _t = self.provider.usage.chat_tokens
             summary, detail_synopsis = self._summarize(chapter_text, story_so_far)   # 2계층 요약(한줄+상세)
             _track("summarize", _t)
+            # CN-2 claim-audit: 자유형 사실 모순을 과거 회차 프로즈와 대조(RAG-grounded·비차단·non-hard).
+            #   status 는 위에서 이미 확정됨 — 여기서 무엇을 찾든 발행을 막지 않는다(작가 가시화 advisory).
+            if getattr(self.settings, "claim_audit", True):
+                _t = self.provider.usage.chat_tokens
+                from .claim_audit import audit_chapter
+                _q = f"{beat.get('summary', '')} {' '.join(beat.get('key_events', []) or [])} {' '.join(roster)}"
+                claim_findings = audit_chapter(self.provider, rag, chapter_text, ch_no, query_hint=_q)
+                _track("claim_audit", _t)
+                for a in claim_findings:
+                    self.bus.emit("claim_audit", "contradiction", chapter=ch_no, claim=a.get("claim", ""),
+                                  canon=a.get("canon", ""), ref=a.get("ref", ""), why=a.get("why", ""))
             self.bus.emit("finalize", "done", chapter=ch_no, indexed=indexed, wiki_pages=pages,
                           summarized=bool(summary))
         recovery_hints = []
         if status != ChapterStatus.FINALIZED:
             from .recovery import recovery_report
             recovery_hints = recovery_report(hard_remaining)   # 작가용 자연어 진단+회복 레버(결정론·LLM 0콜)
+            if _empty:   # 빈 생성 — hard 가 없어 recovery_report 가 비므로 전용 안내(silent 금지)
+                recovery_hints = [{"kind": "empty_generation", "entity": "",
+                                   "diagnosis": "이번 회차 본문이 비어 있습니다(생성 실패·거부로 추정).",
+                                   "fix": ["‘이대로 다시 생성’으로 재시도하세요(작가 지시를 더하면 도움이 됩니다).",
+                                           "반복되면 다른 지시·비트로 바꿔 보세요."], "levers": ["rewrite"]}]
             self.bus.emit("finalize", "escalation", chapter=ch_no,
-                          hard=[v.kind for v in hard_remaining], recovery=recovery_hints)
+                          hard=([v.kind for v in hard_remaining] or ["empty_generation"]), recovery=recovery_hints)
 
         return ChapterRecord(
             chapter=ch_no, title=beat.get("title", ""), status=status, text=chapter_text,
             summary=summary, detail_synopsis=detail_synopsis, scenes=1 + ext, n_retrieved=len(narrative), indexed_chunks=indexed,
             wiki_pages_touched=pages, initial_violations=initial_caught or [], recovery_hints=recovery_hints,
             chapter_function=beat.get("chapter_function", ""), hook_type=beat.get("hook_type", ""),
-            time_advance=beat.get("time_advance", ""), place=beat.get("place", ""),   # G4: 기능 차원 영속(훅 이력)
+            time_advance=beat.get("time_advance", ""), time_delta=beat.get("time_delta"),   # G4 기능차원 + CN-1 구조화 델타 영속
+            place=beat.get("place", ""), claim_audit=claim_findings,   # CN-2: 자유형 모순 advisory 영속(비구속)
             gen_context={"draft": draft_ctx},   # 디버그: 집필 입력(계획 입력은 copilot 가 'plan' 키로 합침)
             final_violations=final.violations, rounds=rounds, usage_by_stage=stage_usage)

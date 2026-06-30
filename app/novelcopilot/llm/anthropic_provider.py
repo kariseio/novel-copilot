@@ -8,7 +8,7 @@ from .base import LLMProvider
 
 class AnthropicProvider(LLMProvider):
     def __init__(self, gen_model: str, embed_provider: LLMProvider, api_key: str | None = None,
-                 max_output_cap: int = 8192):
+                 max_output_cap: int = 16000):
         super().__init__()
         import anthropic
         self._anthropic = anthropic
@@ -16,6 +16,7 @@ class AnthropicProvider(LLMProvider):
         self.gen_model = gen_model
         self._embed = embed_provider
         self._cap = max_output_cap
+        self._use_temp = True   # 신형 모델(opus-4-8 등)은 temperature deprecated → 거부 시 자동 제거하고 *인스턴스 단위로 기억*(이후 콜은 헛 시도 0)
 
     def chat(self, messages, *, temperature=0.7, max_tokens=2200, json_mode=False) -> str:
         sys = "\n".join(m["content"] for m in messages if m["role"] == "system")
@@ -25,24 +26,24 @@ class AnthropicProvider(LLMProvider):
         if json_mode:   # Anthropic 네이티브 json 모드 없음 — 지시로(base.chat_json 가 파싱 실패 시 재시도)
             sys = (sys + "\n유효한 JSON 객체만 출력. 설명·코드펜스 금지.").strip()
         mt = min(int(max_tokens), self._cap)
-        use_temp = True   # 신형 모델(opus-4-8 등)은 temperature deprecated → 거부 시 자동 제거 후 재시도
         last = None
         for attempt in range(4):
             try:
                 kw = dict(model=self.gen_model, max_tokens=mt, messages=conv)
                 if sys:
                     kw["system"] = sys
-                if use_temp:
+                if self._use_temp:
                     kw["temperature"] = temperature
                 r = self._client.messages.create(**kw)
                 self.usage.chat_calls += 1
                 if getattr(r, "usage", None):
                     self.usage.chat_tokens += int(r.usage.input_tokens + r.usage.output_tokens)
+                self.last_truncated = (getattr(r, "stop_reason", None) == "max_tokens")   # 절단 신호(harness 재생성용)
                 return "".join(b.text for b in r.content if getattr(b, "type", None) == "text") or ""
             except Exception as e:
                 msg = str(e)
-                if use_temp and "temperature" in msg and ("deprecated" in msg or "unsupported" in msg.lower()):
-                    use_temp = False
+                if self._use_temp and "temperature" in msg and ("deprecated" in msg or "unsupported" in msg.lower()):
+                    self._use_temp = False   # 인스턴스 단위로 기억 → 같은 provider 의 이후 모든 콜은 헛 시도 없이 바로 무-temp
                     continue   # 파라미터 적응 — 즉시 재시도(대기 없음)
                 last = e
                 time.sleep(2 * (attempt + 1))
