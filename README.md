@@ -172,6 +172,13 @@ git push origin github-public:main
 
 실행할 때마다 `github-public` 위에 커밋이 하나 쌓이고(트리가 같으면 건너뜀), 원격 `main` 은 fast-forward 로 따라갑니다.
 브랜치를 처음 만들 때 기존 원격 이력을 이으려면 먼저 `git branch -f github-public origin/main` 을 실행합니다.
+
+GitLab(`gitlab-origin`) 에는 같은 트리를 별도 브랜치로 잇습니다. 원격 이력이 서로 달라 브랜치를 나눈 것이며, 두 브랜치의 트리는 같습니다.
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\export_github.ps1 -Branch gitlab-public
+git push gitlab-origin gitlab-public:main
+```
 제외·재포함 규칙은 스크립트 상단의 `$Exclude` / `$Reinclude` 에 있습니다.
 
 ## 라이선스
