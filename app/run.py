@@ -7,4 +7,4 @@ if __name__ == "__main__":
     uvicorn.run("novelcopilot.main:app",
                 host=os.environ.get("NOVEL_HOST", "127.0.0.1"),
                 port=int(os.environ.get("NOVEL_PORT", "8000")),
-                reload=bool(os.environ.get("NOVEL_RELOAD")))
+                reload=os.environ.get("NOVEL_RELOAD", "").strip().lower() in ("1", "true", "yes"))

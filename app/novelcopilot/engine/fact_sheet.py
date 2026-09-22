@@ -9,14 +9,15 @@
 브리프에 또 넣으면 중복(>엔티티 다수 시 lossy 절단까지) — 그래서 브리프는 캐논을 복제하지 않고 *가리킨다*.
 브리프 = 시점(CN-1, 여기로 통합) + 이번 회차 핵심 사건 + '아래 확정 설정·세계 규칙을 어기지 마라' 바인딩.
 
-원칙: (1) 프로즈 덤프 금지 — 짧게(cap). (2) 새 사실 발명 0 — 결정론 조립값(story_clock·beat)만 초점화.
-(3) I-1 예산경합 주의 — 길이 상한으로 본문 예산 잠식 차단.
+원칙: (1) 프로즈 덤프 금지 — 결정론 조립값만 짧은 불릿으로. (2) 새 사실 발명 0 — 결정론 조립값(story_clock·beat)만 초점화.
+(3) 재료 자체가 유계(시점 한 줄 + beat 사건 목록)라 길이 상한 없이도 브리프는 짧다(절단 전면 제거 2026-08-21).
 """
 from __future__ import annotations
 
 
-def build_brief(story_time: str, key_events, *, cap: int = 600) -> str:
-    """집필 직전 '이 회차 집필 기준' 브리프(시점 + 이번 사건). 비면 ''(주입 생략). cap=본문 길이 상한."""
+def build_brief(story_time: str, key_events, *, story_mode: bool = False) -> str:
+    """집필 직전 '이 회차 집필 기준' 브리프(시점 + 이번 사건). 비면 ''(주입 생략).
+    절단 전면 제거(2026-08-21): 구 cap=600 꼬리 절단 소거 — 사건 수 자체가 beat 설계에서 유계라 전문."""
     lines: list[str] = []
     if story_time:
         lines.append(f"· 시점: {story_time}(시간 역행·시점 모순 금지)")
@@ -26,6 +27,10 @@ def build_brief(story_time: str, key_events, *, cap: int = 600) -> str:
     if not lines:
         return ""
     body = "\n".join(lines)
-    if len(body) > cap:
-        body = body[:cap].rstrip() + " …"
-    return "[이 회차 집필 기준 — 이 사건들을 아래 확정 설정·세계 규칙을 하나도 어기지 않고 써라]\n" + body
+    # SY-1(3차 감사 m-e + 최종 감사 중대 3-ⓑ): 변형 헤더는 story 모드 '전용' — evs 유무로 분기하면
+    #   레거시 이어쓰기 콜(항상 사건 0줄)의 프롬프트 바이트가 전 작품에서 바뀐다(하위호환 위반).
+    #   story 모드에서만 지시 대상 없는 '이 사건들을'을 뺀다. 레거시의 대상 없는 지시어는 별건 결함.
+    head = ("[이 회차 집필 기준: 아래 확정 설정·세계 규칙을 하나도 어기지 않고 써라]"
+            if (story_mode and not evs)
+            else "[이 회차 집필 기준: 이 사건들을 아래 확정 설정·세계 규칙을 하나도 어기지 않고 써라]")
+    return head + "\n" + body

@@ -10,9 +10,12 @@ import re
 from collections import Counter
 
 # 서술 구조어(틱이 아님) — 빈도 검사 제외
+# DP-8: 1인칭 서술자 대명사(나는·내가·나를·나도)를 편입 — 3인칭 대명사(그녀·그는·그가)와 대칭.
+#   1인칭 회차에서 서술 주어가 고빈도로 반복되는 것은 문체 틱이 아니라 시점의 문법적 필연이므로 빈도 검사 제외.
 _STOP = {"그리고", "하지만", "그러나", "그런데", "있었다", "없었다", "것이다", "했다", "않았다",
          "그녀", "그는", "그가", "자신", "지금", "다시", "위해", "함께", "수многие", "있는", "없는",
-         "했다가", "였다", "이었다", "한다", "된다", "대한", "통해", "처럼", "만큼", "아니라"}
+         "했다가", "였다", "이었다", "한다", "된다", "대한", "통해", "처럼", "만큼", "아니라",
+         "나는", "내가", "나를", "나도"}
 
 
 _QUOTE_SPAN = re.compile(r'["“]([^"”\n]{2,90})["”]')
@@ -103,6 +106,108 @@ def tense_leak_ratio(text: str) -> float:
     return present / len(sents)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# DP-9: 결정론 카운터 2종(과거형 종결 run · 무동사 파편문 비율) — ai_tell 계보의 '측정 피처'.
+#   판정기 아님(no-whack-a-mole): 임계·이진 판정·자동교정 트리거 없음. 작가/실험 게이트가 추세로만 해석.
+#   DP-9 확정: 종결 run 은 house cadence(대조군)라 단독 변별력이 낮고, '파편문 비율'이 판별축
+#   (DP-4 실측 16.7% vs 대조 5.1%). 자유 정독이 지각-하 틱을 건너뛰므로 수치가 정독의 앵커가 된다.
+# ─────────────────────────────────────────────────────────────────────────────
+_TRAIL = re.compile(r'[\s.!?…"“”\'’·—\-)\]]+$')       # 말미 구두점·따옴표 제거(종결 음절 노출)
+
+
+def _has_ss_jong(ch: str) -> bool:
+    """음절 종성이 ㅆ(쌍시옷)인가 — 과거 선어말어미 았/었/였/했 판별(종성 index 20)."""
+    if not ch:
+        return False
+    o = ord(ch)
+    return 0xAC00 <= o <= 0xD7A3 and (o - 0xAC00) % 28 == 20
+
+
+def _prose_sentences(text: str) -> list[str]:
+    """지문(비대사) 문장 리스트 — tense_leak_ratio 와 동일 계보(대사행 제외).
+    대사는 본디 파편·호격이 잦아 지문 문체 신호를 오염하므로 제외(두 카운터가 공유)."""
+    prose_lines = [ln.strip() for ln in (text or "").splitlines()
+                   if ln.strip() and not ln.strip().startswith(('"', '“', '”', '—', '-'))]
+    sents = []
+    for ln in prose_lines:
+        for s in re.split(r"(?<=[.!?…])\s+", ln):
+            s = s.strip()
+            if len(s) >= 2:
+                sents.append(s)
+    return sents
+
+
+def past_tense_run(text: str) -> dict:
+    """과거형 종결(…ㅆ다) 문장의 최장 연속 run·비율 — 지문만, LLM 0콜.
+    검출=종결 '다' 직전 음절의 종성이 ㅆ(았/었/였/했)일 때만(종성 ㅆ 가드) → 현재·형용사 '다'(간다/크다/이다)는 제외.
+    측정 피처(advisory)일 뿐 판정기 아님(임계·자동교정 없음). DP-9 註: 종결 run 은 house cadence 라 단독
+    변별력이 낮을 수 있어 파편문 비율과 함께 읽는다. 한계: 존재사 '있다'(종성 ㅆ·현재)는 과거로 근사 계수될
+    수 있음(형태소분석기 없는 거친 근사) — 절대값 판정 금물."""
+    sents = _prose_sentences(text)
+    flags = [(len(c) >= 2 and c.endswith("다") and _has_ss_jong(c[-2]))
+             for c in (_TRAIL.sub("", s) for s in sents)]
+    n = len(flags)
+    max_run = cur = best_start = run_start = 0
+    for i, f in enumerate(flags):
+        if f:
+            run_start = run_start if cur else i
+            cur += 1
+            if cur > max_run:
+                max_run, best_start = cur, run_start
+        else:
+            cur = 0
+    examples = sents[best_start:best_start + max_run][:4] if max_run else []
+    n_past = sum(flags)
+    return {"max_run": max_run, "n_past": n_past, "n_sent": n,
+            "ratio": round(n_past / n, 3) if n else 0.0, "examples": examples}
+
+
+# 무동사 파편문 판별 — 종결 서술어(동사/형용사/존대/청유/명령/의문)나 연결어미로 끝나면 '동사 있는 문장'=파편 아님.
+#   조사 §4 오탐 가드: 비종결 연결어미(-다면·-으면·-던가류)·의문·호격은 정상 문장이므로 반드시 제외.
+#   반말 해체 종결(-어/-여/-해: 먹어·봤어·해)도 서술어가 있는 정상 문장 — 제외(DP-8 1인칭 도파민물의 idiom).
+#     대가(문서화): 명사가 어/여/해로 끝나면(상어·오해) 과소계수 — 연결어미형(고/서/면/니) 명사와 같은 보수적
+#     오탐 클래스로, 판별축을 '실제 서술어를 파편으로 오계수'(cry-wolf)하지 않는 방향으로 옮긴다.
+_PREDICATE_TAIL = re.compile(
+    r"("
+    r"다|요|죠|"                                                     # 종결 서술(대다수 '다')·존대
+    r"습니다|ㅂ니다|십니다|답니다|랍니다|"                            # 존대 종결
+    r"군|군요|네|네요|구나|는구나|더라|더군|거든|걸|"                  # 반말·감탄 종결
+    r"어|여|해|"                                                     # 반말 해체 종결(먹어·봤어·했어·해) — §4 확장 가드
+    r"았어|었어|였어|"                                                # 과거 반말(어간 노출 — 어 subsume 하나 가독 유지)
+    r"자|라|어라|아라|여라|렴|으렴|시오|십시오|ㅂ시다|읍시다|"          # 청유·명령
+    r"까|까요|나|나요|니|냐|느냐|는가|은가|ㄴ가|을까|ㄹ까|던가|던지|는지|을지|ㄹ지|"  # 의문 종결(§4 가드)
+    r"다면|라면|으면|면서|면|거나|든지|든가|지만|는데|은데|ㄴ데|"       # 비종결 연결어미(§4 가드)
+    r"니까|어서|아서|고서|려고|려면|도록|어도|아도|고|서"              # 비종결 연결어미(계속)
+    r")$")
+_VOCATIVE_TAIL = re.compile(r"[가-힣]{1,6}[아야]$")                   # 호격(부름) — 이름/명사 + 아/야(§4 가드)
+
+
+def fragment_ratio(text: str) -> dict:
+    """무동사 파편문(서술어 없는 명사·부사 종결) 비율 — 지문만, LLM 0콜. DP-9 판별축(DP-4 16.7% vs 대조 5.1%).
+    파편 후보=종결 서술어로 끝나지 않는 지문 문장. 조사 §4 오탐 가드로 '동사 있는 정상 문장'을 제외:
+      · 비종결 연결어미(-다면·-으면·-던가류) · 의문(? 및 의문 종결) · 호격(이름+아/야)
+      · 반말 해체 종결(-어/-여/-해: 먹어·봤어·해 — DP-8 1인칭 도파민물의 서술 idiom) → 전부 파편 아님.
+    측정 피처(advisory) — 판정·임계·자동교정 없음. 형태소분석기 없는 거친 근사(명사가 우연히 연결어미·해체
+    형태로 끝나면 — 고/서/면/니/어/여/해 — 과소계수) — 이 근사는 '실제 서술어를 파편으로 오계수(cry-wolf)'하지
+    않는 보수적 방향이다. 절대값 판정 금물, 코퍼스 분위수 대비 추세로만."""
+    sents = _prose_sentences(text)
+    frags, n = [], 0
+    for s in sents:
+        if s.rstrip().endswith(("?", "？")):        # 의문 제외(§4)
+            continue
+        core = _TRAIL.sub("", s)
+        if len(core) < 2:
+            continue
+        n += 1
+        if _PREDICATE_TAIL.search(core):            # 서술어/연결어미 종결 → 파편 아님
+            continue
+        if _VOCATIVE_TAIL.search(core):             # 호격 제외(§4)
+            continue
+        frags.append(s)
+    return {"n_fragment": len(frags), "n_sent": n,
+            "ratio": round(len(frags) / n, 3) if n else 0.0, "examples": frags[:5]}
+
+
 def ai_tell_profile(text: str, roster: set[str] | None = None) -> dict:
     """한국어 'AI 티'의 무사전·결정론 분포 신호(KatFishNet 자질 재구현 — LLM 0콜·사전 0·형태소분석기 의존 0).
 
@@ -125,7 +230,8 @@ def ai_tell_profile(text: str, roster: set[str] | None = None) -> dict:
     chars = len(re.findall(r"\S", body))
     if n == 0 or chars == 0:
         return {"comma_per_100": 0.0, "comma_per_sent": 0.0, "sent_len_cv": 0.0,
-                "lexical_mattr": 0.0, "ending_diversity": 0.0, "simile_per_1k": 0.0, "n_sent": 0}
+                "lexical_mattr": 0.0, "ending_diversity": 0.0, "simile_per_1k": 0.0,
+                "past_run_max": 0, "frag_ratio": 0.0, "n_sent": 0}
     commas = body.count(",") + body.count("，")
     lens = [len(s) for s in sents]
     mean = sum(lens) / n
@@ -157,20 +263,12 @@ def ai_tell_profile(text: str, roster: set[str] | None = None) -> dict:
         "lexical_mattr": _mawin(words, 60),                   # ③ 길이-불변 TTR, 낮을수록 반복(AI)
         "ending_diversity": _mawin(endings, 40),              # ④ 길이-불변, 낮을수록 종결 단조(AI)
         "simile_per_1k": round(simile / chars * 1000, 2),     # ⑤ 밀도, 높을수록 비유 강박(AI)
+        "past_run_max": past_tense_run(body)["max_run"],       # DP-9 과거형 종결 최장 run(지문·종성 ㅆ 가드)
+        "frag_ratio": fragment_ratio(body)["ratio"],           # DP-9 무동사 파편문 비율(지문·§4 오탐 가드) — 판별축
         "n_sent": n,
     }
 
-
-def chapter_quality_report(text: str, prev_tails: list[str], roster: set[str] | None = None) -> dict:
-    """회차 1개의 결정론 품질 리포트 — 편집자 감점 축 전부 숫자로."""
-    from .harness import fragmentation_score, short_line_ratio   # 기존 검출기 재사용
-    tail = " ".join([ln for ln in text.splitlines() if ln.strip()][-3:])
-    return {
-        "tics": word_tics(text, roster),
-        "hook_sim": round(hook_repeat(tail, prev_tails), 2),
-        "short_line_ratio": round(short_line_ratio(text), 2),
-        "frag_score": round(fragmentation_score(text), 1),
-        "tense_leak": round(tense_leak_ratio(text), 3),
-        "directive_leak": bool(re.search(r"^\s*절단", text, re.MULTILINE)),
-        "ai_tell": ai_tell_profile(text, roster),   # 한국어 AI티 분포 신호(advisory 추세)
-    }
+# NOTE(PR-2·감사 G4): dead였던 chapter_quality_report(text-level 번들러 — 제품 생성 경로에서 호출 0)는
+#   회차 통합 검증 SSOT인 engine.verification.build_verification(ChapterRecord 결정론 집계)로 흡수·삭제됨.
+#   개별 검출기(word_tics·short_line_ratio·fragmentation_score·tense_leak_ratio·hook_repeat·past_tense_run·
+#   fragment_ratio·ai_tell_profile)는 그대로 유지 — 실측 부품이므로. 실험 러너는 필요한 검출기를 직접 호출.

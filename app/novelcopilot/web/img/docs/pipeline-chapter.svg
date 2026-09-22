@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 470" role="img" aria-labelledby="pc-title pc-desc" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="pc-title">다음 회차 쓰기 — 8단계 파이프라인</title>
+  <desc id="pc-desc">회차 계획, 재료 조립, 집필, 사실 교정, 문체 다듬기, 파생물, 검증 리포트, 발행 게이트의 여덟 단계 흐름도.</desc>
+  <defs>
+    <marker id="pc-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <text x="30" y="34" font-size="19" font-weight="700" fill="#111317">다음 회차 쓰기 — 여덟 단계</text>
+  <text x="30" y="56" font-size="13" fill="#6B7280">"다음 회차 쓰기" 버튼 뒤에서 도는 결정론 파이프라인 (계획 → 집필 → 검증 → 수리)</text>
+
+  <!-- Row 1 cards: x = 30, 250, 470, 690  (width 200, gap 20) -->
+  <!-- ① 회차 계획 -->
+  <g>
+    <rect x="30" y="80" width="200" height="90" rx="12" fill="#EFF4FF" stroke="#DBE5FB"/>
+    <circle cx="56" cy="106" r="13" fill="#2563EB"/>
+    <text x="56" y="111" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+    <text x="80" y="111" font-size="14.5" font-weight="700" fill="#1B4AC2">회차 계획</text>
+    <text x="46" y="138" font-size="12" fill="#3A3F46">비트를 뽑고 보상(정산)이</text>
+    <text x="46" y="156" font-size="12" fill="#3A3F46">터질 지점을 배치</text>
+  </g>
+  <!-- ② 재료 조립 -->
+  <g>
+    <rect x="250" y="80" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <circle cx="276" cy="106" r="13" fill="#2563EB"/>
+    <text x="276" y="111" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+    <text x="300" y="111" font-size="14.5" font-weight="700" fill="#111317">재료 조립</text>
+    <text x="266" y="138" font-size="12" fill="#3A3F46">확정 설정을 사실로 박고</text>
+    <text x="266" y="156" font-size="12" fill="#3A3F46">회수할 복선을 검색</text>
+  </g>
+  <!-- ③ 집필 -->
+  <g>
+    <rect x="470" y="80" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <circle cx="496" cy="106" r="13" fill="#2563EB"/>
+    <text x="496" y="111" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+    <text x="520" y="111" font-size="14.5" font-weight="700" fill="#111317">집필</text>
+    <text x="586" y="111" font-size="11" fill="#6B7280" text-anchor="end">Claude</text>
+    <text x="486" y="138" font-size="12" fill="#3A3F46">계획된 사건이 남을 때만</text>
+    <text x="486" y="156" font-size="12" fill="#3A3F46">이어 쓰는 전진 집필</text>
+  </g>
+  <!-- ④ 사실 교정 -->
+  <g>
+    <rect x="690" y="80" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <circle cx="716" cy="106" r="13" fill="#2563EB"/>
+    <text x="716" y="111" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+    <text x="740" y="111" font-size="14.5" font-weight="700" fill="#111317">사실 교정</text>
+    <text x="706" y="138" font-size="12" fill="#3A3F46">확정 설정과 대조해 위반을</text>
+    <text x="706" y="156" font-size="12" fill="#3A3F46">잡고 자동 교정</text>
+  </g>
+
+  <!-- Row 1 arrows between cards -->
+  <line x1="230" y1="125" x2="250" y2="125" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+  <line x1="450" y1="125" x2="470" y2="125" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+  <line x1="670" y1="125" x2="690" y2="125" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+
+  <!-- Serpentine down from ④ to ⑤ (⑤ sits under ④) -->
+  <path d="M790 170 L790 200 L790 220" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+
+  <!-- Row 2 cards (right to left flow): ⑧ x=30, ⑦ x=250, ⑥ x=470, ⑤ x=690 -->
+  <!-- ⑤ 문체 다듬기 -->
+  <g>
+    <rect x="690" y="225" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <circle cx="716" cy="251" r="13" fill="#2563EB"/>
+    <text x="716" y="256" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+    <text x="740" y="256" font-size="14.5" font-weight="700" fill="#111317">문체 다듬기</text>
+    <text x="706" y="283" font-size="12" fill="#3A3F46">휴머나이즈로 'AI 티' 수술</text>
+    <text x="706" y="301" font-size="12" fill="#3A3F46">사실 바뀌면 가드가 거부</text>
+  </g>
+  <!-- ⑥ 파생물 -->
+  <g>
+    <rect x="470" y="225" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <circle cx="496" cy="251" r="13" fill="#2563EB"/>
+    <text x="496" y="256" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+    <text x="520" y="256" font-size="14.5" font-weight="700" fill="#111317">파생물</text>
+    <text x="486" y="283" font-size="12" fill="#3A3F46">요약·작품 노트·복선 정산</text>
+    <text x="486" y="301" font-size="12" fill="#3A3F46">가상 독자 반응 기록</text>
+  </g>
+  <!-- ⑦ 검증 리포트 -->
+  <g>
+    <rect x="250" y="225" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <circle cx="276" cy="251" r="13" fill="#2563EB"/>
+    <text x="276" y="256" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+    <text x="300" y="256" font-size="14.5" font-weight="700" fill="#111317">검증 리포트</text>
+    <text x="266" y="283" font-size="12" fill="#3A3F46">전 축을 회차마다 기록</text>
+    <text x="266" y="301" font-size="12" fill="#3A3F46">결측은 "미실행"으로 정직</text>
+  </g>
+  <!-- ⑧ 발행 게이트 -->
+  <g>
+    <rect x="30" y="225" width="200" height="90" rx="12" fill="#EEF1F8" stroke="#DCDFE4" stroke-dasharray="4 3"/>
+    <circle cx="56" cy="251" r="13" fill="#1E2A4A"/>
+    <text x="56" y="256" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
+    <text x="80" y="256" font-size="14.5" font-weight="700" fill="#1E2A4A">발행 게이트</text>
+    <text x="216" y="256" font-size="11" fill="#6B7280" text-anchor="end">옵션</text>
+    <text x="46" y="283" font-size="12" fill="#3A3F46">초비판 독자가 정독하고</text>
+    <text x="46" y="301" font-size="12" fill="#3A3F46">하차 트리거를 찾아 수리</text>
+  </g>
+
+  <!-- Row 2 arrows (right-to-left flow) -->
+  <line x1="690" y1="270" x2="670" y2="270" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+  <line x1="470" y1="270" x2="450" y2="270" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+  <line x1="250" y1="270" x2="230" y2="270" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+
+  <!-- Output: 발행된 회차 -->
+  <path d="M130 315 L130 350 L130 372" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+  <g>
+    <rect x="30" y="378" width="300" height="58" rx="12" fill="#E6F4EC" stroke="#0F7A4B" stroke-opacity="0.35"/>
+    <text x="52" y="405" font-size="14.5" font-weight="700" fill="#0F7A4B">발행된 회차</text>
+    <text x="52" y="424" font-size="12" fill="#3A3F46">본문 + 파생 자산 + 검증 기록이 함께 남음</text>
+  </g>
+
+  <text x="890" y="432" font-size="11.5" fill="#6B7280" text-anchor="end">출처: 작동 방식 §2</text>
+</svg>

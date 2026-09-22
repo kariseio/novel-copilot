@@ -7,6 +7,7 @@
 - 강제 자동 적용 없음 — 작가가 고른 revision 만 revise_spine 으로 반영.
 """
 from __future__ import annotations
+from ..llm import promptlog   # XR-3: consumer 태그(관측 전용 — 위임·바이트 불변)
 import json
 
 # 미래 아크/엔딩에 한해 개정 가능한 필드(과거·집필분 보호)
@@ -14,6 +15,7 @@ ARC_FIELDS = {"goal", "central_conflict", "turning_point", "title"}
 ENDING_FIELDS = {"ending", "central_question", "thematic_payoff"}
 
 
+@promptlog.stage("retrospective")
 def generate_retrospective(provider, *, genre: str, ending: str, done_arcs: list, upcoming_arcs: list,
                            pacing: dict, ledger_open: list, reader_trend: list) -> dict:
     """회고 제안 생성(LLM 1콜). 반환 {diagnosis, revisions:[{target,field,new_value,reason}]}. 실패 시 빈 제안."""
@@ -33,7 +35,7 @@ def generate_retrospective(provider, *, genre: str, ending: str, done_arcs: list
            'ending|central_question|thematic_payoff","new_value":"개정 내용","reason":"왜"}]}')
     try:
         r = provider.chat_json([{"role": "system", "content": sys},
-                                {"role": "user", "content": usr}], temperature=0.4, max_tokens=2000)
+                                {"role": "user", "content": usr}], temperature=0.4)
     except Exception:
         return {"diagnosis": "", "revisions": []}
     valid_arc_ids = {a.get("arc_id") for a in upcoming_arcs}

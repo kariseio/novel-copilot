@@ -22,7 +22,11 @@ class Entity:
     aliases: list = field(default_factory=list)
     base_status: str = "alive"
     voice: str = ""                  # 말투 시그니처(보이스 분화 — 스타일 지침)
+    voice_stages: dict = field(default_factory=dict)   # VB-1: 상태 연동 보이스(EntitySpec.voice_stages 미러). key=상태값, value=그 단계 카드. 비면 voice 사용 = 기존 동작
     provisional: bool = False        # 동적 커밋된 신규 인물
+    introduced: bool = False         # RR-1: 본문 첫 등장 완료(EntitySpec.introduced 미러 — 프로즈 생성 시 데뷔 전 인물 명부 노출 차단용). SSOT 는 state.world.entities
+    debut_episode: str = ""          # RR-1: 데뷔 계획 에피소드(EntitySpec.debut_episode 미러). 미등장·미캐스트 판정 보조
+    cardinality: dict = field(default_factory=dict)   # CN-4: 관계 개수 상한(rel_id→max). 예 외동={"sibling_of":0}. 비면 무제한
 
 
 class Ontology:
@@ -44,10 +48,9 @@ class Ontology:
         self.rules.append(text)
 
     def remove_rule(self, text: str) -> None:   # demote 역연산
-        try:
-            self.rules.remove(text)
-        except ValueError:
-            pass
+        # CN-5: 주입 시 열거표 접미사(' [대응표: ...]')가 붙을 수 있음 → 원형 텍스트 또는 그 접두 매칭까지 제거
+        #  (exact-match 실패로 orphan 고신뢰 캐논이 잔존하던 결함 차단, 적대검증 MED-1). 결정론(고정 마커).
+        self.rules = [r for r in self.rules if r != text and not r.startswith(text + " [대응표:")]
 
     def set_state(self, eid, attr, value, eff_from, reason="", trust_tier="ground_truth") -> None:
         # upsert(last-writer-wins) by (eid,attr,eff,tier): 같은 시점에 *다른* ground_truth 값이 쌓이면
@@ -74,18 +77,29 @@ class Ontology:
                     val, best, best_gt = v, f, gt
         return val
 
+    def binding_entry_as_of(self, eid, attr, chapter) -> tuple:
+        """XR-3 계보용 — binding 값과 '그 값이 어디서 왔는가'를 함께 준다: (값, eff_from|None, 출처).
+        출처는 'timeline'(회차 커밋) 또는 'seed_attr'(EntitySpec 초기값). 값 선택 규칙은
+        binding_state_as_of 와 동일한 루프다(계산 지점 단일화 — 계보와 주입값이 갈라지지 않게).
+
+        결측 정직(K1): 런타임 timeline 튜플은 (eid, attr, value, eff_from, reason, trust_tier) 6원소로
+        TimelineEntry.provenance(machine|author)를 싣지 않는다(factory:84·session:59 직렬화에서 소실).
+        provenance 를 계보에 담으려면 튜플 형태를 바꿔야 하고 그건 조립 경로 변경이라 기록을 포기한다 —
+        world_rules 의 rule_id 소실과 같은 처리(호출부가 gap 으로 표기)."""
+        ent = self.entities.get(eid)
+        if not ent:
+            return (None, None, "")
+        val = ent.base_status if attr == "status" else ent.attrs.get(attr)
+        best, src = -1, "seed_attr"
+        for (e, a, v, f, _r, t) in self.timeline:
+            if e == eid and a == attr and t == "ground_truth" and f <= chapter and f > best:
+                val, best, src = v, f, "timeline"
+        return (val, (best if best >= 0 else None), src)
+
     def binding_state_as_of(self, eid, attr, chapter):
         """ground_truth-tier 상태만 반영하는 결정론 캐논값('박기'). 기계추출(narrative_inferred) 상태는 비구속 → 제외.
         canon_facts 주입과 사망 하드게이트가 이걸 본다(비대칭: AI 추출 상태는 작가 확정 전 자동 binding 금지)."""
-        ent = self.entities.get(eid)
-        if not ent:
-            return None
-        val = ent.base_status if attr == "status" else ent.attrs.get(attr)
-        best = -1
-        for (e, a, v, f, _r, t) in self.timeline:
-            if e == eid and a == attr and t == "ground_truth" and f <= chapter and f > best:
-                val, best = v, f
-        return val
+        return self.binding_entry_as_of(eid, attr, chapter)[0]
 
     def alias_map(self) -> dict[str, str]:
         m = {}
@@ -105,9 +119,47 @@ class Ontology:
         return [e.id for e in self.entities.values()
                 if self.is_actor(e.etype) and any(nm and nm in text for nm in [e.name] + list(e.aliases))]
 
-    def canon_facts(self, eids, chapter) -> list[OntologyFact]:
-        """ground_truth 슬롯용 결정론 사실. '박기'. 라벨은 vocab 에서."""
+    # ── CX-2 노출 등급 — 생성 입력용 단일 질의점 ──
+    def is_public_attr(self, attr: str) -> bool:
+        """생성 입력(확정 설정·조회·cast)에 보여도 되는 속성인가. 스펙 미등록 속성은 public(하위호환)."""
+        spec = self.vocab.attr(attr)
+        return getattr(spec, "exposure", "public") == "public" if spec is not None else True
+
+    def public_attrs(self, eid, chapter) -> list[tuple[str, object, bool]]:
+        """개체의 public 속성 (attr, 값, is_binding) 목록 — 생성 입력 소비처(canon_facts·lookup·cast) 공용.
+
+        값 규약(CX-3 채널 일관): 같은 속성에 binding(ground_truth) 값이 있으면 그것만, 없을 때만
+        비구속(state_as_of) 값을 is_binding=False 로 — push/lookup 이 서로 다른 값을 싣는 모순의 소스 차단.
+        internal 속성은 여기서 걸러진다(검증·심사·UI 는 무필터 state_as_of 경로를 그대로 쓴다)."""
+        e = self.entities.get(eid)
+        if not e:
+            return []
+        out: list[tuple[str, object, bool]] = []
+        for a in e.attrs:
+            if not self.is_public_attr(a):
+                continue
+            b = self.binding_state_as_of(eid, a, chapter)
+            if b is not None:
+                out.append((a, b, True))
+                continue
+            v = self.state_as_of(eid, a, chapter)
+            if v is not None:
+                out.append((a, v, False))
+        return out
+
+    def canon_facts(self, eids, chapter, *, actors_status_only: bool = False,
+                    with_lineage: bool = False):
+        """ground_truth 슬롯용 결정론 사실. '박기'. 라벨은 vocab 에서. CX-2: public 속성만(내부 계측 축 비주입).
+
+        actors_status_only(CX-3): True 면 행동주체(인물)의 속성 push 를 생략하고 생사 중대 상태만 남긴다 —
+        인물 사실은 조회(lookup) 단일 경로가 전담(3중 주입·채널 모순 해소). 세계 상수 등 비행동주체는 계속 push.
+        기본 False = 기존 동작 그대로(gen_tools OFF 하위호환).
+
+        with_lineage(XR-3): True 면 (facts, lineage_items) 튜플 — facts 는 False 일 때와 완전 동일하고
+        (주입 바이트 불변 계약·테스트 고정) lineage_items 는 facts 와 1:1 순서 대응하는 출처 기록이다
+        (ID·eff_from·tier·채택 사유). 기본 False = 기존 시그니처·반환형 그대로."""
         facts: list[OntologyFact] = []
+        lin: list[dict] = []
         for eid in eids:
             e = self.entities.get(eid)
             if not e:
@@ -115,17 +167,25 @@ class Ontology:
             if self.is_actor(e.etype):
                 # 생애주기 '중대 상태'(terminal/irreversible = 사망·각성·발각 등)만 캐논 주입. 데이터주도('dead' 리터럴 제거):
                 # death 없는 장르에 '생존' 노이즈 강제 안 함 + custom 한글 states 의 거짓 '생존' 주입 방지.
-                st = self.binding_state_as_of(eid, "status", chapter)   # ground_truth(작가·시드)만 — 기계추출 비주입
+                st, _eff, _org = self.binding_entry_as_of(eid, "status", chapter)   # ground_truth(작가·시드)만 — 기계추출 비주입
                 crit = self.vocab.terminal_states("status") | self.vocab.irreversible_states("status")
                 if st is not None and st in crit:
                     spec = self.vocab.attr("status")
                     facts.append(OntologyFact(entity=e.name, attr_label=(spec.label if spec else "생사"),
                                               value=("사망" if st == "dead" else str(st))))
-            for a in e.attrs:
-                v = self.binding_state_as_of(eid, a, chapter)
-                if v is not None:
+                    lin.append({"src": "canon_fact", "id": f"{eid}.status", "eff_from": _eff,
+                                "tier": "ground_truth", "origin": _org, "reason": "critical_status"})
+            if actors_status_only and self.is_actor(e.etype):
+                continue   # CX-3: 인물 속성은 조회 단일 경로 — 위 생사 중대 상태만 push
+            for a, v, is_binding in self.public_attrs(eid, chapter):
+                if a == "status":
+                    continue   # 생애주기는 위 중대 상태 분기가 전담(이중 주입 방지 — 기존 동작 유지)
+                if is_binding:   # push 는 종전대로 binding 만(비구속 값은 조회 채널 몫)
                     facts.append(OntologyFact(entity=e.name, attr_label=self.vocab.label(a), value=str(v)))
-        return facts
+                    _, _eff2, _org2 = self.binding_entry_as_of(eid, a, chapter)
+                    lin.append({"src": "canon_fact", "id": f"{eid}.{a}", "eff_from": _eff2,
+                                "tier": "ground_truth", "origin": _org2, "reason": "binding_state_as_of"})
+        return (facts, lin) if with_lineage else facts
 
     # ---- 관계 엣지(자유 속성그래프) ----
     def rel_spec(self, rel_id: str) -> RelationSpec:
@@ -180,10 +240,13 @@ class Ontology:
                 best[k] = e
         return list(best.values())
 
-    def canon_relations(self, eids, chapter) -> list[OntologyFact]:
+    def canon_relations(self, eids, chapter, *, with_lineage: bool = False):
         """ground_truth 슬롯용 결정론 관계 사실('박기'). 작가 확정(ground_truth) + 객관(pov=None) 엣지만 대상.
         - 추정(narrative_inferred) 엣지가 작가 확정 관계를 밀어내 누락시키지 않음.
-        - 관점(pov) 엣지는 '그 주체의 인식/믿음'(거짓 가능)이라 객관 캐논에 주입하지 않음(비대칭·관점 분리)."""
+        - 관점(pov) 엣지는 '그 주체의 인식/믿음'(거짓 가능)이라 객관 캐논에 주입하지 않음(비대칭·관점 분리).
+
+        with_lineage(XR-3): True 면 (facts, lineage_items) — facts 는 False 일 때와 동일. 엣지는 노드
+        timeline 과 달리 provenance 를 런타임까지 보존하므로(RelationEdge.provenance) 계보에 실린다."""
         wanted = set(eids)
         best: dict = {}
         for e in self.edges_as_of(chapter):
@@ -193,6 +256,7 @@ class Ontology:
             if k not in best or e.eff_from > best[k].eff_from:
                 best[k] = e
         facts: list[OntologyFact] = []
+        lin: list[dict] = []
         for e in best.values():
             if e.src_id not in wanted and e.dst_id not in wanted:
                 continue
@@ -202,7 +266,11 @@ class Ontology:
             label = self.rel_spec(e.rel_id).label
             value = f"{dst.name}({e.state})" if e.state else dst.name   # 질적 상태가 있으면 함께(예: 동맹(소원))
             facts.append(OntologyFact(entity=src.name, attr_label=f"관계:{label}", value=value))
-        return facts
+            lin.append({"src": "canon_relation",
+                        "id": (e.edge_id or f"{e.rel_id}:{e.src_id}->{e.dst_id}:{e.eff_from}"),
+                        "eff_from": e.eff_from, "tier": e.trust_tier,
+                        "provenance": list(e.provenance or []), "reason": "edges_as_of·objective"})
+        return (facts, lin) if with_lineage else facts
 
     def _name(self, eid: str) -> str:
         e = self.entities.get(eid)

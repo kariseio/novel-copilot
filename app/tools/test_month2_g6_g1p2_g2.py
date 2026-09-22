@@ -81,15 +81,21 @@ def test_payoff_detect() -> bool:
     return ok
 
 
-# ---------- G2: 블라인드 독자 데스크(advisory) ----------
+# ---------- G2/DP-10: 시뮬 독자 데스크(advisory·hair-trigger 스키마) ----------
 def test_reader_desk() -> bool:
-    fake = ScriptFake([{"got": "각성 등급 공개", "pay_next": True, "why": "다음 전투가 궁금해 결제"}])
+    # DP-10 신규 스키마: {drop, kill_trigger, hate_comment, retention_est, why}
+    fake = ScriptFake([{"drop": True, "kill_trigger": "\"그는 다시 각성했다\"",
+                        "hate_comment": "또 각성? 하차합니다", "retention_est": 25, "why": "전개 정체"}])
     p = reader_prediction(fake, "이번 회차 본문...", "지금까지 줄거리", "헌터물")
-    ok = (p and p["got"] == "각성 등급 공개" and p["pay_next"] is True and "결제" in p["why"])
+    ok = (p and p["drop"] is True and "각성" in p["kill_trigger"]
+          and p["retention_est"] == 25 and p["hate_comment"] and "정체" in p["why"])
+    # retention_est 정수 정규화(문자·범위) + kill_trigger 미기재 시 '없음'
+    p2 = reader_prediction(ScriptFake([{"drop": False, "retention_est": "150", "why": "괜찮음"}]), "본문", "", "x")
+    ok &= (p2 and p2["retention_est"] == 100 and p2["kill_trigger"] == "없음" and p2["drop"] is False)
     # 빈 응답 → None(비차단), 빈 본문 → None(콜 안 함)
-    ok &= (reader_prediction(ScriptFake([{"got": "", "why": ""}]), "본문", "", "x") is None)
+    ok &= (reader_prediction(ScriptFake([{"kill_trigger": "", "hate_comment": "", "why": ""}]), "본문", "", "x") is None)
     ok &= (reader_prediction(ScriptFake([{}]), "", "", "x") is None)
-    print(f"[{'OK' if ok else 'FAIL'}] 독자 데스크: got/pay_next/why 파싱·빈응답 None·빈본문 None(advisory·비차단)")
+    print(f"[{'OK' if ok else 'FAIL'}] 시뮬 독자 데스크: drop/kill_trigger/hate_comment/retention_est 파싱·정수정규화·빈응답 None")
     return ok
 
 

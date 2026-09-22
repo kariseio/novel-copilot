@@ -1,7 +1,15 @@
+# 서비스 실행(novelcopilot/) 필수 의존성. 검증 환경: Python 3.12
 fastapi>=0.111
 uvicorn[standard]>=0.30
-openai>=1.30
-numpy>=1.26
-rank-bm25>=0.2.2
 pydantic>=2.7
 pydantic-settings>=2.3
+python-dotenv>=1.0
+openai>=2.0
+anthropic>=0.71
+numpy>=1.26
+rank-bm25>=0.2.2
+
+# 선택 — 필요할 때만 설치
+#   Gemini 프로바이더(모델 라우팅 gemini:...):  pip install google-genai
+#   LangSmith 트레이싱(LANGSMITH_TRACING=1):     pip install langsmith
+#   테스트·도구 스크립트:                        pip install -r requirements-dev.txt

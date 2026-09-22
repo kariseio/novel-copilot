@@ -19,6 +19,8 @@
   <nav class="top-nav">
     <a class="top-link" role="button" tabindex="0" onclick="go('#/skills')"
        onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('#/skills')}">✨ 스킬 라이브러리</a>
+    <a class="top-link" href="/about.html">소개</a>
+    <a class="top-link" href="/manual.html">문서</a>
   </nav>
   <div id="health" class="health" title="서버 연결 상태"></div>
 </header>
@@ -33,7 +35,17 @@
 
   <div class="home-grid">
     <section class="panel lib-panel">
-      <h2>내 작품 <span class="muted small" id="lib-count"></span></h2>
+      <div class="lib-head">
+        <h2>내 작품 <span class="muted small" id="lib-count"></span></h2>
+        <a class="dash-enter" role="button" tabindex="0" onclick="go('#/dashboard')"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();go('#/dashboard')}">📊 관측 대시보드</a>
+        <select id="lib-sort" class="lib-sort" aria-label="작품 정렬 순서" onchange="setLibSort(this.value)">
+          <option value="recent">최근 만든 순</option>
+          <option value="title">제목순</option>
+          <option value="progress">진행률순</option>
+          <option value="chapters">쓴 회차 많은 순</option>
+        </select>
+      </div>
       <div id="project-list" class="book-list">불러오는 중…</div>
     </section>
 
@@ -54,6 +66,18 @@
 <!-- ===== SKILLS LIBRARY (전역 — 작품 무관) ===== -->
 <main id="view-skills" class="view hidden">
   <div id="skills-library" class="skills-library"></div>
+</main>
+
+<!-- ===== OBSERVABILITY DASHBOARD (FI-4 · 서재 레벨 전역 관측) ===== -->
+<main id="view-dashboard" class="view hidden">
+  <div class="dash-head panel">
+    <div>
+      <h2>관측 대시보드 <span class="muted small">전 작품 원시 수치 — 판정 아님</span></h2>
+      <div class="muted small" id="dash-sub"></div>
+    </div>
+    <button onclick="goHome()">← 목록</button>
+  </div>
+  <div id="dashboard-body" class="dashboard-body">불러오는 중…</div>
 </main>
 
 <!-- ===== CREATE (대화로 세계관 빚기) ===== -->
@@ -141,8 +165,8 @@
       <span class="export-wrap">
         <button onclick="this.parentElement.classList.toggle('open')">📤 내보내기 ▾</button>
         <div class="export-menu">
-          <button onclick="exportNovel('txt')">텍스트 (.txt)</button>
-          <button onclick="exportNovel('md')">마크다운 (.md)</button>
+          <button onclick="exportNovel('txt')">텍스트 — 회차별 .txt (zip)</button>
+          <button onclick="exportNovel('md')">마크다운 — 회차별 .md (zip)</button>
         </div>
       </span>
       <button class="primary" onclick="openViewer()">📖 읽기 모드</button>
@@ -184,12 +208,19 @@
             </label>
             <label class="dir-keep"><input type="checkbox" id="dir-keep" /> 계속 적용 <span class="muted small">— 체크하면 다음 회차에도 이 지시를 유지(아크 내내 지킬 제약)</span></label>
             <div id="write-skill-hint" class="write-skill-hint"></div>
+            <!-- XR-7: 퇴고 반영 안 된 파생 자료 사전 점검(참고·비차단 — 재계산은 작가가 버튼으로) -->
+            <div id="stale-derivatives" class="readiness stale-derivs"></div>
             <button id="gen-btn" class="primary" onclick="generateNext()">다음 회차 쓰기</button>
             <div id="harness-log" class="harness-log"></div>
             <div id="gen-result" class="gen-result"></div>
             <details class="geninfo">
               <summary>🔍 이 회차 생성 정보 — 어떤 정보로 만들었나</summary>
               <div id="inspect-gen" class="inspect-body"></div>
+            </details>
+            <!-- GA-2/FI-2: 생성 디버그 트레이스 — 중간 산출물 타임라인(첫 초안·판정·수술·후보·이벤트·실패) + 작가 의도·퇴고·재생성 3원천 조인 -->
+            <details id="trace-details" class="geninfo" ontoggle="loadTracePanel()">
+              <summary>🔬 생성 디버그 트레이스 — 판단·행위·실패·작가 의도 타임라인</summary>
+              <div id="inspect-trace" class="inspect-body"></div>
             </details>
           </section>
         </div>

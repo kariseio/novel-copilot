@@ -6,7 +6,7 @@ from novelcopilot.config import get_settings
 from novelcopilot.repository import FilesystemProjectRepository
 from novelcopilot.services import CopilotService
 
-N_CH = 5
+N_CH = 6
 
 
 def main():

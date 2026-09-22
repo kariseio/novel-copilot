@@ -16,7 +16,13 @@ def create_provider(settings: Settings) -> LLMProvider:
     name = settings.llm_provider
     if name not in _REGISTRY:
         raise ValueError(f"알 수 없는 LLM 프로바이더: {name!r} (등록됨: {list(_REGISTRY)})")
-    return _REGISTRY[name](settings)
+    provider = _REGISTRY[name](settings)
+    # PL-1(2026-08-17 사용자 지시): 모든 콜 전문을 파일 영속 — 단일 지점 래핑(role provider 도 여길 경유).
+    #   OFF 면 래핑 자체를 생략해 종전과 객체 동일(프롬프트·동작 바이트 불변은 ON 에서도 보장 — 관측 전용).
+    if getattr(settings, "prompt_log", True):
+        from .promptlog import PromptLoggingProvider
+        provider = PromptLoggingProvider(provider)
+    return provider
 
 
 def create_role_provider(settings: Settings, model_spec: str) -> LLMProvider:

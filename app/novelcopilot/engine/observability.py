@@ -7,7 +7,7 @@
 from __future__ import annotations
 from typing import Callable
 
-FAILURE_MODES = {"parse_failure", "non_convergence", "escalation", "degraded_judge", "tool_error"}
+FAILURE_MODES = {"parse_failure", "empty_response", "non_convergence", "escalation", "degraded_judge", "tool_error"}
 
 
 class EventBus:

@@ -4,3 +4,30 @@ __pycache__/
 .env
 app/data/
 app/.env
+
+# ST-1b 저작권: 레퍼런스 상용 연재작 원문은 절대 커밋 금지(분석·측정 전용 로컬 자료)
+reference/
+
+# B-27: 위생 소스차단 — 일회성 스크래치/임시 덤프는 기본 ignore.
+# 이미 추적 중인 파일은 아래 negation 으로 예외 처리(언트랙 금지).
+# app/cj.txt · app/full.html · ppt/ 는 사용자 판단 대기 — ignore 하지 말 것.
+
+# 일회성 스크래치 스크립트 (app/tools/_*.py)
+app/tools/_*.py
+!app/tools/_audit_extract.py
+!app/tools/_test_planner.py
+
+# 툴 리포트 임시 덤프 (app/tools/reports/) — 커밋된 리서치/감사 산출물은 예외
+app/tools/reports/*
+!app/tools/reports/*.md
+!app/tools/reports/blind_audit_gaps.json
+!app/tools/reports/gate_validity.json
+!app/tools/reports/model_comparison.json
+!app/tools/reports/model_comparison_rejudged.json
+!app/tools/reports/sim_persona_log.json
+!app/tools/reports/test_history.jsonl
+ai-web-novel-abcur/
+
+# 가상환경
+.venv/
+venv/

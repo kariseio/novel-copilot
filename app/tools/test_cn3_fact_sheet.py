@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""CN-3 회차 집필 브리프(fact_sheet) 테스트 — 초점화 조립·길이상한·빈입력·최상단 배치·캐논 비복제. LLM 0콜.
+"""CN-3 회차 집필 브리프(fact_sheet) 테스트 — 초점화 조립·무절단 전문·빈입력·최상단 배치·캐논 비복제. LLM 0콜.
 
 설계(적대검증 반영): 브리프는 캐논(등장 고정값)을 복제하지 않는다 — 시점 + 이번 사건만. 캐논은 인접한 [확정 설정]에.
 """
@@ -24,9 +24,12 @@ def test_brief_empty_when_no_inputs():
     assert build_brief("", ["  ", ""]) == ""                  # 공백 사건만 → 미주입
 
 
-def test_brief_length_cap():
-    b = build_brief("시점X", ["사건 " * 30] * 40, cap=600)
-    assert len(b) < 700 and b.endswith("…")                  # 본문 cap+말줄임(예산 경합 차단)
+def test_brief_no_truncation():
+    # 절단 전면 제거(2026-08-21): 구 cap=600 꼬리 절단 소거 — 사건 목록이 길어도 전문 보존(말줄임 없음)
+    evs = ["사건 " * 30] * 40
+    b = build_brief("시점X", evs)
+    assert "…" not in b and b.endswith("사건")               # 마지막 사건까지 유실 0(말줄임 없음)
+    assert len(b) > 600                                       # 구 cap 을 실제로 넘는 입력으로 검증
 
 
 def test_brief_does_not_duplicate_canon():

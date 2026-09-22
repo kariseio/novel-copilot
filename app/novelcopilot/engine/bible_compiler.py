@@ -56,7 +56,11 @@ def bible_digest(bible: StoryBible, budget: int = 1500,
     lines, total = [], 0
     for e in ordered:
         cat = CATEGORY_LABEL.get(e.category, e.category)
-        line = f"[{cat}] {e.title}: {e.prose[:200]}"
+        # XR-6⒜(cross-review/005 §2.4): 작가 확정 항목만 ✓ 긍정 표시(구현 후보) — 미검수는 무표시(부정 라벨 0·
+        #   종전 "[cat] title" 바이트 그대로). "]✓ " 마커는 prompts.py 구현 명령 조건의 결정론 검출 계약
+        #   (작가 프로즈 내 ✓ 오탐 차단 — 감사 경미 7).
+        mark = "✓ " if e.status == "author_approved" else " "
+        line = f"[{cat}]{mark}{e.title}: {e.prose}"   # 절단 전면 제거(2026-08-21): 항목 전문 — 선별은 아래 budget 루프(줄 단위·드롭 수 정직)가 담당
         if lines and total + len(line) > budget:
             break
         lines.append(line)
@@ -64,7 +68,10 @@ def bible_digest(bible: StoryBible, budget: int = 1500,
     dropped = len(ordered) - len(lines)
     if not lines:
         return [], dropped
-    return [RetrievedItem(source="bible", ref="digest", text="[세계관 설정집]\n" + "\n".join(lines))], dropped
+    # XR-6⒜(감사 조건 2·6): 범례는 예산 컷 '이후' 실린 줄 기준(dangling legend 차단) · em dash 0(EM-1) ·
+    #   "확정" 권위어 대신 기능어(확정설정 블록과의 권위 이중화 차단 — 감사 중대 4).
+    legend = "(✓=작가가 쓰기로 정한 항목)" if any("]✓ " in l for l in lines) else ""
+    return [RetrievedItem(source="bible", ref="digest", text=f"[세계관 설정집{legend}]\n" + "\n".join(lines))], dropped
 
 
 def migrate_world_to_bible(world) -> list[BibleEntry]:

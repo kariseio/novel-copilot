@@ -22,6 +22,20 @@ def _is_true(v) -> bool:
     return v is True or (isinstance(v, str) and v.strip().lower() in ("true", "1", "yes", "y"))
 
 
+def table_lookup(table: dict, key: str, value: str) -> str | None:
+    """CN-5 열거규칙 flat-lookup — 선언된 표(키→값)에서 key 의 캐논값과 본문 주장 value 를 대조.
+    반환: 위반 시 '캐논값'(≠ 본문 주장), 일치/판정불가면 None. 세계별 하드코딩 0 — 순수 데이터 대조(판정=코드, 키·값 추출=LLM).
+    미선언 키는 판정 대상 아님(과잉게이트 금지) — 표에 없는 키를 본문이 발명해도 여기선 침묵(범위 밖)."""
+    k, v = _norm(key), _norm(value)
+    if k is None or v is None:
+        return None
+    canon = table.get(k)
+    if canon is None:                     # 표에 선언 안 된 키 → 대조 불가(범위 밖)
+        return None
+    cn = _norm(canon)
+    return cn if cn != v else None
+
+
 class PredicateEvaluator(ABC):
     kind: str = ""
 

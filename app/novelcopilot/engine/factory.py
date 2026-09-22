@@ -66,9 +66,20 @@ def build_ontology(world: WorldConfig, vocab: Vocabulary) -> Ontology:
     for es in world.entities:
         o.add(Entity(id=es.id, name=es.name, etype=es.etype, attrs=dict(es.attrs),
                      aliases=list(es.aliases), base_status=es.base_status,
-                     voice=getattr(es, "voice", ""), provisional=es.provisional))
+                     voice=getattr(es, "voice", ""), provisional=es.provisional,
+                     voice_stages=dict(getattr(es, "voice_stages", None) or {}),   # VB-1: 상태 연동 보이스 미러(비면 기존 동작)
+                     introduced=bool(getattr(es, "introduced", False)),        # RR-1: 데뷔 상태 미러(프로즈 명부 노출 차단용)
+                     debut_episode=getattr(es, "debut_episode", "") or "",     # RR-1: 데뷔 계획 미러
+                     cardinality=dict(getattr(es, "cardinality", None) or {})))   # CN-4 관계 상한 로드
     for wr in world.world_rules:
-        o.add_rule(wr.text)
+        # CX-2: internal 규칙(반전 서술 지침 등 스포 평문)은 생성 입력 채널(ontology.rules)에서 제외 —
+        #   심사(build_rules)·아크 계획(world.world_rules 직접 참조)에는 그대로 남는다. 기본 public=바이트 동일.
+        if getattr(wr, "exposure", "public") == "internal":
+            continue
+        # CN-5: 열거표가 있으면 고신뢰 주입 텍스트에 대응을 명시(집필이 정확한 키→값 보유=예방). WorldRuleSpec.text 는 원형 유지.
+        tbl = getattr(wr, "table", None)
+        suffix = (" [대응표: " + ", ".join(f"{k}={v}" for k, v in tbl.items()) + "]") if tbl else ""
+        o.add_rule(wr.text + suffix)
     for t in world.timeline:
         o.set_state(t.entity_id, t.attr, t.value, t.eff_from, reason=t.reason)
     return o   # seed_edges 는 build_engine 에서 검증 후 적재(무검증 적재 시 영구 dangling 락 방지)
@@ -84,10 +95,19 @@ class EngineBundle:
     generator: ChapterGenerator
     updater: OntologyUpdater
     event_bus: EventBus
+    aux_provider: LLMProvider | None = None   # CE-1 ⓑ: 보조 스테이지 provider(copilot 의 ledger/propose 델타 계측용). 폴백 시 gen provider
 
 
 def build_engine(world: WorldConfig, provider: LLMProvider, settings: Settings,
-                 event_bus: EventBus | None = None) -> EngineBundle:
+                 event_bus: EventBus | None = None,
+                 aux_provider: LLMProvider | None = None,
+                 extract_provider: LLMProvider | None = None) -> EngineBundle:
+    # CE-1 ⓑ: aux_provider = 보조(기계) 스테이지용 저가 provider. 미주입이면 gen provider 로 폴백 →
+    #   Wiki/OntologyUpdater/generator._summarize 가 전부 동일 provider 로 돌아 기존 경로 바이트 동일(하위호환).
+    #   세션이 aux_model 로부터 1회 생성해 주입한다(콜마다 재생성 금지). embed 는 여전히 OpenAI 위임(RAG 일관).
+    # extract_provider = 캐논 추출(ClaimExtractor) 전용 — 미주입이면 gen provider 폴백(스왑 0·기존 경로 동일).
+    aux = aux_provider or provider
+    exp = extract_provider or provider
     bus = event_bus or EventBus()
     vocab = Vocabulary.from_world(world)
     ontology = build_ontology(world, vocab)
@@ -120,19 +140,19 @@ def build_engine(world: WorldConfig, provider: LLMProvider, settings: Settings,
             bus.emit("factory", "invalid_seed_edge",
                      edge_id=e.edge_id or f"{e.rel_id}:{e.src_id}->{e.dst_id}", rel_id=e.rel_id)
 
-    extractor = ClaimExtractor(provider, vocab, list(world.world_rules))   # copy: world.world_rules 와 공유 금지(promote 시 이중 append 방지)
+    extractor = ClaimExtractor(exp, vocab, list(world.world_rules))   # copy: world.world_rules 와 공유 금지(promote 시 이중 append 방지)
     rule_engine = RuleEngine(build_rules(world), vocab)
     checker = Checker(extractor, rule_engine)
 
     rag = RAG(provider)
-    wiki = Wiki(provider)
+    wiki = Wiki(aux)   # CE-1 ⓑ: wiki(인물카드 재생성)=aux. embed 는 aux 내부에서 OpenAI 위임(RAG 일관·비용 동일)
     for seed in world.wiki_seeds:
         wiki.seed_page(WikiPage(page_id=seed.page_id, page_type=seed.page_type, body=seed.body,
                                 payoff_deadline=seed.payoff_deadline,
                                 as_of_narrative_order=seed.as_of_narrative_order,
                                 provenance=[f"{seed.as_of_narrative_order}화"]))
 
-    generator = ChapterGenerator(provider, checker, world.style, bus, settings)
-    updater = OntologyUpdater(provider, vocab, bus, allow_reversal=world.allow_state_reversal)
+    generator = ChapterGenerator(provider, checker, world.style, bus, settings, aux_provider=aux)  # CE-1 ⓑ: _summarize=aux
+    updater = OntologyUpdater(aux, vocab, bus, allow_reversal=world.allow_state_reversal)   # CE-1 ⓑ: ontology_propose=aux
     return EngineBundle(vocab=vocab, ontology=ontology, rag=rag, wiki=wiki, checker=checker,
-                        generator=generator, updater=updater, event_bus=bus)
+                        generator=generator, updater=updater, event_bus=bus, aux_provider=aux)

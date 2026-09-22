@@ -14,6 +14,8 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
+# FI-1(설계 §3): 아래 sim_persona 임포트가 requests.Session.request 를 X-NC-Actor: tool 로 1회 패치한다(멱등).
+#   이 모듈의 requests.post/get 도 같은 Session 클래스를 경유하므로 자동으로 tool 로 표기된다(작가 원장 오염 방지).
 from sim_persona import sse_generate, eval_chapter, record, BASE  # noqa: E402
 
 RUN = "audit-fresh-3works"

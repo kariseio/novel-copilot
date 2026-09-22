@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>NovelCopilot — AI 웹소설 코파일럿</title>
+<meta name="description" content="AI가 쓰고, 작가가 이끕니다. 세계관을 정하면 엔진이 연재를 집필하고, 모든 회차를 계측·검증·수리해 '사람이 쓴 것처럼 읽히는' 상태로 발행합니다." />
+<style>
+/* ===== NovelCopilot 소개 랜딩 — 자체 완결형(인라인 CSS·외부 CDN/폰트 0) =====
+   디자인 토큰은 앱 style.css 와 통일: 순백 캔버스 / 딥 잉크네이비 시그니처 / 모던 블루(#2563EB) 액센트 / 시스템 산세리프. */
+:root{
+  --paper:#FFFFFF; --surface:#FFFFFF; --surface-2:#F6F7F9;
+  --ink:#111317; --ink-soft:#3A3F46; --muted:#6B7280;
+  --line:#ECEEF1; --line-strong:#DCDFE4;
+  --brand:#1E2A4A; --brand-soft:#EEF1F8;
+  --accent:#2563EB; --accent-soft:#EFF4FF; --accent-100:#DBE5FB; --accent-700:#1B4AC2;
+  --ok:#0F7A4B; --ok-soft:#E6F4EC;
+  --shadow:0 1px 2px rgba(16,17,23,.05), 0 6px 20px rgba(16,17,23,.06);
+  --shadow-sm:0 1px 2px rgba(16,17,23,.05);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Pretendard",Roboto,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+  --r-card:14px; --r-ctrl:9px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--font-sans);line-height:1.7;font-size:15px;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+h1,h2,h3{margin:0;letter-spacing:-.02em;font-weight:700;color:var(--ink)}
+.muted{color:var(--muted)}
+.wrap{max-width:1080px;margin:0 auto;padding:0 1.5em}
+
+/* ---- header ---- */
+.topbar{position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;align-items:center;
+  padding:.85em 1.5em;border-bottom:1px solid var(--line);background:rgba(255,255,255,.82);
+  backdrop-filter:saturate(150%) blur(8px)}
+.brand{font-size:1.18rem;font-weight:800;color:var(--brand);letter-spacing:-.02em}
+.brand b{color:var(--accent);font-weight:800}
+.nav{display:flex;gap:.3em;align-items:center}
+.nav a{font-size:.88rem;color:var(--ink-soft);padding:.4em .7em;border-radius:var(--r-ctrl);font-weight:500}
+.nav a:hover{background:var(--surface-2);color:var(--ink);text-decoration:none}
+.nav a.cta{color:#fff;background:var(--ink);font-weight:600}
+.nav a.cta:hover{background:#000}
+@media(max-width:640px){.nav a:not(.cta){display:none}}
+
+/* ---- hero ---- */
+.hero{padding:4em 0 3.4em;background:
+  radial-gradient(120% 130% at 100% 0%, var(--surface-2) 0%, transparent 55%), var(--paper);
+  border-bottom:1px solid var(--line)}
+.eyebrow{display:inline-block;font-size:.74rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  color:var(--brand);background:var(--brand-soft);border-radius:999px;padding:.35em .9em;margin-bottom:1.3em}
+.hero h1{font-size:3rem;font-weight:800;letter-spacing:-.035em;line-height:1.12;max-width:16em;color:var(--ink)}
+.hero .sub{max-width:40em;color:var(--ink-soft);font-size:1.08rem;margin:1.1em 0 0;line-height:1.65}
+.hero-cta{display:flex;gap:.7em;margin-top:2em;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:.4em;font-size:1rem;font-weight:600;
+  padding:.75em 1.7em;border-radius:var(--r-ctrl);border:1px solid var(--line-strong);
+  background:var(--surface);color:var(--ink);cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s}
+.btn:hover{background:var(--surface-2);border-color:var(--muted);text-decoration:none}
+.btn.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
+.btn.primary:hover{background:#000;border-color:#000}
+@media(max-width:640px){.hero h1{font-size:2.1rem}.hero .sub{font-size:1rem}}
+
+/* ---- sections ---- */
+section.block{padding:3.6em 0;border-bottom:1px solid var(--line)}
+.sec-head{max-width:34em;margin-bottom:2em}
+.sec-head .eyebrow{margin-bottom:.7em}
+.sec-head h2{font-size:1.75rem;letter-spacing:-.025em;line-height:1.25}
+.sec-head p{color:var(--ink-soft);font-size:1rem;margin:.6em 0 0}
+
+/* 핵심 가치 3 카드 */
+.value-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1.1em}
+.value-card{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--brand);
+  border-radius:var(--r-card);padding:1.6em 1.5em;box-shadow:var(--shadow-sm)}
+.value-card .vk{font-size:.78rem;font-weight:700;letter-spacing:.04em;color:var(--accent);text-transform:uppercase}
+.value-card h3{font-size:1.2rem;margin:.5em 0 .5em;letter-spacing:-.01em}
+.value-card p{color:var(--ink-soft);font-size:.94rem;margin:0}
+@media(max-width:820px){.value-grid{grid-template-columns:1fr}}
+
+/* How it works — 4단계 */
+.steps{display:grid;grid-template-columns:repeat(4,1fr);gap:1em}
+.step{position:relative;background:var(--surface-2);border-radius:var(--r-card);padding:1.5em 1.3em}
+.step .n{display:inline-flex;align-items:center;justify-content:center;width:2em;height:2em;border-radius:50%;
+  background:var(--accent);color:#fff;font-weight:700;font-size:.95rem;margin-bottom:.9em}
+.step h3{font-size:1.05rem;margin-bottom:.4em;letter-spacing:-.01em}
+.step p{color:var(--ink-soft);font-size:.9rem;margin:0}
+@media(max-width:820px){.steps{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:480px){.steps{grid-template-columns:1fr}}
+/* 인라인 파이프라인 다이어그램(자체 완결 — 외부 파일 참조 없음). ncp- 접두어로 스타일 격리 */
+.ncp-diagram{margin:0 0 2em;border:1px solid var(--line);border-radius:var(--r-card);
+  background:var(--surface);padding:1.1em 1.2em;box-shadow:var(--shadow-sm)}
+.ncp-diagram svg{display:block;width:100%;height:auto}
+.ncp-diagram figcaption{margin-top:.6em;color:var(--muted);font-size:.85rem;text-align:center;line-height:1.5}
+
+/* 품질 섹션 */
+.quality{background:var(--brand);color:#fff}
+.quality .eyebrow{color:#AFC0E8;background:rgba(255,255,255,.08)}
+.quality h2{color:#fff}
+.quality .sec-head p{color:#C9D2E6}
+.q-pillars{display:grid;grid-template-columns:repeat(3,1fr);gap:1.1em;margin-bottom:2.2em}
+.q-pillar{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:var(--r-card);padding:1.4em 1.4em}
+.q-pillar h3{color:#fff;font-size:1.05rem;margin-bottom:.4em}
+.q-pillar p{color:#C9D2E6;font-size:.9rem;margin:0;line-height:1.65}
+.q-pillar b{color:#fff}
+.badges{display:grid;grid-template-columns:repeat(3,1fr);gap:1em}
+.mbadge{background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);border-radius:var(--r-ctrl);
+  padding:1.2em 1.3em}
+.mbadge .mv{font-size:1.05rem;font-weight:700;color:#fff;line-height:1.4;letter-spacing:-.01em}
+.mbadge .ml{font-size:.8rem;color:#AFC0E8;margin-top:.5em;line-height:1.5}
+@media(max-width:820px){.q-pillars,.badges{grid-template-columns:1fr}}
+
+/* 기능 그리드 */
+.feat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:.9em}
+.feat{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-card);padding:1.2em 1.3em;
+  box-shadow:var(--shadow-sm)}
+.feat h3{font-size:1rem;margin-bottom:.35em;letter-spacing:-.01em}
+.feat p{color:var(--ink-soft);font-size:.88rem;margin:0;line-height:1.6}
+@media(max-width:820px){.feat-grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.feat-grid{grid-template-columns:1fr}}
+
+/* CTA 스트립 */
+.cta-strip{padding:3.4em 0;text-align:center;background:var(--surface-2)}
+.cta-strip h2{font-size:1.7rem;letter-spacing:-.025em}
+.cta-strip p{color:var(--ink-soft);margin:.6em auto 1.6em;max-width:32em}
+.cta-strip .hero-cta{justify-content:center}
+
+/* footer */
+footer{padding:2.6em 0 3em;color:var(--muted);font-size:.85rem}
+footer .frow{display:flex;justify-content:space-between;gap:1em;flex-wrap:wrap;align-items:center}
+footer .flinks{display:flex;gap:1.2em;flex-wrap:wrap}
+footer .flinks a{color:var(--ink-soft)}
+footer .ver{font-weight:600;color:var(--ink-soft)}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">Novel<b>Copilot</b></div>
+  <nav class="nav">
+    <a href="#features">기능</a>
+    <a href="#quality">품질</a>
+    <a href="/manual.html">문서</a>
+    <a class="cta" href="/">앱 열기 →</a>
+  </nav>
+</header>
+
+<!-- ===== 히어로 ===== -->
+<section class="hero">
+  <div class="wrap">
+    <span class="eyebrow">AI 웹소설 코파일럿</span>
+    <h1>AI가 쓰고, 작가가 이끕니다.</h1>
+    <p class="sub">작가가 세계관을 정하면 엔진이 연재를 집필하고, 모든 회차를 계측·검증·수리해
+      "사람이 쓴 것처럼 읽히는" 상태로 발행합니다. 기계가 쓰되 판단과 통제는 작가에게 있습니다.</p>
+    <div class="hero-cta">
+      <a class="btn primary" href="/">지금 시작하기 →</a>
+      <a class="btn" href="/manual.html">문서 보기</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 핵심 가치 3 ===== -->
+<section class="block" id="value">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">핵심 가치</span>
+      <h2>발상에서 발행까지, 세 가지 약속</h2>
+      <p>한 줄 발상 또는 대화형 세계관 빌딩에서 시작해, 검증 기록을 갖춘 회차까지 — 그러나 결정은 언제나 작가의 몫입니다.</p>
+    </div>
+    <div class="value-grid">
+      <div class="value-card">
+        <div class="vk">기계 집필</div>
+        <h3>발상에서 본문까지</h3>
+        <p>한 줄 발상 또는 대화형 세계관 빚기에서 시작해, 이야기 구조 설계 → 회차 계획 → 회차 본문까지 자동으로 집필합니다.</p>
+      </div>
+      <div class="value-card">
+        <div class="vk">검증된 발행</div>
+        <h3>통과 기록과 함께</h3>
+        <p>매 회차가 사실(확정 설정)·재미(정독 게이트)·문체(AI 티 계측) 전 축을 통과 기록과 함께 발행됩니다. 결측은 "미실행"으로 정직하게 표기합니다.</p>
+      </div>
+      <div class="value-card">
+        <div class="vk">작가 주권 · 무강제</div>
+        <h3>측정하되 막지 않는다</h3>
+        <p>시스템은 측정하고 보여주고 제안할 뿐, 임계값으로 자동 재작성하거나 발행을 막지 않습니다. 모든 개입 패스는 opt-in이고 되돌릴 수 있습니다(undo).</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== How it works 4단계 ===== -->
+<section class="block" id="how">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">작동 방식</span>
+      <h2>네 단계로 연재가 자랍니다</h2>
+      <p>진행 상황은 실시간으로 표시되고, 각 단계의 산출물은 작품 자산으로 남습니다.</p>
+    </div>
+
+    <!-- 인라인 파이프라인 다이어그램 — 파일 참조 없이 자체 완결(외부 이미지/CDN 0). id 는 pc- 접두어로 격리 -->
+    <figure class="ncp-diagram">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 470" role="img" aria-labelledby="pc-title pc-desc" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+        <title id="pc-title">다음 회차 쓰기 — 8단계 파이프라인</title>
+        <desc id="pc-desc">회차 계획, 재료 조립, 집필, 사실 교정, 문체 다듬기, 파생물, 검증 리포트, 발행 게이트의 여덟 단계 흐름도.</desc>
+        <defs>
+          <marker id="pc-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+          </marker>
+        </defs>
+        <text x="30" y="34" font-size="19" font-weight="700" fill="#111317">다음 회차 쓰기 — 여덟 단계</text>
+        <text x="30" y="56" font-size="13" fill="#6B7280">"다음 회차 쓰기" 버튼 뒤에서 도는 결정론 파이프라인 (계획 → 집필 → 검증 → 수리)</text>
+        <g>
+          <rect x="30" y="80" width="200" height="90" rx="12" fill="#EFF4FF" stroke="#DBE5FB"/>
+          <circle cx="56" cy="106" r="13" fill="#2563EB"/>
+          <text x="56" y="111" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">1</text>
+          <text x="80" y="111" font-size="14.5" font-weight="700" fill="#1B4AC2">회차 계획</text>
+          <text x="46" y="138" font-size="12" fill="#3A3F46">회차 계획을 세우고 보상이</text>
+          <text x="46" y="156" font-size="12" fill="#3A3F46">터질 지점을 배치</text>
+        </g>
+        <g>
+          <rect x="250" y="80" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+          <circle cx="276" cy="106" r="13" fill="#2563EB"/>
+          <text x="276" y="111" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">2</text>
+          <text x="300" y="111" font-size="14.5" font-weight="700" fill="#111317">재료 조립</text>
+          <text x="266" y="138" font-size="12" fill="#3A3F46">확정 설정을 사실로 박고</text>
+          <text x="266" y="156" font-size="12" fill="#3A3F46">회수할 복선을 검색</text>
+        </g>
+        <g>
+          <rect x="470" y="80" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+          <circle cx="496" cy="106" r="13" fill="#2563EB"/>
+          <text x="496" y="111" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">3</text>
+          <text x="520" y="111" font-size="14.5" font-weight="700" fill="#111317">집필</text>
+          <text x="586" y="111" font-size="11" fill="#6B7280" text-anchor="end">Claude</text>
+          <text x="486" y="138" font-size="12" fill="#3A3F46">계획된 사건이 남을 때만</text>
+          <text x="486" y="156" font-size="12" fill="#3A3F46">이어 쓰는 전진 집필</text>
+        </g>
+        <g>
+          <rect x="690" y="80" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+          <circle cx="716" cy="106" r="13" fill="#2563EB"/>
+          <text x="716" y="111" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">4</text>
+          <text x="740" y="111" font-size="14.5" font-weight="700" fill="#111317">사실 교정</text>
+          <text x="706" y="138" font-size="12" fill="#3A3F46">확정 설정과 대조해 위반을</text>
+          <text x="706" y="156" font-size="12" fill="#3A3F46">잡고 자동 교정</text>
+        </g>
+        <line x1="230" y1="125" x2="250" y2="125" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+        <line x1="450" y1="125" x2="470" y2="125" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+        <line x1="670" y1="125" x2="690" y2="125" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+        <path d="M790 170 L790 200 L790 220" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+        <g>
+          <rect x="690" y="225" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+          <circle cx="716" cy="251" r="13" fill="#2563EB"/>
+          <text x="716" y="256" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">5</text>
+          <text x="740" y="256" font-size="14.5" font-weight="700" fill="#111317">문체 다듬기</text>
+          <text x="706" y="283" font-size="12" fill="#3A3F46">'AI 티' 문장을 국소 수술</text>
+          <text x="706" y="301" font-size="12" fill="#3A3F46">사실 바뀌면 가드가 거부</text>
+        </g>
+        <g>
+          <rect x="470" y="225" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+          <circle cx="496" cy="251" r="13" fill="#2563EB"/>
+          <text x="496" y="256" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">6</text>
+          <text x="520" y="256" font-size="14.5" font-weight="700" fill="#111317">파생물</text>
+          <text x="486" y="283" font-size="12" fill="#3A3F46">요약·작품 노트·복선 정산</text>
+          <text x="486" y="301" font-size="12" fill="#3A3F46">가상 독자 반응 기록</text>
+        </g>
+        <g>
+          <rect x="250" y="225" width="200" height="90" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+          <circle cx="276" cy="251" r="13" fill="#2563EB"/>
+          <text x="276" y="256" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">7</text>
+          <text x="300" y="256" font-size="14.5" font-weight="700" fill="#111317">검증 리포트</text>
+          <text x="266" y="283" font-size="12" fill="#3A3F46">전 축을 회차마다 기록</text>
+          <text x="266" y="301" font-size="12" fill="#3A3F46">결측은 "미실행"으로 정직</text>
+        </g>
+        <g>
+          <rect x="30" y="225" width="200" height="90" rx="12" fill="#EEF1F8" stroke="#DCDFE4" stroke-dasharray="4 3"/>
+          <circle cx="56" cy="251" r="13" fill="#1E2A4A"/>
+          <text x="56" y="256" font-size="13" font-weight="700" fill="#ffffff" text-anchor="middle">8</text>
+          <text x="80" y="256" font-size="14.5" font-weight="700" fill="#1E2A4A">발행 게이트</text>
+          <text x="216" y="256" font-size="11" fill="#6B7280" text-anchor="end">옵션</text>
+          <text x="46" y="283" font-size="12" fill="#3A3F46">초비판 독자가 정독하고</text>
+          <text x="46" y="301" font-size="12" fill="#3A3F46">하차 트리거를 찾아 수리</text>
+        </g>
+        <line x1="690" y1="270" x2="670" y2="270" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+        <line x1="470" y1="270" x2="450" y2="270" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+        <line x1="250" y1="270" x2="230" y2="270" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+        <path d="M130 315 L130 350 L130 372" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#pc-arrow)"/>
+        <g>
+          <rect x="30" y="378" width="300" height="58" rx="12" fill="#E6F4EC" stroke="#0F7A4B" stroke-opacity="0.35"/>
+          <text x="52" y="405" font-size="14.5" font-weight="700" fill="#0F7A4B">발행된 회차</text>
+          <text x="52" y="424" font-size="12" fill="#3A3F46">본문 + 파생 자산 + 검증 기록이 함께 남음</text>
+        </g>
+      </svg>
+      <figcaption>① 회차 계획 ② 재료 조립 ③ 집필(Claude) ④ 사실 교정 ⑤ 문체 다듬기 ⑥ 파생물 ⑦ 검증 리포트 ⑧ 발행 게이트(옵션) — 계획→집필→검증→수리.</figcaption>
+    </figure>
+
+    <div class="steps">
+      <div class="step">
+        <div class="n">1</div>
+        <h3>세계관 빚기</h3>
+        <p>대화형으로 로그라인·갈등·인물·키워드를 다듬고 잠급니다. 확정 시 세계관·인물 시트·아크 척추·설정집·서술자 음성 카드까지 생성됩니다.</p>
+      </div>
+      <div class="step">
+        <div class="n">2</div>
+        <h3>연재 집필</h3>
+        <p>회차 계획 → 재료 조립(확정 설정 반영·복선 검색) → 본문 집필. 다음 회차를 한 화씩 써 내려갑니다.</p>
+      </div>
+      <div class="step">
+        <div class="n">3</div>
+        <h3>전축 검증</h3>
+        <p>설정 충돌·AI 티 계측·도입부 반복도·가상 독자 반응·게이트 판정을 회차마다 기록합니다. 판정 라벨 없이 원자료를 열람합니다.</p>
+      </div>
+      <div class="step">
+        <div class="n">4</div>
+        <h3>다듬기</h3>
+        <p>퇴고(지시형)·재실현(문체 리셋)·마지막 회차 재생성 — 전부 되돌릴 수 있습니다(undo). 사실을 바꾸는 편집은 채택 자체가 거부됩니다.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 품질 시스템 ===== -->
+<section class="block quality" id="quality">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">품질 시스템</span>
+      <h2>정독이 1차 척도, 수치는 조향, 사실은 가드</h2>
+      <p>"AI가 쓴 티"를 정면으로 다룹니다. 자동 판정 대신 계측을 보여주고, 근본 처방(재실현)을 제공합니다.</p>
+    </div>
+    <div class="q-pillars">
+      <div class="q-pillar">
+        <h3>정독 1차</h3>
+        <p>교차 벤더(생성=Claude, 심사=GPT) <b>초비판 독자 시뮬</b>이 매 회차를 정독합니다 — "읽히는가, 결제하겠는가". 자기 채점을 막기 위해 생성·심사 모델을 다른 회사 것으로 분리합니다.</p>
+      </div>
+      <div class="q-pillar">
+        <h3>수치는 조향</h3>
+        <p>문체 계측(문장 종결의 단조로움 등)과 사람 글 범위는 <b>참조선</b>일 뿐, 자동 판정에 쓰지 않습니다.</p>
+      </div>
+      <div class="q-pillar">
+        <h3>사실은 가드</h3>
+        <p>확정 설정 대조(설정 충돌 0)·사실 보존 검사·수치/대사 보존 검사 — 다듬기 기능이 사실을 바꾸면 <b>채택 자체가 거부</b>됩니다.</p>
+      </div>
+    </div>
+    <div class="badges">
+      <div class="mbadge">
+        <div class="mv">'-었다' 지배율 0.77 → 0.36~0.41</div>
+        <div class="ml">재실현 패스로 대표 문말 지배율이 인간 웹소설 대역으로 진입(파일럿 실측).</div>
+      </div>
+      <div class="mbadge">
+        <div class="mv">블라인드 정독 우세 / 무승부</div>
+        <div class="ml">재실현본이 원문과의 블라인드 비교에서 대등하거나 더 나은 평가를 받음(ch1 완승·ch2 무승부).</div>
+      </div>
+      <div class="mbadge">
+        <div class="mv">설정 하드 위반 0 게이트</div>
+        <div class="ml">확정 설정을 단일 원장으로 관리하고 본문을 재검사 — 위반은 자동 교정 또는 발행 보류로 표시.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 기능 그리드 ===== -->
+<section class="block" id="features">
+  <div class="wrap">
+    <div class="sec-head">
+      <span class="eyebrow">기능</span>
+      <h2>작가 여정을 따라가는 도구들</h2>
+      <p>작품 만들기부터 연재·다듬기·자산 관리·내보내기까지.</p>
+    </div>
+    <div class="feat-grid">
+      <div class="feat">
+        <h3>대화형 세계관 빚기</h3>
+        <p>Concept Studio에서 브리프를 다듬고 잠그면 세계관·인물·아크·설정집·엔딩 계약·서술자 음성 카드까지 자동 생성.</p>
+      </div>
+      <div class="feat">
+        <h3>다음 회차 쓰기</h3>
+        <p>회차 계획 → 재료 조립 → 집필 → 사실 교정 → 문체 다듬기 → 검증 리포트. 진행은 실시간 표시.</p>
+      </div>
+      <div class="feat">
+        <h3>회차 검증 패널</h3>
+        <p>설정 충돌·AI 티 계측·도입부 반복도·가상 독자 반응·게이트 판정을 회차마다 열람(판정 라벨 없는 원자료).</p>
+      </div>
+      <div class="feat">
+        <h3>퇴고</h3>
+        <p>작가 지시문으로 프로즈만 수정(사실 불변 가드). diff 확인 후 채택하거나 되돌립니다.</p>
+      </div>
+      <div class="feat">
+        <h3>재실현</h3>
+        <p>회차를 사실 뼈대+대사만으로 웹소설 문체로 다시 실현 — 'AI 티'의 근본 처방. 정독 심사에서 원문에 완패하면 스스로 채택을 거부합니다(원문 보호 원칙).</p>
+      </div>
+      <div class="feat">
+        <h3>공식 설정 · 관계도</h3>
+        <p>공식 설정(인물 상태·관계도)을 직접 편집. 낡거나 틀린 설정을 작가가 바로잡으면 이후 회차에 반영.</p>
+      </div>
+      <div class="feat">
+        <h3>설정집 · 작품 노트</h3>
+        <p>장르 산문 설정집과 회차마다 자동 축적되는 위키. 문체 설정(작가 오버레이)과 스킬(문체 프리셋)로 조향.</p>
+      </div>
+      <div class="feat">
+        <h3>표지 생성</h3>
+        <p>설정과 주인공에서 표지 이미지를 이미지 1콜로 생성합니다.</p>
+      </div>
+      <div class="feat">
+        <h3>내보내기</h3>
+        <p>작품 전체를 텍스트·마크다운으로 내보냅니다. 퇴고 이력 포함 — 창작 기여 증거의 원형.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ===== CTA 스트립 ===== -->
+<section class="cta-strip">
+  <div class="wrap">
+    <h2>한 줄이면 충분합니다.</h2>
+    <p>만들고 싶은 이야기를 한 문장으로 적는 것부터 — 나머지는 대화에서 자라납니다.</p>
+    <div class="hero-cta">
+      <a class="btn primary" href="/">지금 시작하기 →</a>
+      <a class="btn" href="/manual.html">빠른 시작 문서</a>
+    </div>
+  </div>
+</section>
+
+<!-- ===== 정직 푸터 ===== -->
+<footer>
+  <div class="wrap">
+    <div class="frow">
+      <div>
+        <span class="ver">NovelCopilot v0.9.0</span> ·
+        로컬 단일 사용자 도구 · 데이터는 전부 로컬 저장(외부 저장 없음)
+      </div>
+      <div class="flinks">
+        <a href="/manual.html#overview">서비스 소개</a>
+        <a href="/manual.html#getting-started">빠른 시작</a>
+        <a href="/manual.html#faq">FAQ</a>
+        <a href="/manual.html#changelog">릴리스 노트</a>
+        <a href="/">앱 열기</a>
+      </div>
+    </div>
+  </div>
+</footer>
+</body>
+</html>

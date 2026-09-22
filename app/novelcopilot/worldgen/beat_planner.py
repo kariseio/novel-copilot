@@ -7,6 +7,7 @@
 from __future__ import annotations
 import json
 
+from ..llm import promptlog   # XR-3: consumer 태그(관측 전용 — 위임·바이트 불변)
 from ..domain.world import WorldConfig, Beat
 from ..llm.base import LLMProvider
 
@@ -22,6 +23,7 @@ class BeatPlanner:
             return existing
         return self._extend(world, chapter, recent_summaries, directives)
 
+    @promptlog.stage("beat_plan_flat")
     def _extend(self, world: WorldConfig, chapter: int,
                 recent_summaries: list[str], directives: list[str]) -> Beat:
         char_ids = [e.id for e in world.entities if e.etype == "character"]

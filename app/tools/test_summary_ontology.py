@@ -29,12 +29,13 @@ def test_story_so_far() -> bool:
            Ch(3, "", text="본문3내용"),                                   # 요약실패 but FINALIZED→text fallback 포함
            Ch(4, "미회수.", text="x", status=ChapterStatus.ESCALATED)]    # ESCALATED→제외
     s, dropped = _build_story_so_far(chs, 6000)
-    ok = ("1화:" in s and "2화:" in s and "3화: 본문3내용" in s and "4화" not in s and dropped == 0)
+    # B-34: 회차 라벨은 산문 누출 없는 out-of-band 메타 태그('[#N]') — 'N화:' 산문 라벨 아님
+    ok = ("[#1]" in s and "[#2]" in s and "[#3] 본문3내용" in s and "[#4]" not in s and dropped == 0)
     # 예산 컷: 최신부터 채우고 시간순 제시 + dropped 카운트
     long = [Ch(i, "x" * 100) for i in range(1, 11)]
     s2, d2 = _build_story_so_far(long, 250)
     lines = s2.split("\n")
-    ok &= 0 < len(lines) <= 3 and lines[-1].startswith("10화") and not s2.startswith("1화") and d2 == len(long) - len(lines)
+    ok &= 0 < len(lines) <= 3 and lines[-1].startswith("[#10]") and not s2.startswith("[#1]") and d2 == len(long) - len(lines)
     print(f"[{'OK' if ok else 'FAIL'}] story_so_far: ESCALATED제외·요약실패 text폴백 + 예산컷(최신·시간순)·dropped={d2}")
     return ok
 

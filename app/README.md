@@ -8,21 +8,7 @@ PoC `v2-engine`(비대칭 일관성 엔진)을 **하드코딩 배제 + 디자인
 
 ## 실행
 
-```powershell
-# 1) 의존성
-pip install -r requirements.txt
-# 2) 환경변수 (.env.example 복사)
-#    OPENAI_API_KEY, NOVEL_GEN_MODEL 등 — 코드에 키/모델 하드코딩 없음
-$env:OPENAI_API_KEY = "sk-..."
-# 3) 실행
-python run.py            # http://127.0.0.1:8000  (브라우저로 열기)
-```
-
-스모크 테스트:
-```powershell
-$env:PYTHONPATH="."; python smoke.py          # 임포트 + 결정론 코어(LLM 0콜)
-$env:PYTHONPATH="."; python smoke.py --live    # 실제 worldgen + 1회차 생성
-```
+설치·환경변수·실행·테스트 방법은 저장소 루트의 [README.md](../README.md) 를 본다.
 
 ## 체험 흐름 (웹페이지)
 

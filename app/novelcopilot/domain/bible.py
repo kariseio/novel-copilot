@@ -31,6 +31,7 @@ CATEGORY_LABEL: dict[str, str] = {
     # 장르 중립 확장(로맨스·미스터리·회빙환 등). 미등록 카테고리는 키를 그대로 라벨로(개방형).
     "relationship": "관계·인물관계", "secret_identity": "비밀·정체", "tech_system": "기술 체계",
     "clue_investigation": "단서·수사", "knowledge_state": "지식·정보", "emotion_arc": "감정선",
+    "setting": "설정",   # XR-6⒜(감사 경미 7): ✓ 대상 실데이터 6건이 이 키 — 영문 폴백 렌더 보강
 }
 
 # 장르별 권장 섹션(worldgen 가이드 + UI 그룹핑). 데이터 — 미정의 장르는 DEFAULT. 카테고리는 자유(개방형).

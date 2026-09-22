@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 470" role="img" aria-labelledby="ar-title ar-desc" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="ar-title">시스템 레이어 스택</title>
+  <desc id="ar-desc">web 정적 프론트엔드에서 api(FastAPI), services 파사드, engine 결정론 하네스, worldgen과 llm 라우팅, repository 로컬 JSON으로 내려가는 레이어 스택. tools 실험·계측 트랙은 의존성 격리된 채 옆에 있다.</desc>
+  <defs>
+    <marker id="ar-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <text x="30" y="34" font-size="19" font-weight="700" fill="#111317">시스템 한눈에 — 레이어 스택</text>
+  <text x="30" y="56" font-size="13" fill="#6B7280">단일 프로세스 · "harness over model" — 전진·검증·종료·라우팅은 결정론 코드, LLM은 격리된 창작 지점만.</text>
+
+  <!-- Main stack: x=30, width=560, each row height 52, gap 12, start y=80 -->
+  <!-- web -->
+  <g>
+    <rect x="30" y="80" width="560" height="52" rx="10" fill="#EFF4FF" stroke="#DBE5FB"/>
+    <text x="50" y="103" font-size="14.5" font-weight="700" fill="#1B4AC2">web</text>
+    <text x="50" y="122" font-size="12" fill="#3A3F46">정적 HTML/JS/CSS · no-cache 재검증</text>
+    <text x="572" y="112" font-size="11" fill="#6B7280" text-anchor="end">web/</text>
+  </g>
+  <line x1="310" y1="132" x2="310" y2="144" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ar-arrow)"/>
+  <!-- api -->
+  <g>
+    <rect x="30" y="144" width="560" height="52" rx="10" fill="#ffffff" stroke="#ECEEF1"/>
+    <text x="50" y="167" font-size="14.5" font-weight="700" fill="#111317">api</text>
+    <text x="50" y="186" font-size="12" fill="#3A3F46">FastAPI 라우트 · schemas</text>
+    <text x="572" y="176" font-size="11" fill="#6B7280" text-anchor="end">api/routes.py</text>
+  </g>
+  <line x1="310" y1="196" x2="310" y2="208" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ar-arrow)"/>
+  <!-- services -->
+  <g>
+    <rect x="30" y="208" width="560" height="52" rx="10" fill="#ffffff" stroke="#ECEEF1"/>
+    <text x="50" y="231" font-size="14.5" font-weight="700" fill="#111317">services</text>
+    <text x="50" y="250" font-size="12" fill="#3A3F46">CopilotService 파사드 · 세션/락 규율</text>
+    <text x="572" y="240" font-size="11" fill="#6B7280" text-anchor="end">services/copilot.py</text>
+  </g>
+  <line x1="310" y1="260" x2="310" y2="272" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ar-arrow)"/>
+  <!-- engine -->
+  <g>
+    <rect x="30" y="272" width="560" height="52" rx="10" fill="#EEF1F8" stroke="#DCDFE4"/>
+    <text x="50" y="295" font-size="14.5" font-weight="700" fill="#1E2A4A">engine</text>
+    <text x="50" y="314" font-size="12" fill="#3A3F46">결정론 하네스 · 검증 · 게이트 · 편집 패스</text>
+    <text x="572" y="304" font-size="11" fill="#6B7280" text-anchor="end">engine/harness.py</text>
+  </g>
+  <!-- fork down to worldgen and llm -->
+  <path d="M180 324 L180 340 L180 352" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ar-arrow)"/>
+  <path d="M440 324 L440 340 L440 352" fill="none" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ar-arrow)"/>
+  <!-- worldgen -->
+  <g>
+    <rect x="30" y="352" width="270" height="52" rx="10" fill="#ffffff" stroke="#ECEEF1"/>
+    <text x="50" y="375" font-size="14.5" font-weight="700" fill="#111317">worldgen</text>
+    <text x="50" y="394" font-size="12" fill="#3A3F46">세계·아크·비트·설정집 생성</text>
+  </g>
+  <!-- llm -->
+  <g>
+    <rect x="320" y="352" width="270" height="52" rx="10" fill="#ffffff" stroke="#ECEEF1"/>
+    <text x="340" y="375" font-size="14.5" font-weight="700" fill="#111317">llm</text>
+    <text x="340" y="394" font-size="12" fill="#3A3F46">provider 라우팅 (Claude · GPT)</text>
+  </g>
+  <!-- merge down to repository -->
+  <path d="M165 404 L165 418 L310 418 L310 430" fill="none" stroke="#94a3b8" stroke-width="1.6"/>
+  <path d="M455 404 L455 418 L310 418" fill="none" stroke="#94a3b8" stroke-width="1.6"/>
+  <line x1="310" y1="418" x2="310" y2="430" stroke="#94a3b8" stroke-width="1.6" marker-end="url(#ar-arrow)"/>
+  <!-- repository -->
+  <g>
+    <rect x="120" y="430" width="380" height="30" rx="8" fill="#F6F7F9" stroke="#ECEEF1"/>
+    <text x="140" y="450" font-size="13.5" font-weight="700" fill="#3A3F46">repository</text>
+    <text x="230" y="450" font-size="12" fill="#6B7280">로컬 JSON · ProjectState 집계 루트</text>
+  </g>
+
+  <!-- tools isolated (dashed, right column) -->
+  <g>
+    <rect x="640" y="208" width="250" height="116" rx="12" fill="#ffffff" stroke="#DCDFE4" stroke-dasharray="5 4"/>
+    <text x="662" y="236" font-size="14.5" font-weight="700" fill="#3A3F46">tools</text>
+    <text x="662" y="260" font-size="12" fill="#3A3F46">실험 · 계측</text>
+    <text x="662" y="280" font-size="12" fill="#3A3F46">(Kiwi · im-not-ai)</text>
+    <text x="662" y="304" font-size="11.5" fill="#6B7280">의존성 격리 —</text>
+    <text x="662" y="318" font-size="11.5" fill="#6B7280">엔진은 로드타임 import 안 함</text>
+  </g>
+  <!-- dashed lazy link engine <- tools -->
+  <path d="M640 292 L590 292" fill="none" stroke="#DCDFE4" stroke-width="1.6" stroke-dasharray="5 4"/>
+  <text x="618" y="284" font-size="10.5" fill="#6B7280" text-anchor="middle">lazy</text>
+
+  <text x="890" y="452" font-size="11.5" fill="#6B7280" text-anchor="end">출처: ARCHITECTURE §1</text>
+</svg>

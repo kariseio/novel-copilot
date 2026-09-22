@@ -1,0 +1,6 @@
+# ST-10 계측 도구(tools/) 전용 개발 의존성 — 엔진(novelcopilot/)은 의존성0 불변.
+#   이 패키지는 tools/kiwi_metrics.py 에서만 lazy 로드된다. 미설치 시 정규식 폴백으로 강등(러너 사망 없음).
+#   설치: py -3.12 -m pip install -r tools/requirements-metrics.txt
+#
+# Kiwi 형태소 분석기(세종 태그셋 EP/EF 분리·인용문 인식 문장 분리) — 정규식 근사의 소스 정밀화.
+kiwipiepy>=0.23.2,<0.24

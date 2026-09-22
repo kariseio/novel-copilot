@@ -8,6 +8,7 @@ worldgen_chat(생성 후 그래프 반영)과 분리: 여기선 ProjectState 가
 from __future__ import annotations
 import json
 
+from ..llm import promptlog   # XR-3: consumer 태그(관측 전용 — 위임·바이트 불변)
 from ..domain.draft import ConceptBrief
 from ..llm.base import LLMProvider
 
@@ -23,7 +24,7 @@ _SYS = (
     "keywords[이 작품을 가리키는 검색·분류 태그 — 작가가 실제로 쓴 언어와 이 작품의 전제·소재·정서에서 도출해 채워라(미리 정한 장르 목록에 끼워맞추지 말 것)], target_chapters(정수).\n"
     "  · 장르·분위기(tone)·target_chapters 는 대화에서 드러나면 적극 제안해 채워라(작품의 호흡·연재 형태에 맞는 분량으로). "
     "단 [작가 확정]으로 표시된 값은 절대 바꾸지 말고 그대로 둬라.\n"
-    "- changes: 이번 턴에 바뀐 것 짧은 항목들(예: '추가: 마법은 수명을 대가로 쓴다', '구체화: 주인공의 동기').\n"
+    "- changes: 이번 턴에 바뀐 것 짧은 항목들(예: '추가: 항구 도시의 야시장', '구체화: 주인공의 동기').\n"
     "- questions: 세계를 더 깊게 만들 추천 질문 2~3개(작가가 누르면 바로 답이 되는 형태).\n"
     "- gaps: 아직 비었거나 서로 어긋나는 점 0~2개(되물어 보완 유도). 없으면 빈 배열.\n"
     "- ready: 첫 회차를 쓰기 시작해도 좋을 만큼(로그라인+주인공+갈등+배경) 무르익었으면 true.\n"
@@ -39,6 +40,7 @@ class ConceptChat:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
 
+    @promptlog.stage("worldgen:concept_chat")
     def turn(self, brief: ConceptBrief, history: list[dict], message: str, locked: dict | None = None) -> dict:
         convo = "\n".join(f"{t.get('role')}: {t.get('text', '')}" for t in history[-10:])
         lock_block = (f"[작가 확정 — 절대 바꾸지 마라]\n{locked}\n\n" if locked else "")
@@ -47,7 +49,7 @@ class ConceptChat:
         try:
             r = self.provider.chat_json([{"role": "system", "content": _SYS},
                                          {"role": "user", "content": usr}],
-                                        temperature=0.6, max_tokens=2600)
+                                        temperature=0.6)
         except Exception:
             return {"reply": "(응답 생성에 실패했어요. 한 번만 다시 말씀해 주세요.)",
                     "brief": brief.model_dump(), "changes": [], "questions": [], "gaps": [], "ready": False}

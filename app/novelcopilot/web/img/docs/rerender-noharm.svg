@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 430" role="img" aria-labelledby="rr-title rr-desc" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="rr-title">재실현 — no-harm 채택</title>
+  <desc id="rr-desc">원문에서 사실 뼈대와 대사를 추출해 후보 3개를 병렬 생성하고 계측 리랭크로 최적 1개를 골라 사실 가드와 정독 심사를 거친다. 통과하면 채택(undo 가능), 원문이 완승하면 채택을 거부하고 원문을 유지한다.</desc>
+  <defs>
+    <marker id="rr-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+    <marker id="rr-arrow-bad" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#C4231F"/>
+    </marker>
+    <marker id="rr-arrow-ok" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#0F7A4B"/>
+    </marker>
+  </defs>
+
+  <text x="30" y="34" font-size="19" font-weight="700" fill="#111317">재실현 — 문체를 근본부터 다시</text>
+  <text x="30" y="56" font-size="13" fill="#6B7280">같은 사건·같은 대사를 유지한 채 웹소설 문체로 재집필 · 원문보다 못 읽히면 스스로 채택 거부(no-harm)</text>
+
+  <!-- 원문 -->
+  <g>
+    <rect x="30" y="150" width="140" height="86" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <text x="100" y="184" font-size="14.5" font-weight="700" fill="#111317" text-anchor="middle">원문</text>
+    <text x="100" y="206" font-size="11.5" fill="#3A3F46" text-anchor="middle">사실 뼈대 +</text>
+    <text x="100" y="222" font-size="11.5" fill="#3A3F46" text-anchor="middle">대사 추출</text>
+  </g>
+  <line x1="170" y1="193" x2="204" y2="193" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#rr-arrow)"/>
+
+  <!-- 후보 3 병렬 -->
+  <g>
+    <rect x="210" y="132" width="130" height="30" rx="8" fill="#EFF4FF" stroke="#DBE5FB"/>
+    <text x="275" y="152" font-size="12.5" fill="#1B4AC2" text-anchor="middle">후보 A</text>
+    <rect x="210" y="178" width="130" height="30" rx="8" fill="#EFF4FF" stroke="#DBE5FB"/>
+    <text x="275" y="198" font-size="12.5" fill="#1B4AC2" text-anchor="middle">후보 B</text>
+    <rect x="210" y="224" width="130" height="30" rx="8" fill="#EFF4FF" stroke="#DBE5FB"/>
+    <text x="275" y="244" font-size="12.5" fill="#1B4AC2" text-anchor="middle">후보 C</text>
+    <text x="275" y="118" font-size="11.5" fill="#6B7280" text-anchor="middle">후보 3 병렬 생성</text>
+  </g>
+  <line x1="340" y1="193" x2="374" y2="193" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#rr-arrow)"/>
+
+  <!-- 계측 리랭크 -->
+  <g>
+    <rect x="380" y="150" width="150" height="86" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <text x="455" y="184" font-size="14.5" font-weight="700" fill="#111317" text-anchor="middle">계측 리랭크</text>
+    <text x="455" y="206" font-size="11.5" fill="#3A3F46" text-anchor="middle">최적 1개 선택</text>
+    <text x="455" y="222" font-size="11.5" fill="#6B7280" text-anchor="middle">(문말 지배율 등)</text>
+  </g>
+  <line x1="530" y1="193" x2="564" y2="193" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#rr-arrow)"/>
+
+  <!-- 사실 가드 -->
+  <g>
+    <rect x="570" y="150" width="130" height="86" rx="12" fill="#EEF1F8" stroke="#DCDFE4"/>
+    <text x="635" y="184" font-size="14.5" font-weight="700" fill="#1E2A4A" text-anchor="middle">사실 가드</text>
+    <text x="635" y="206" font-size="11.5" fill="#3A3F46" text-anchor="middle">캐논 불변</text>
+    <text x="635" y="222" font-size="11.5" fill="#3A3F46" text-anchor="middle">검사</text>
+  </g>
+  <line x1="700" y1="193" x2="734" y2="193" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#rr-arrow)"/>
+
+  <!-- 정독 심사 -->
+  <g>
+    <rect x="740" y="150" width="150" height="86" rx="12" fill="#1E2A4A"/>
+    <text x="815" y="180" font-size="14.5" font-weight="700" fill="#ffffff" text-anchor="middle">정독 심사</text>
+    <text x="815" y="202" font-size="11.5" fill="#C9D2E6" text-anchor="middle">vs 원문</text>
+    <text x="815" y="220" font-size="11.5" fill="#C9D2E6" text-anchor="middle">(교차 벤더)</text>
+  </g>
+
+  <!-- branch down: pass (left) and original wins (right) -->
+  <!-- pass -> 채택 -->
+  <path d="M790 236 L790 300 L790 322" fill="none" stroke="#0F7A4B" stroke-width="1.8" marker-end="url(#rr-arrow-ok)"/>
+  <text x="700" y="290" font-size="12" font-weight="700" fill="#0F7A4B">통과</text>
+  <g>
+    <rect x="640" y="328" width="250" height="70" rx="12" fill="#E6F4EC" stroke="#0F7A4B" stroke-opacity="0.4"/>
+    <text x="662" y="356" font-size="14.5" font-weight="700" fill="#0F7A4B">채택</text>
+    <text x="662" y="378" font-size="12" fill="#3A3F46">재실현본으로 교체 · undo 가능</text>
+  </g>
+
+  <!-- original wins -> reject -->
+  <path d="M840 236 L840 268 L440 268 L440 322" fill="none" stroke="#C4231F" stroke-width="1.8" marker-end="url(#rr-arrow-bad)"/>
+  <text x="470" y="262" font-size="12" font-weight="700" fill="#C4231F">원문 완승</text>
+  <g>
+    <rect x="30" y="328" width="430" height="70" rx="12" fill="#FCEAE9" stroke="#C4231F" stroke-opacity="0.4"/>
+    <text x="52" y="356" font-size="14.5" font-weight="700" fill="#C4231F">채택 거부 · 원문 유지</text>
+    <rect x="290" y="340" width="150" height="24" rx="12" fill="#ffffff" stroke="#C4231F" stroke-opacity="0.4"/>
+    <text x="365" y="357" font-size="11.5" font-weight="700" fill="#C4231F" text-anchor="middle">no-harm</text>
+    <text x="52" y="378" font-size="12" fill="#3A3F46">원문보다 못 읽히면 스스로 채택을 거부합니다</text>
+  </g>
+
+  <text x="890" y="418" font-size="11.5" fill="#6B7280" text-anchor="end">출처: 작동 방식 §3</text>
+</svg>

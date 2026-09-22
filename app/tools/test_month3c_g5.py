@@ -50,11 +50,12 @@ def test_contract_block_and_roundtrip() -> bool:
 
 
 def test_reader_desk_expectations() -> bool:
-    fake = ScriptFake([{"got": "각성 등급 공개", "pay_next": True, "why": "궁금"}])
+    # DP-10 신규 스키마 하에서도 장르 기대(expectations) 주입이 동작하는지
+    fake = ScriptFake([{"drop": True, "kill_trigger": "\"뻔한 전개\"", "retention_est": 20, "why": "기시감"}])
     p = reader_prediction(fake, "본문", "줄거리", "헌터", expectations=["사이다", "성장"])
-    ok = (p and p["got"] == "각성 등급 공개" and p["pay_next"] is True)
-    ok &= (reader_prediction(ScriptFake([{"got": "x", "why": "y"}]), "본문", "", "헌터") is not None)  # 기대 없어도 동작
-    print(f"[{'OK' if ok else 'FAIL'}] 독자 데스크 장르 기대 주입(advisory)·하위호환")
+    ok = (p and p["drop"] is True and "뻔한" in p["kill_trigger"] and p["retention_est"] == 20)
+    ok &= (reader_prediction(ScriptFake([{"why": "y"}]), "본문", "", "헌터") is not None)  # 기대 없어도 동작
+    print(f"[{'OK' if ok else 'FAIL'}] 시뮬 독자 데스크 장르 기대 주입(advisory)·신규 스키마")
     return ok
 
 

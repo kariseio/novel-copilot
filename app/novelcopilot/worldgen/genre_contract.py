@@ -7,9 +7,11 @@
 """
 from __future__ import annotations
 
+from ..llm import promptlog   # XR-3: consumer 태그(관측 전용 — 위임·바이트 불변)
 from ..domain.world import GenreContract
 
 
+@promptlog.stage("worldgen:genre_contract")
 def infer_genre_contract(provider, world) -> GenreContract | None:
     """장르/전제/시놉시스 → GenreContract 초안. 실패 시 None(비차단)."""
     try:
@@ -21,8 +23,8 @@ def infer_genre_contract(provider, world) -> GenreContract | None:
               '"vocabulary_tone":"이 장르다운 어휘·톤 한 줄",'
               '"premise_asset":"이 작품의 핵심 동력 전제와 그 역할(장기 자산이면 그렇게)"}'},
              {"role": "user", "content":
-              f"[장르]{world.genre}\n[전제]{(world.premise or '')[:600]}\n[시놉시스]{(world.synopsis or '')[:600]}"}],
-            temperature=0.4, max_tokens=900)
+              f"[장르]{world.genre}\n[전제]{world.premise or ''}\n[시놉시스]{world.synopsis or ''}"}],   # 절단 전면 제거(2026-08-21): 전문(실측 시놉 599자가 구 600 경계에 밀착)
+            temperature=0.4)
         gc = GenreContract(
             pleasure_engine=(r.get("pleasure_engine") or "").strip(),
             reader_expectations=[str(x).strip() for x in (r.get("reader_expectations") or []) if str(x).strip()][:6],

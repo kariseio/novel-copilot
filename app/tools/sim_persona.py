@@ -15,6 +15,21 @@ from pathlib import Path
 
 import requests
 
+# FI-1(설계 §3): 실험 도구의 모든 HTTP 요청에 X-NC-Actor: tool 헤더를 붙여 서버가 이 액션을 '작가'가 아니라
+#   '도구'로 기록하게 한다(작가 의도 원장 오염 방지 — 예: 설정집 promote 는 bible_promote 이벤트를 낸다). requests
+#   세션 레벨 1회 패치(멱등 — 중복 임포트/재실행에도 1겹). requests.get/post/… 는 전부 Session.request 를 경유한다.
+if not getattr(requests.sessions.Session, "_nc_actor_patched", False):
+    _nc_orig_request = requests.sessions.Session.request
+
+    def _nc_request(self, method, url, **kw):
+        h = dict(kw.get("headers") or {})
+        h.setdefault("X-NC-Actor", "tool")
+        kw["headers"] = h
+        return _nc_orig_request(self, method, url, **kw)
+
+    requests.sessions.Session.request = _nc_request
+    requests.sessions.Session._nc_actor_patched = True
+
 BASE = "http://127.0.0.1:8000/api"
 LOG: dict = {"persona": "한도윤(29) 밀리터리/아포칼립스 SF, 문피아 지망", "actions": [], "chapters": []}
 
@@ -149,8 +164,18 @@ def eval_chapter(text: str, ch: int, roster: set | None = None) -> dict:
             temperature=0.0, max_tokens=2500)
         sc = r.get("scores", {})
         # 심판 정렬: LLM 심판의 맹점(자기 틱·조판·누출)은 결정론 지표가 점수 상한을 강제(Goodhart 차단)
-        from novelcopilot.engine.quality_gates import chapter_quality_report
-        det = chapter_quality_report(text, [], roster=roster)
+        # PR-2(G4): 제품 SSOT는 engine.verification.build_verification(ChapterRecord 집계)로 이관되어
+        #   dead였던 chapter_quality_report는 삭제됨 — 이 실험 러너는 필요한 결정론 검출기만 직접 호출한다.
+        import re as _re
+        from novelcopilot.engine.quality_gates import word_tics, tense_leak_ratio
+        from novelcopilot.engine.harness import short_line_ratio
+        det = {
+            "tics": word_tics(text, roster),
+            "short_line_ratio": round(short_line_ratio(text), 2),
+            "tense_leak": round(tense_leak_ratio(text), 3),
+            "hook_sim": 0.0,   # 선행 tail 미전달(원 chapter_quality_report도 []) — sim_persona는 재탕 대조 안 함
+            "directive_leak": bool(_re.search(r"^\s*절단", text, _re.MULTILINE)),
+        }
         if det["tics"]:
             sc["style"] = min(sc.get("style", 10), 5)
             r.setdefault("defects", []).insert(0, f"[결정론] 틱 과용 {det['tics'][:3]}")

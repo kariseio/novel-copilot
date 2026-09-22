@@ -93,10 +93,11 @@ def test_hier_summary() -> bool:
     # I-1 교정 후: 예산 안에서 최신 회차를 상세로 채우고, 예산 밖 먼 에피소드만 롤업으로 압축.
     # 작은 예산(12) → 최신 ch3만 상세, ep1(ch1·ch2)은 예산 밖이라 롤업 1줄로 압축.
     txt, dropped = _build_story_so_far_hier(st, 4, 12)
-    ok = ("EP1롤업" in txt and "3화: s3" in txt and "1화: s1" not in txt and "2화: s2" not in txt)
+    # B-34: 상세 레이어 회차 라벨은 out-of-band 메타 태그('[#N]') — 'N화:' 산문 라벨 아님
+    ok = ("EP1롤업" in txt and "[#3] s3" in txt and "[#1] s1" not in txt and "[#2] s2" not in txt)
     # 큰 예산이면 ep1 회차도 상세로 채워 예산 활용(경계 기아 해소) — 롤업 대신 상세
     txt2, _ = _build_story_so_far_hier(st, 4, 6000)
-    ok &= ("1화: s1" in txt2 and "2화: s2" in txt2 and "3화: s3" in txt2)
+    ok &= ("[#1] s1" in txt2 and "[#2] s2" in txt2 and "[#3] s3" in txt2)
     print(f"[{'OK' if ok else 'FAIL'}] 계층 요약: 작은예산=먼EP 롤업압축 / 큰예산=최신 상세로 충전 (dropped={dropped})")
     return ok
 
@@ -112,6 +113,56 @@ def test_completion() -> bool:
     ep = ArcPlanner(Fake()).current_episode(w, p, [])
     ok = ep is None and p.completed is True
     print(f"[{'OK' if ok else 'FAIL'}] 완결 종료: 모든 에피소드 done → None + completed(무한생성 차단)")
+    return ok
+
+
+def test_final_settlement_split() -> bool:
+    """B-31: 최종 아크가 '절정 회차'와 '정산/여운 회차'를 분리하는가 — 완결 클라이맥스 절단 소스 차단.
+    (실측: 붕괴/서리꽃/봄 24화가 절정+엔딩 정산을 마지막 단일 finale 에 과밀 배정해 절정 한중간 절단.)"""
+    from novelcopilot.domain.narrative import NarrativeSpine, Arc, Episode, EndingSpec
+    ok = True
+    # 1) 직접 유닛: 최종 아크 climax 에피소드 뒤에 정산 에피소드 1회 보장 + 예산 이월보존 + 멱등
+    sp = NarrativeSpine(
+        ending=EndingSpec(central_question="Q", ending="주인공 최종 상태", thematic_payoff="주제 보상"),
+        arcs=[Arc(arc_id="arc1", order=1, episodes=[
+                  Episode(episode_id="arc1_ep1", arc_id="arc1", order=1, target_chapters=3, done=True)]),
+              Arc(arc_id="arc2", order=2, episodes=[
+                  Episode(episode_id="arc2_ep1", arc_id="arc2", order=1, climax="c1", target_chapters=3),
+                  Episode(episode_id="arc2_ep2", arc_id="arc2", order=2, climax="작품 절정", target_chapters=3)])])
+    before = sum(e.target_chapters for e in sp.arcs[1].episodes)   # 6
+    ArcPlanner._ensure_final_settlement(sp)
+    eps = sp.arcs[1].episodes
+    settle = eps[-1]
+    ok &= settle.episode_id == "arc2_settle" and settle.order == 3          # 정산이 '마지막' 에피소드
+    ok &= eps[-2].episode_id == "arc2_ep2"                                  # climax 에피소드는 정산 '앞'(분리)
+    ok &= "주제 보상" in settle.climax                                       # 엔딩 정산(thematic_payoff)에서 파생
+    ok &= "이미 열린 것을 닫고 여운을 남긴다" in settle.premise               # B-32: 부정명령('새 떡밥 열지 말고')→긍정('닫고 여운') 전환
+    ok &= sum(e.target_chapters for e in eps) == before                     # 예산 보존(climax 이월)
+    ok &= eps[-2].target_chapters == 2 and settle.target_chapters == 1      # climax 3→2, settle 1(climax 최소 2 보존)
+    ArcPlanner._ensure_final_settlement(sp)                                 # 멱등
+    ok &= sum(1 for e in eps if e.episode_id.endswith("_settle")) == 1
+    ok &= not any(e.episode_id.endswith("_settle") for e in sp.arcs[0].episodes)   # 중간/비최종 아크엔 무동작
+    # 2) 큰 climax(>=5화)면 정산 2화 배정(이월 보존)
+    sp2 = NarrativeSpine(ending=EndingSpec(ending="E"),
+                         arcs=[Arc(arc_id="arc1", order=1, episodes=[
+                             Episode(episode_id="arc1_ep1", arc_id="arc1", order=1, climax="큰 절정", target_chapters=6)])])
+    ArcPlanner._ensure_final_settlement(sp2)
+    ce, se = sp2.arcs[0].episodes
+    ok &= (ce.target_chapters == 4 and se.target_chapters == 2               # 6→4, settle 2(총 6 보존)
+           and se.episode_id == "arc1_settle")
+    # 3) 통합(lazy): 최종 아크 분해 시 정산 에피소드 자동 부착 → 마지막 회차가 '절정'이 아니라 '정산'
+    w = WorldConfig(title="t", genre="x", entities=[EntitySpec(id="hero", name="주인공")])
+    w.spine = NarrativeSpine(ending=EndingSpec(ending="끝"), arcs=[
+        Arc(arc_id="arc1", order=1, episodes=[
+            Episode(episode_id="arc1_ep1", arc_id="arc1", order=1, done=True, target_chapters=2)]),
+        Arc(arc_id="arc2", order=2, episodes=[])])
+    p = NarrativeProgress(current_arc_id="arc1", current_episode_id="arc1_ep1")
+    ep = ArcPlanner(Fake()).current_episode(w, p, [], remaining=6)          # arc1 소진 → arc2 lazy 분해
+    a2 = w.spine.arc("arc2")
+    ok &= (ep is not None and a2.episodes[-1].episode_id.endswith("_settle")   # 정산이 최종 아크 마지막
+           and sum(1 for e in a2.episodes if e.episode_id.endswith("_settle")) == 1)
+    print(f"[{'OK' if ok else 'FAIL'}] B-31 정산회차 분리: climax→정산 이월·멱등·lazy 부착(절정/완결 분리)")
+    assert ok, "B-31 최종 아크 정산 에피소드 분리 계약 위반"
     return ok
 
 
@@ -135,11 +186,15 @@ def test_escalated_rollback() -> bool:
     st = ProjectState(id="t", seed=ProjectSeed(target_chapters=6), world=w, created_at="t")
     svc.repo.save(st)
     sess, _ = svc.get_session("t")
+    _orig_beat = apmod.ArcPlanner.beat_for_episode          # 클래스 패치 누수 차단 — 미복원 시 후속 테스트(t3 비트폴백) 오염
     apmod.ArcPlanner.beat_for_episode = lambda self, world, arc, ep, ch, fin, rec, direc, plant_notes="", **kw: \
         Beat(chapter=ch, entities=["hero"], arc_id=ep.arc_id, episode_id=ep.episode_id)
     sess.bundle.generator.generate = lambda ch_no, beat, ont, rag, wiki, **kw: \
         ChapterRecord(chapter=ch_no, status=ChapterStatus.ESCALATED, text="x")
-    res = svc.generate_next_chapter("t")
+    try:
+        res = svc.generate_next_chapter("t")
+    finally:
+        apmod.ArcPlanner.beat_for_episode = _orig_beat
     st2 = svc.get_project("t")
     ok = (res["record"].status == ChapterStatus.ESCALATED and st2.current_chapter == 0
           and st2.narrative_progress.current_episode_id is None        # 진입 시점(None)으로 롤백
@@ -167,6 +222,7 @@ def test_generate_exception_rollback() -> bool:
     st = ProjectState(id="t", seed=ProjectSeed(target_chapters=6), world=w, created_at="t")
     svc.repo.save(st)
     sess, _ = svc.get_session("t")
+    _orig_beat = apmod.ArcPlanner.beat_for_episode          # 클래스 패치 누수 차단(위와 동일)
     apmod.ArcPlanner.beat_for_episode = lambda self, world, arc, ep, ch, fin, rec, direc, plant_notes="", **kw: \
         Beat(chapter=ch, entities=["hero"], arc_id=ep.arc_id, episode_id=ep.episode_id)
     def _boom(*a, **k):
@@ -177,6 +233,8 @@ def test_generate_exception_rollback() -> bool:
         svc.generate_next_chapter("t")
     except RuntimeError:
         raised = True
+    finally:
+        apmod.ArcPlanner.beat_for_episode = _orig_beat
     st2 = svc.get_project("t")   # 디스크(미저장=클린) 재읽기
     ok = (raised
           and "t" not in svc.sessions._sessions               # 세션 evict 됨(오염 커서 폐기)
@@ -209,7 +267,8 @@ def test_pacing_budget() -> bool:
 
 if __name__ == "__main__":
     results = [test_cursor(), test_anchors_and_drift(), test_hier_summary(),
-               test_completion(), test_escalated_rollback(), test_generate_exception_rollback(),
+               test_completion(), test_final_settlement_split(),
+               test_escalated_rollback(), test_generate_exception_rollback(),
                test_pacing_budget()]
     print("\nR4 검증:", "ALL GREEN ✅" if all(results) else "FAIL ❌")
     sys.exit(0 if all(results) else 1)

@@ -14,9 +14,10 @@ class OpenAIProvider(LLMProvider):
         self.gen_model = gen_model
         self.embed_model = embed_model
 
-    def chat(self, messages, *, temperature=0.7, max_tokens=2200, json_mode=False) -> str:
-        kwargs = dict(model=self.gen_model, messages=messages,
-                      temperature=temperature, max_tokens=max_tokens)
+    def chat(self, messages, *, temperature=0.7, max_tokens=None, json_mode=False) -> str:
+        kwargs = dict(model=self.gen_model, messages=messages, temperature=temperature)
+        if max_tokens is not None:   # None=무상한(파라미터 생략 — 모델 최대까지). base.py chat 계약 참조
+            kwargs["max_tokens"] = max_tokens
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         last = None

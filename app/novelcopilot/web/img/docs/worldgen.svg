@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 400" role="img" aria-labelledby="wg-title wg-desc" font-family="system-ui, -apple-system, 'Segoe UI', sans-serif">
+  <title id="wg-title">작품이 만들어질 때 — 한 번의 준비</title>
+  <desc id="wg-desc">세계관 빚기 대화에서 세계관·인물, 연재 설계(엔딩에서 역산), 설정집, 서술자 목소리 카드 네 가지가 한 번에 준비되고 연재가 시작된다.</desc>
+  <defs>
+    <marker id="wg-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 z" fill="#94a3b8"/>
+    </marker>
+  </defs>
+
+  <text x="30" y="34" font-size="19" font-weight="700" fill="#111317">작품이 만들어질 때 — 한 번</text>
+  <text x="30" y="56" font-size="13" fill="#6B7280">세계관 빚기(대화)를 확정하는 순간, 연재의 뼈대가 한 번에 준비됩니다.</text>
+
+  <!-- 대화 (세계관 빚기) -->
+  <g>
+    <rect x="30" y="150" width="150" height="100" rx="14" fill="#1E2A4A"/>
+    <text x="105" y="192" font-size="15" font-weight="700" fill="#ffffff" text-anchor="middle">대화</text>
+    <text x="105" y="216" font-size="12" fill="#C9D2E6" text-anchor="middle">세계관 빚기</text>
+    <text x="105" y="234" font-size="12" fill="#C9D2E6" text-anchor="middle">(로그라인·갈등)</text>
+  </g>
+
+  <!-- arrow into cards -->
+  <line x1="180" y1="200" x2="222" y2="200" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#wg-arrow)"/>
+
+  <!-- brace bar -->
+  <rect x="228" y="82" width="4" height="236" rx="2" fill="#DBE5FB"/>
+
+  <!-- 4 cards: x=252, each width 200, gap 18; two columns × two rows -->
+  <!-- 세계관·인물 -->
+  <g>
+    <rect x="252" y="82" width="200" height="108" rx="12" fill="#EFF4FF" stroke="#DBE5FB"/>
+    <text x="270" y="110" font-size="14.5" font-weight="700" fill="#1B4AC2">세계관 · 인물</text>
+    <text x="270" y="134" font-size="12" fill="#3A3F46">전제 · 세계 규칙</text>
+    <text x="270" y="152" font-size="12" fill="#3A3F46">인물 시트</text>
+    <text x="270" y="170" font-size="12" fill="#3A3F46">(욕망·관계·비밀)</text>
+  </g>
+  <!-- 연재 설계 (엔딩 역산 강조) -->
+  <g>
+    <rect x="470" y="82" width="220" height="108" rx="12" fill="#EEF1F8" stroke="#2563EB" stroke-width="1.6"/>
+    <text x="488" y="110" font-size="14.5" font-weight="700" fill="#1E2A4A">연재 설계</text>
+    <rect x="488" y="122" width="184" height="26" rx="6" fill="#DBE5FB"/>
+    <text x="580" y="140" font-size="12.5" font-weight="700" fill="#1B4AC2" text-anchor="middle">엔딩에서 역산</text>
+    <text x="488" y="167" font-size="12" fill="#3A3F46">아크 / 에피소드 척추</text>
+    <text x="488" y="184" font-size="11.5" fill="#6B7280">"결말 있는 질문" 위에서 집필</text>
+  </g>
+  <!-- 설정집 -->
+  <g>
+    <rect x="252" y="210" width="200" height="108" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <text x="270" y="238" font-size="14.5" font-weight="700" fill="#111317">설정집</text>
+    <text x="270" y="262" font-size="12" fill="#3A3F46">장르 산문으로 정리된</text>
+    <text x="270" y="280" font-size="12" fill="#3A3F46">세계 문서</text>
+  </g>
+  <!-- 서술자 목소리 카드 -->
+  <g>
+    <rect x="470" y="210" width="220" height="108" rx="12" fill="#ffffff" stroke="#ECEEF1"/>
+    <text x="488" y="238" font-size="14.5" font-weight="700" fill="#111317">서술자 목소리 카드</text>
+    <text x="488" y="262" font-size="12" fill="#3A3F46">주인공 인격에서 파생한</text>
+    <text x="488" y="280" font-size="12" fill="#3A3F46">서술 음성 — 작품마다</text>
+    <text x="488" y="298" font-size="12" fill="#3A3F46">다른 결의 문장</text>
+  </g>
+
+  <!-- arrow out to 연재 시작 -->
+  <line x1="708" y1="200" x2="750" y2="200" stroke="#94a3b8" stroke-width="1.8" marker-end="url(#wg-arrow)"/>
+
+  <!-- 연재 시작 -->
+  <g>
+    <rect x="756" y="150" width="134" height="100" rx="14" fill="#E6F4EC" stroke="#0F7A4B" stroke-opacity="0.35"/>
+    <text x="823" y="196" font-size="15" font-weight="700" fill="#0F7A4B" text-anchor="middle">연재 시작</text>
+    <text x="823" y="220" font-size="12" fill="#3A3F46" text-anchor="middle">한 화씩</text>
+    <text x="823" y="238" font-size="12" fill="#3A3F46" text-anchor="middle">써 내려감</text>
+  </g>
+
+  <text x="890" y="378" font-size="11.5" fill="#6B7280" text-anchor="end">출처: 작동 방식 §1</text>
+</svg>

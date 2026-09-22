@@ -23,9 +23,9 @@ def _clamp_skill_fields(data: dict, sk: Skill) -> None:
     if data.get("point") in ("worldgen", "chapter", "revise"):
         sk.point = data["point"]
     if "instructions" in data:
-        sk.instructions = (data.get("instructions") or "").strip()[:2000]
+        sk.instructions = (data.get("instructions") or "").strip()   # 절단 전면 제거(2026-08-21): 작가 저작 내용 전문(라벨류 캡만 유지)
     if "examples" in data:
-        sk.examples = [str(e).strip()[:1200] for e in (data.get("examples") or []) if str(e).strip()][:5]
+        sk.examples = [str(e).strip() for e in (data.get("examples") or []) if str(e).strip()][:5]
     if "model" in data:
         sk.model = (data.get("model") or "").strip()[:80]
     if "description" in data:

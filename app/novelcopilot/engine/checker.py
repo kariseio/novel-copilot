@@ -8,14 +8,16 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from ..domain.types import Violation, SignalGrade
-from .extractor import ClaimExtractor
+from .extractor import ClaimExtractor, _quote_in_text
 from .rules import RuleEngine
+from .rules.predicates import table_lookup, _norm
 
 
 @dataclass
 class CheckResult:
     violations: list[Violation] = field(default_factory=list)
     claims: list[dict] = field(default_factory=list)
+    missing_appears_as: list = field(default_factory=list)   # CE-4 ⓐ: appears_as 누락 엔티티(advisory·자동 채움 금지·기본값 하위호환)
 
     @property
     def hard(self):
@@ -48,13 +50,35 @@ class Checker:
                         entity=f"{ontology.name(e.src_id)}↔{ontology.name(e.dst_id)}",
                         kind="relation_contradiction", grade=SignalGrade.QUASI,
                         canon=f"관계:{espec.label}", text=f"본문 단정:{spec.label}",
-                        evidence=str(rc.get("evidence") or "")[:80]))
+                        evidence=str(rc.get("evidence") or "")))   # 절단 전면 제거(2026-08-21): 반려 증거 전문(CE-7 증거 영속과 정합)
         return viols
 
-    def check_text(self, text: str, ontology, chapter: int, involved_ids: list[str]) -> CheckResult:
-        full = self.extractor.extract_full(text, ontology, involved_ids)
+    def _table_contradictions(self, table_claims, text, chapter) -> list[Violation]:
+        """CN-5: 본문이 단정한 열거규칙 대응 vs 선언된 표(worldgen 구조화 캐논) 대조 — advisory(SEMANTIC·비차단).
+        세계별 코드 0 — 일반 table_lookup 술어 하나로 모든 표 처리. 증거는 추출기서 이미 강제(재확인 방어)."""
+        tables = {wr.rule_id: wr.table for wr in self.extractor.world_rules if getattr(wr, "table", None)}
+        viols: list[Violation] = []
+        for tc in table_claims or []:
+            table = tables.get((tc.get("rule_id") or "").strip())
+            if not table or not _quote_in_text(str(tc.get("evidence") or ""), text):
+                continue
+            canon = table_lookup(table, tc.get("key"), tc.get("value"))
+            if canon is not None:
+                viols.append(Violation(entity=str(tc.get("rule_id")), kind="table_lookup",
+                                       grade=SignalGrade.SEMANTIC,
+                                       canon=f"{_norm(tc.get('key'))}={canon}",
+                                       text=f"={_norm(tc.get('value'))}",
+                                       evidence=str(tc.get("evidence") or "")))   # 절단 전면 제거(2026-08-21): 반려 증거 전문
+        return viols
+
+    def check_text(self, text: str, ontology, chapter: int, involved_ids: list[str],
+                   pov_entity_id: str = "") -> CheckResult:
+        # DP-8: pov_entity_id(1인칭 주인공)를 추출기까지 관통 — 3인칭이면 ""(기존 경로·바이트 동일).
+        full = self.extractor.extract_full(text, ontology, involved_ids, pov_entity_id)
         claims = full["entities"]
         viols = self.rule_engine.evaluate(claims, ontology, chapter)   # quasi/semantic
         viols += self._relation_contradictions(full["relation_claims"], ontology, chapter)  # 관계 게이트(quasi)
+        viols += self._table_contradictions(full.get("table_claims"), text, chapter)  # CN-5 열거표 대조(semantic·advisory)
         viols += ontology.ontology_internal_check(chapter)             # 등급1 (LLM 0콜, 엣지검사 회차-국소)
-        return CheckResult(violations=viols, claims=claims)
+        return CheckResult(violations=viols, claims=claims,
+                           missing_appears_as=full.get("missing_appears_as") or [])

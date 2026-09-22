@@ -9,6 +9,7 @@
 from __future__ import annotations
 import json
 
+from ..llm import promptlog   # XR-3: consumer 태그(관측 전용 — 위임·바이트 불변)
 from ..domain.world import WorldConfig
 from ..llm.base import LLMProvider
 
@@ -17,6 +18,7 @@ class WorldgenChat:
     def __init__(self, provider: LLMProvider):
         self.provider = provider
 
+    @promptlog.stage("worldgen:chat")
     def turn(self, world: WorldConfig, ontology, bible, history: list[dict], message: str) -> dict:
         roster = [{"id": e.id, "name": e.name, "etype": e.etype} for e in ontology.entities.values()]
         rel_keys = list(ontology.rel_catalog.keys())
@@ -27,10 +29,13 @@ class WorldgenChat:
                "- reply: 작가에게 건네는 1~3문장 대화(공감+방향 제시).\n"
                "- new_entities: 대화에서 새로 등장/합의된 고유 엔티티(인물/세력/장소/아이템/사건). 기존 명부에 없는 것만.\n"
                "- new_relations: 엔티티 사이 관계. rel_id 는 제시된 관계키 우선, 없으면 간결한 자유 라벨(무엇이든). "
-               "관계에 질적 상태가 있으면 state 에 이 작품의 톤·맥락에서 도출한 짧은 라벨을 적되, 특정 분위기를 미리 가정하지 말 것. src/dst 는 명부 id 또는 새 이름.\n"
-               "- new_bible: 설정집 항목(카테고리+title+prose 3~5문장). 세계 작동원리·분위기·디테일.\n"
+               "관계에 질적 상태가 있으면 state 에는 대화에 실제로 나온 결에서 고른 짧은 라벨만 적는다. src/dst 는 명부 id 또는 새 이름.\n"
+               # VA-3: '분위기' 발주어 제거 + 어휘 계약(긍정형·대시 0) + 상한을 코드 컷과 일치
+               "- new_bible: 설정집 항목(카테고리, title, prose). 한 턴에 최대 2개. prose 는 300자 이내로, "
+               "이 세계가 실제로 어떻게 돌아가는지를 사람들이 하는 일과 겪는 일로 적는다. "
+               "이 이야기의 시대와 장소에서 사람들이 실제로 쓰는 말로 쓰고, 손에 잡히는 사물과 눈에 보이는 동작으로 문장을 세운다.\n"
                "- questions: 세계를 더 깊게 만들 되묻는 질문 1~2개.\n"
-               "기존 설정과 모순 금지. 한 턴에 너무 많이 쏟지 말고 대화 흐름에 맞게. JSON만.")
+               "기존 설정을 그대로 딛고 이어 쓴다. 대화 흐름에 맞는 만큼만 낸다. JSON만.")
         usr = (f"[작품] {world.title} / {world.genre} / {world.tone}\n전제: {world.premise}\n"
                f"[기존 명부]{json.dumps(roster, ensure_ascii=False)}\n[엔티티타입]{ent_types}\n[관계키]{rel_keys}\n"
                f"[설정집 제목]{json.dumps(bible_titles, ensure_ascii=False)}\n[최근 대화]\n{convo}\n\n[작가]{message}\n\n"
@@ -40,7 +45,7 @@ class WorldgenChat:
         try:
             return self.provider.chat_json([{"role": "system", "content": sys},
                                             {"role": "user", "content": usr}],
-                                           temperature=0.6, max_tokens=2500)
+                                           temperature=0.6)
         except Exception:
             return {"reply": "(응답 생성 실패 — 다시 시도해 주세요)", "new_entities": [],
                     "new_relations": [], "new_bible": [], "questions": []}

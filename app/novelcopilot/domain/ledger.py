@@ -19,9 +19,12 @@ class Promise(BaseModel):
     text: str
     opened_chapter: int = 1                 # 약속이 처음 추적된 회차
     due_chapter: Optional[int] = None        # 만기(있으면) — 강제 아님, 가시화용
+    due_source: str = ""                     # AC-2ⓐ: 만기 출처 — ""(없음) | "spine_arith"(에피소드 예산 산술 파생·재계획 시 갱신) | "author"(작가 지정·불변). 기본 ""=구 JSON 하위호환
     kind: str = ""                           # 지불 형태(자유 라벨): power/status/relation/info/mystery …
     status: Literal["open", "paid"] = "open"
     paid_chapter: Optional[int] = None        # 지불된 회차(P1=설계 라벨 일치, P2=본문 추출)
+    last_checked_chapter: int = 0             # B-30: 지불 검출창에 마지막으로 들어가 실제 검사된 회차(0=미검사).
+    #                                           LRU 순환의 결정론 커서 — 구 JSON 은 기본 0 으로 로드(가산적·하위호환)
 
 
 class PromiseLedger(BaseModel):

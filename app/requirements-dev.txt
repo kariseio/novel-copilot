@@ -1,0 +1,5 @@
+# 테스트(tools/test_*.py)와 tools/ 스크립트 의존성
+-r requirements.txt
+pytest>=8
+requests>=2.31
+# 형태소 기반 문체 계측(tools/kiwi_metrics.py)은 선택:  pip install -r tools/requirements-metrics.txt

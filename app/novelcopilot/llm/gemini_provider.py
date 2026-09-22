@@ -15,12 +15,12 @@ class GeminiProvider(LLMProvider):
         self.gen_model = gen_model
         self._embed = embed_provider
 
-    def chat(self, messages, *, temperature=0.7, max_tokens=2200, json_mode=False) -> str:
+    def chat(self, messages, *, temperature=0.7, max_tokens=None, json_mode=False) -> str:
         from google.genai import types
         sys = "\n".join(m["content"] for m in messages if m["role"] == "system")
         contents = "\n\n".join(m["content"] for m in messages if m["role"] != "system")
         cfg = types.GenerateContentConfig(
-            temperature=temperature, max_output_tokens=max_tokens,
+            temperature=temperature, max_output_tokens=max_tokens,   # None=무상한(SDK 가 미설정 처리) — base.py chat 계약
             system_instruction=(sys or None),
             response_mime_type=("application/json" if json_mode else None))
         last = None

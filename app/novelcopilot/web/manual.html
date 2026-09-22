@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>문서 — NovelCopilot</title>
+<meta name="description" content="NovelCopilot 문서 포털 — 서비스 소개·빠른 시작·사용 가이드·FAQ·릴리스 노트." />
+<style>
+/* ===== NovelCopilot 문서 포털 — 인라인 CSS·외부 CDN/폰트 0 =====
+   디자인 토큰은 앱 style.css 와 통일. 마크다운 렌더는 벤더링한 marked.min.js(MIT). */
+:root{
+  --paper:#FFFFFF; --surface:#FFFFFF; --surface-2:#F6F7F9;
+  --ink:#111317; --ink-soft:#3A3F46; --muted:#6B7280;
+  --line:#ECEEF1; --line-strong:#DCDFE4;
+  --brand:#1E2A4A; --brand-soft:#EEF1F8;
+  --accent:#2563EB; --accent-soft:#EFF4FF; --accent-100:#DBE5FB; --accent-700:#1B4AC2;
+  --ok:#0F7A4B; --ok-soft:#E6F4EC; --warn:#8F5D0F; --warn-soft:#FBF0DC;
+  --bad:#C4231F; --bad-soft:#FCEAE9;
+  --shadow:0 1px 2px rgba(16,17,23,.05), 0 6px 20px rgba(16,17,23,.06);
+  --shadow-sm:0 1px 2px rgba(16,17,23,.05);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","Pretendard",Roboto,"Malgun Gothic","Apple SD Gothic Neo",sans-serif;
+  --font-mono:ui-monospace,Menlo,Consolas,"D2Coding",monospace;
+  --r-card:14px; --r-ctrl:9px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);
+  font-family:var(--font-sans);line-height:1.7;font-size:15px;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+.muted{color:var(--muted)}
+
+/* ---- topbar ---- */
+.topbar{position:sticky;top:0;z-index:20;display:flex;justify-content:space-between;align-items:center;
+  padding:.85em 1.5em;border-bottom:1px solid var(--line);background:rgba(255,255,255,.82);
+  backdrop-filter:saturate(150%) blur(8px)}
+.brand{font-size:1.12rem;font-weight:800;color:var(--brand);letter-spacing:-.02em}
+.brand b{color:var(--accent)}
+.brand a{color:inherit}
+.brand a:hover{text-decoration:none}
+.topbar .nav a{font-size:.88rem;color:var(--ink-soft);padding:.4em .7em;border-radius:var(--r-ctrl);font-weight:500}
+.topbar .nav a:hover{background:var(--surface-2);color:var(--ink);text-decoration:none}
+
+/* ---- shell ---- */
+.shell{display:grid;grid-template-columns:236px 1fr;gap:2em;max-width:1140px;margin:0 auto;
+  padding:1.6em 1.5em 4em;align-items:start}
+.sidebar{position:sticky;top:5em}
+.side-back{display:block;font-size:.86rem;color:var(--muted);padding:.4em .7em;margin-bottom:.6em}
+.side-back:hover{color:var(--accent);text-decoration:none}
+.side-nav{display:flex;flex-direction:column;gap:.12em;background:var(--surface);border:1px solid var(--line);
+  border-radius:var(--r-card);padding:.5em;box-shadow:var(--shadow-sm);
+  max-height:calc(100vh - 6.5em);overflow-y:auto}   /* 17항목+divider 5로 길어짐 — 뷰포트 초과 시 사이드바만 스크롤 */
+.side-link{display:block;padding:.55em .8em;border-radius:var(--r-ctrl);color:var(--ink-soft);
+  font-size:.9rem;font-weight:500;cursor:pointer;text-decoration:none;transition:background .12s,color .12s}
+.side-link:hover{background:var(--surface-2);color:var(--ink);text-decoration:none}
+.side-link.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
+.side-link:focus-visible{outline:none;box-shadow:0 0 0 3px var(--accent-soft)}
+.side-divider{margin:1.1em .8em .35em;font-size:.72rem;font-weight:700;letter-spacing:.06em;
+  color:var(--ink-soft);text-transform:uppercase;opacity:.75}
+.side-divider:first-child{margin-top:.35em}   /* 첫 섹션 제목은 상단 여백 축소(카드 상단 밀착) */
+
+/* ---- doc content ---- */
+.doc-wrap{min-width:0}
+.doc{max-width:760px;font-size:15px}
+.doc-status{color:var(--muted);font-size:.9rem;padding:2em 0}
+.doc-status.err{color:var(--bad)}
+.doc-status .retry{margin-top:1em}
+.doc-status .retry button{cursor:pointer;background:var(--surface);color:var(--ink);
+  border:1px solid var(--line-strong);border-radius:var(--r-ctrl);padding:.5em 1em;font:inherit;font-size:.88rem}
+.doc-status .retry button:hover{background:var(--surface-2)}
+
+/* 문서 타이포 */
+.doc h1{font-size:1.85rem;letter-spacing:-.025em;line-height:1.25;margin:.2em 0 .7em;font-weight:800;color:var(--ink)}
+.doc h2{font-size:1.4rem;letter-spacing:-.02em;margin:1.8em 0 .6em;font-weight:700;color:var(--ink);
+  padding-bottom:.35em;border-bottom:1px solid var(--line)}
+.doc h3{font-size:1.12rem;margin:1.4em 0 .5em;font-weight:700;color:var(--ink)}
+.doc h4{font-size:1rem;margin:1.2em 0 .4em;font-weight:700;color:var(--ink-soft)}
+.doc p{margin:.7em 0;color:var(--ink-soft)}
+.doc a{color:var(--accent)}
+.doc strong{color:var(--ink);font-weight:700}
+.doc ul,.doc ol{margin:.7em 0;padding-left:1.5em;color:var(--ink-soft)}
+.doc li{margin:.3em 0;line-height:1.7}
+.doc code{background:var(--surface-2);padding:.12em .42em;border-radius:5px;font-size:.86em;
+  color:var(--accent-700);font-family:var(--font-mono);word-break:break-word}
+.doc pre{background:var(--surface-2);border:1px solid var(--line);border-radius:var(--r-ctrl);
+  padding:1em 1.1em;overflow-x:auto;margin:1em 0;line-height:1.6}
+.doc pre code{background:transparent;padding:0;color:var(--ink);font-size:.85em}
+.doc blockquote{margin:1em 0;padding:.7em 1.1em;border-left:3px solid var(--accent);
+  background:var(--accent-soft);border-radius:0 var(--r-ctrl) var(--r-ctrl) 0;color:var(--ink-soft)}
+.doc blockquote p{margin:.3em 0}
+.doc hr{border:0;border-top:1px solid var(--line);margin:2em 0}
+/* 표 — 가로 스크롤 래퍼로 감싸(본문 넘침 방지) */
+.doc .table-wrap{overflow-x:auto;margin:1.1em 0;border:1px solid var(--line);border-radius:var(--r-ctrl)}
+.doc table{border-collapse:collapse;width:100%;font-size:.9rem;min-width:min(100%,520px)}
+.doc th,.doc td{border-bottom:1px solid var(--line);padding:.6em .85em;text-align:left;vertical-align:top}
+.doc th{background:var(--surface-2);font-weight:700;color:var(--ink);white-space:nowrap}
+.doc td{color:var(--ink-soft)}
+.doc tr:last-child td{border-bottom:none}
+/* 문서 그림(SVG 다이어그램) — 카드 톤 보더·라운드·상하 여백 */
+.doc img{display:block;max-width:100%;height:auto;margin:1.4em 0 .5em;
+  border:1px solid var(--line);border-radius:var(--r-ctrl);background:var(--surface);padding:.6em}
+/* 이미지 바로 뒤 기울임 한 줄 = 캡션 */
+.doc img + em,.doc p > img + em{display:block;color:var(--muted);font-size:.86rem;margin:0 0 1.2em;text-align:center}
+
+@media(max-width:820px){
+  .shell{grid-template-columns:1fr;gap:1.2em}
+  .sidebar{position:static;top:auto}
+  .side-nav{flex-direction:row;flex-wrap:wrap;gap:.3em}
+  .doc h1{font-size:1.55rem}.doc h2{font-size:1.2rem}
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand"><a href="/about.html">Novel<b>Copilot</b></a> · 문서</div>
+  <nav class="nav">
+    <a href="/about.html">소개</a>
+    <a href="/">앱 열기 →</a>
+  </nav>
+</header>
+
+<div class="shell">
+  <aside class="sidebar">
+    <a class="side-back" href="/">← 앱으로</a>
+    <nav class="side-nav" id="side-nav" aria-label="문서 내비게이션">
+      <!-- manual.js 가 채움 -->
+    </nav>
+  </aside>
+  <main class="doc-wrap">
+    <article class="doc" id="doc"></article>
+    <div class="doc-status" id="doc-status">문서를 불러오는 중…</div>
+  </main>
+</div>
+
+<script src="/vendor/marked.min.js"></script>
+<script src="/manual.js"></script>
+</body>
+</html>

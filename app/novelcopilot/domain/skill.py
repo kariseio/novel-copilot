@@ -6,8 +6,24 @@
 - 항상-on 전역 프롬프트가 아니라 *opt-in 이름 묶음* → 과제약(풍선효과) 회피. 켠 것만 그 지점 프롬프트에 주입.
 """
 from __future__ import annotations
+import json
+import pathlib
 from typing import Literal
 from pydantic import BaseModel, Field
+
+
+# SP-1 Stage A 예시 데이터 SSOT = app/tools/reports/sp1_exemplars.json (원문 바이트 그대로·수정 금지).
+#   domain·engine 이 이 파일을 각자 '데이터'로 읽는다(cross-layer 코드 import 없음·byte 동일). 부재/손상 시 빈 리스트.
+_SP1_EXEMPLARS_PATH = (pathlib.Path(__file__).resolve().parents[2]
+                       / "tools" / "reports" / "sp1_exemplars.json")
+
+
+def _load_sp1_exemplars() -> list[str]:
+    try:
+        data = json.loads(_SP1_EXEMPLARS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    return [str(data[k]) for k in ("EX1", "EX2") if k in data and str(data.get(k) or "").strip()]
 
 
 class Skill(BaseModel):
@@ -32,6 +48,17 @@ class SkillLibrary(BaseModel):
 # 내장 프리셋 — 기본 OFF(작가가 켠다). 회차 "문체" 스킬: 가벼운 웹소설 결.
 def default_skills() -> list[Skill]:
     return [
+        # SP-1 Stage A: few-shot 문체 예시를 '작가가 열람·교체·해제 가능한' builtin 슬롯으로 노출(builtin_light_prose 계보).
+        #   실제 생성 주입은 config style_fewshot 토글이 관장(harness.style_fewshot_block) — 이 스킬은 enabled=False 로
+        #   회차 스킬 어댑터 경로를 타지 않아(이중 주입 없음), 오직 예시 데이터의 가시성·편집성만 제공한다. examples 는
+        #   sp1_exemplars.json 원문 바이트 그대로(PM 집필·Kiwi 인간 대역 검증 완료 — EX1/EX2). description 으로 토글 안내.
+        Skill(
+            id="builtin_sp1_exemplars", name="문장 결 예시(SP-1)", point="chapter", builtin=True, enabled=False,
+            description=("생성 시 문체 블록 뒤에 주입되는 순방향 '문장 결' few-shot 예시(내용 무관·결만 참고). "
+                         "실제 주입은 설정 style_fewshot 토글이 관장합니다."),
+            instructions=("아래 예시는 목표 '문장 결'(발화 층위 혼합·입말 개입·종결 다양)만 참고하기 위한 것입니다 — "
+                          "내용·인물·설정은 이 작품과 무관합니다."),
+            examples=_load_sp1_exemplars()),
         Skill(
             id="builtin_light_prose", name="가벼운 문체", point="chapter", builtin=True, enabled=False,
             description="문예체 대신 웹소설 특유의 가볍고 빠른 결(짧은 호흡·1인칭 능청·대사 중심)",
@@ -57,5 +84,17 @@ def default_skills() -> list[Skill]:
             instructions=(
                 "이 퇴고는 *사실은 단 하나도 바꾸지 말고*, 대사 위주로 결을 살려라 — 늘어진 설명 지문을 줄이고, "
                 "대사를 짧고 또렷한 티키타카로, 인물 말투를 분화해 생동감 있게. 새 사건·설정·수치는 절대 추가 금지."),
+            examples=[]),
+        # ST-11: 검출기 피드백 스팬 재작성의 제품 경로(opt-in·기본 OFF). 실행은 revise 포인트(=harness.revise_prose)로,
+        #   작가가 켜면 이 지시가 퇴고 프롬프트 말미에 주입된다. 엔진 상시 자동 패스 아님(스팬 자동 검출은 실험 도구 st11).
+        Skill(
+            id="builtin_rhythm_polish", name="리듬 퇴고", point="revise", builtin=True, enabled=False,
+            description="같은 종결(~다)이 길게 이어지거나 짧게 끊긴 지문의 리듬을 화자 목소리 유지한 채 살리는 퇴고(사실 불변)",
+            instructions=(
+                "이 퇴고는 *사실·사건·수치·화자 목소리는 단 하나도 바꾸지 말고*, 리듬만 살려라 — "
+                "하나의 연속된 체험·동작이 짧게 끊긴 문장들로 나뉘어 있으면 연결어미·종속절로 엮어 한 문장으로 흘려라. "
+                "호흡이 긴 문장과 짧은 강조 문장이 교차하게, 극적 순간의 단문 펀치 한둘은 남긴다. "
+                "문형(의문·감탄)·시제(현재형 판단)·발화 층위(입말 생각·짧은 대사)·술어 교체도 함께 활용해 "
+                "종결의 결을 다양하게. 정보는 그대로 두고 문장의 이음새와 호흡만 자연스럽게 재구성한다."),
             examples=[]),
     ]

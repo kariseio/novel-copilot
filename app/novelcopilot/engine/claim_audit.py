@@ -11,15 +11,24 @@
 (4) +0~1콜 — 과거 회차/검색결과 없으면 LLM 콜 0.
 """
 from __future__ import annotations
+from ..llm import promptlog   # XR-3: consumer 태그(관측 전용 — 위임·바이트 불변)
 
 
+@promptlog.stage("claim_audit")
 def audit_chapter(provider, rag, chapter_text: str, ch_no: int, *,
-                  query_hint: str = "", k: int = 4, excerpt_chars: int = 3500, cap: int = 6) -> list[dict]:
-    """새 회차 vs 과거 회차 프로즈의 구체 사실 모순을 보수적으로 탐지. 모순 없으면 [] (advisory)."""
+                  query_hint: str = "", k: int = 4, cap: int = 6) -> list[dict]:
+    """새 회차 vs 과거 회차 프로즈의 구체 사실 모순을 보수적으로 탐지. 모순 없으면 [] (advisory).
+    절단 전면 제거(2026-08-21): 구 excerpt_chars=3500 머리 절단이 매 화 후반 30~50%를 감사 사각으로
+    만들던 결함 소거 — 본문·검색 쿼리 모두 전문."""
     text = (chapter_text or "").strip()
     if ch_no <= 1 or not text:
         return []
-    query = (query_hint or text[:600]).strip()
+    # 검색 쿼리는 임베딩 API 하드리밋(8k 토큰) 탓에 무제한이 불가능한 유일한 지점 — 구 머리 600자는
+    # 후반 사건이 검색 키에 안 잡히는 사각이라, 머리+꼬리 결합으로 회차 양끝을 모두 커버한다(리밋 내 보수 폭).
+    if not query_hint and len(text) > 3000:
+        query = text[:1500] + "\n" + text[-1500:]
+    else:
+        query = (query_hint or text).strip()
     past = rag.search(query, ch_no - 1, k=k)          # 과거 회차만(새 회차 자신 제외) — 검색결과 0이면 콜 0
     if not past:
         return []
@@ -28,13 +37,15 @@ def audit_chapter(provider, rag, chapter_text: str, ch_no: int, *,
         return []
     sys = ("너는 웹소설 연속성 감수자다. '새 회차'가 '이전 회차 발췌'의 *구체적 서술 사실*과 정면으로 양립 불가한 곳만 찾아라. "
            "등급·소속·생사·관계 같은 설정 항목은 별도 시스템이 점검하니 *제외*하고, 설정에 없는 '서술 디테일'의 충돌에 집중하라 — "
-           "사물·외형·색, 소지품·무기 상태, 장소·동선, 날씨·시간대, 인물이 한 말·약속, 목격·정황 같은 것이 같은 대상에 대해 서로 어긋나는 경우만. "
+           "사물·외형·색, 소지품·무기 상태, 장소·동선, 날씨·시간대, 인물이 한 말·약속, 목격·정황, "
+           "집단 인원수·잔여 수량(생존자 수·남은 탄약 등 — T5-R4 recall nudge; 결정론 추적 아님·기존 스코프 내 예시일 뿐) "
+           "같은 것이 같은 대상에 대해 서로 어긋나는 경우만. "
            "보수적으로 판정하라 — 의도적 변화·반전·회상·모호한 서술·단순히 새로 추가된 정보는 모순이 아니다(제외). "
            "확신이 없으면 보고하지 마라(거짓경보보다 누락이 낫다). 모순이 없으면 빈 배열.\n"
            'JSON만: {"contradictions":[{"claim":"새 회차의 진술(짧게 인용/요약)","canon":"이전 회차의 진술(짧게)",'
            '"ref":"이전 회차 번호","why":"왜 양립 불가한지 한 줄"}]}')
     msg = [{"role": "system", "content": sys},
-           {"role": "user", "content": f"[이전 회차 발췌]\n{refs}\n\n[새 회차({ch_no}화) 본문]\n{text[:excerpt_chars]}"}]
+           {"role": "user", "content": f"[이전 회차 발췌]\n{refs}\n\n[새 회차({ch_no}화) 본문]\n{text}"}]
     try:
         res = provider.chat_json(msg, temperature=0.0)
     except Exception:
@@ -44,6 +55,6 @@ def audit_chapter(provider, rag, chapter_text: str, ch_no: int, *,
         claim = (str(c.get("claim") or "")).strip()
         canon = (str(c.get("canon") or "")).strip()
         if claim and canon:                            # 양쪽 진술이 다 있어야 advisory(편측은 폐기)
-            out.append({"claim": claim[:200], "canon": canon[:200],
-                        "ref": str(c.get("ref") or "").strip(), "why": (str(c.get("why") or "")).strip()[:200]})
+            out.append({"claim": claim, "canon": canon,   # 절단 전면 제거(2026-08-21): 작가 정독 대상 advisory 전문
+                        "ref": str(c.get("ref") or "").strip(), "why": (str(c.get("why") or "")).strip()})
     return out
